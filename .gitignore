@@ -1,88 +1,41 @@
-# ==========================================
-# 1. Operating System Files
-# ==========================================
-.DS_Store
-.DS_Store?
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
-
-# ==========================================
-# 2. Python (Backend & AI Engine)
-# ==========================================
-# Environments
-.venv/
-venv/
-ENV/
-env/
-*.venv
-
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Testing & Coverage
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Python Build / Distribution
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# ==========================================
-# 3. Node.js & Frontend (React / Next.js / UX)
-# ==========================================
+# Dependencies
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
 
-# Next.js / Build Output
-.next/
-out/
-build/
-dist/
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
 
 # Logs
-logs
+logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
 
-# ==========================================
-# 4. Environment Variables & Secrets
-# ==========================================
-.env
-.env*.local
-.env.development.local
-.env.test.local
-.env.production.local
-*.env
+# Build output
+dist/
+build/
 
-# ==========================================
-# 5. IDEs & Editors
-# ==========================================
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+# Coverage
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
 .idea/
-*.swp
-*.swo
+
+# Temporary files
+*.tmp
+*.temp
+
+# TypeScript
+*.tsbuildinfo

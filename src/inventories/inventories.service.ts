@@ -13,27 +13,30 @@ export class InventoriesService {
     private readonly itemRepository: Repository<Item>,
   ) {}
 
-  // 품목별 재고 조회 (없으면 기본값 0으로 생성)
-  async getByItemId(itemId: string): Promise<Inventory> {
-    let inventory = await this.inventoryRepository.findOne({
-      where: { item: { id: itemId } },
+  async getByItemId(itemId: number) {
+    return await this.inventoryRepository.find({
+      where: { item: { id: Number(itemId) } },
       relations: ['item'],
     });
-
-    if (!inventory) {
-      const item = await this.itemRepository.findOne({ where: { id: itemId } });
-      if (!item) {
-        throw new NotFoundException(`ID가 ${itemId}인 품목을 찾을 수 없습니다.`);
-      }
-      inventory = this.inventoryRepository.create({ item, quantity: 0 });
-      await this.inventoryRepository.save(inventory);
-    }
-
-    return inventory;
   }
 
-  // 전체 재고 목록 조회
-  async findAll(): Promise<Inventory[]> {
+  async findByItem(itemId: number) {
+    return await this.inventoryRepository.findOne({
+      where: { item: { id: Number(itemId) } },
+    });
+  }
+
+  async findOneByItemId(itemId: number) {
+    const item = await this.itemRepository.findOne({
+      where: { id: Number(itemId) },
+    });
+    if (!item) {
+      throw new NotFoundException(`ID가 ${itemId}인 품목을 찾을 수 없습니다.`);
+    }
+    return item;
+  }
+
+  async findAll() {
     return await this.inventoryRepository.find({ relations: ['item'] });
   }
 }
