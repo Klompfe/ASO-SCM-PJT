@@ -2,33 +2,29 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
-  ManyToOne,
-  JoinColumn,
 } from 'typeorm';
 import { Item } from '../../items/entities/item.entity';
-import { User } from '../../users/entities/user.entity';
-import { WorkOrderStatus } from './work-order-status.enum';
 
-@Entity('work_orders')
+export enum WorkOrderStatus {
+  PENDING = 'PENDING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}
+
+@Entity()
 export class WorkOrder {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  // DB 컬럼과 TS 타입 모두 string으로 명시적 통일
-  @Column({ type: 'varchar', length: 50, unique: true })
-  orderNumber: string;
-
-  @ManyToOne(() => Item, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'item_id' })
+  @ManyToOne(() => Item, { eager: true })
   item: Item;
 
   @Column({ type: 'int' })
-  targetQuantity: number;
-
-  @Column({ type: 'int', default: 0 })
-  producedQuantity: number;
+  quantity: number;
 
   @Column({
     type: 'enum',
@@ -36,10 +32,6 @@ export class WorkOrder {
     default: WorkOrderStatus.PENDING,
   })
   status: WorkOrderStatus;
-
-  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'assignee_id' })
-  assignee: User | null;
 
   @CreateDateColumn()
   createdAt: Date;

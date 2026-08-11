@@ -4,22 +4,14 @@ import { WorkOrdersService } from './work-orders.service';
 import { WorkOrdersController } from './work-orders.controller';
 import { WorkOrder } from './entities/work-order.entity';
 import { Item } from '../items/entities/item.entity';
-import { User } from '../users/entities/user.entity';
-import { Bom } from '../items/entities/bom.entity';
-import { Inventory } from '../inventories/entities/inventory.entity';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      WorkOrder,
-      Item,
-      User,
-      Bom,
-      Inventory,
-    ]),
+    TypeOrmModule.forFeature([WorkOrder, Item]),
+    AuthModule,
   ],
   controllers: [WorkOrdersController],
   providers: [WorkOrdersService],
-  exports: [WorkOrdersService, TypeOrmModule],
 })
 export class WorkOrdersModule {}

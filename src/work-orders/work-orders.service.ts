@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { WorkOrder } from './entities/work-order.entity';
+import { WorkOrder, WorkOrderStatus } from './entities/work-order.entity';
 import { Item } from '../items/entities/item.entity';
 
 @Injectable()
@@ -14,37 +14,55 @@ export class WorkOrdersService {
   ) {}
 
   async create(createWorkOrderDto: any) {
-    const workOrder = this.workOrderRepository.create(createWorkOrderDto);
+    const { itemId, quantity } = createWorkOrderDto;
+
+    const item = await this.itemRepository.findOne({
+      where: { id: +itemId },
+    });
+
+    if (!item) {
+      throw new NotFoundException(`ID가 ${itemId}인 품목을 찾을 수 없습니다.`);
+    }
+
+    const workOrder = this.workOrderRepository.create({
+      item,
+      quantity: +quantity,
+      status: WorkOrderStatus.PENDING,
+    });
+
     return await this.workOrderRepository.save(workOrder);
   }
 
   async findAll() {
-    return await this.workOrderRepository.find({ relations: ['item'] });
-  }
-
-  async findOne(id: any) {
-    const workOrder = await this.workOrderRepository.findOne({
-      where: { id: id as any },
+    return await this.workOrderRepository.find({
       relations: ['item'],
     });
+  }
+
+  async findOne(id: string) {
+    const workOrder = await this.workOrderRepository.findOne({
+      where: { id },
+      relations: ['item'],
+    });
+
     if (!workOrder) {
-      throw new NotFoundException(`ID가 ${id}인 작업지시서를 찾을 수 없습니다.`);
+      throw new NotFoundException(`ID가 ${id}인 작업 지시서를 찾을 수 없습니다.`);
     }
+
     return workOrder;
   }
 
-  async update(id: any, updateWorkOrderDto: any) {
-    await this.workOrderRepository.update(id, updateWorkOrderDto);
-    return await this.findOne(id);
-  }
+  async update(id: string, updateWorkOrderDto: any) {
+    const workOrder = await this.findOne(id);
 
-  async getItemForWorkOrder(itemId: number) {
-    const item = await this.itemRepository.findOne({
-      where: { id: Number(itemId) },
-    });
-    if (!item) {
-      throw new NotFoundException(`ID가 ${itemId}인 품목을 찾을 수 없습니다.`);
+    if (updateWorkOrderDto.status) {
+      workOrder.status = updateWorkOrderDto.status;
     }
-    return item;
+
+    if (updateWorkOrderDto.quantity) {
+      workOrder.quantity = +updateWorkOrderDto.quantity;
+    }
+
+    return await this.workOrderRepository.save(workOrder);
   }
 }
