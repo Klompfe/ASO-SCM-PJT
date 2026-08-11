@@ -1,8 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Item } from './entities/item.entity';
-import { CreateItemDto } from './dto/create-item.dto';
+import { Bom } from './entities/bom.entity';
 import { CreateBomDto } from './dto/create-bom.dto';
 
 @Injectable()
@@ -10,44 +14,57 @@ export class ItemsService {
   constructor(
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @InjectRepository(Bom)
+    private readonly bomRepository: Repository<Bom>,
   ) {}
 
-  // 신규 품목 생성
-  async create(createItemDto: CreateItemDto): Promise<Item> {
+  async findAll() {
+    return await this.itemRepository.find();
+  }
+
+  async create(createItemDto: any) {
+    const existing = await this.itemRepository.findOne({
+      where: { code: createItemDto.code },
+    });
+
+    if (existing) {
+      throw new ConflictException(
+        `이미 존재 품목 코드입니다. (ID: ${existing.id}, Code: ${existing.code})`,
+      );
+    }
+
     const item = this.itemRepository.create(createItemDto);
     return await this.itemRepository.save(item);
   }
 
-  // 전체 품목 목록 조회
-  async findAll(): Promise<Item[]> {
-    return await this.itemRepository.find();
-  }
-
-  // 단일 품목 조회
-  async findOne(id: number): Promise<Item> {
-    const item = await this.itemRepository.findOne({
-      where: { id },
-    });
-    if (!item) {
-      throw new NotFoundException(`ID가 ${id}인 품목을 찾을 수 없습니다.`);
-    }
-    return item;
-  }
-
-  // BOM 등록
   async createBom(createBomDto: CreateBomDto) {
-    return {
-      message: 'BOM이 성공적으로 등록되었습니다.',
-      data: createBomDto,
-    };
+    const parentId = +createBomDto.parentItemId;
+    const childId = +createBomDto.childItemId;
+
+    const parentItem = await this.itemRepository.findOne({
+      where: { id: parentId },
+    });
+    const childItem = await this.itemRepository.findOne({
+      where: { id: childId },
+    });
+
+    if (!parentItem || !childItem) {
+      throw new NotFoundException('모품목 또는 자품목을 찾을 수 없습니다.');
+    }
+
+    const bom = this.bomRepository.create({
+      parentItem,
+      childItem,
+      quantity: createBomDto.quantity,
+    });
+
+    return await this.bomRepository.save(bom);
   }
 
-  // BOM 조회
-  async getBom(id: number) {
-    const item = await this.findOne(id);
-    return {
-      parentItem: item,
-      components: [],
-    };
+  async getBom(parentItemId: string | number) {
+    return await this.bomRepository.find({
+      where: { parentItem: { id: +parentItemId } },
+      relations: ['childItem'],
+    });
   }
 }
