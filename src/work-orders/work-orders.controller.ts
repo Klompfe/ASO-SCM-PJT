@@ -1,6 +1,8 @@
 import { Controller, Post, Get, Patch, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { WorkOrdersService } from './work-orders.service';
+import { CreateWorkOrderDto } from './dto/create-work-order.dto';
+import { UpdateWorkOrderDto } from './dto/update-work-order.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('work-orders')
@@ -12,16 +14,7 @@ export class WorkOrdersController {
 
   @Post()
   @ApiOperation({ summary: '작업 지시서 생성' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        itemId: { type: 'number', example: 2 },
-        quantity: { type: 'number', example: 10 },
-      },
-    },
-  })
-  create(@Body() createWorkOrderDto: any) {
+  create(@Body() createWorkOrderDto: CreateWorkOrderDto) {
     return this.workOrdersService.create(createWorkOrderDto);
   }
 
@@ -39,7 +32,11 @@ export class WorkOrdersController {
 
   @Patch(':id')
   @ApiOperation({ summary: '작업 지시서 정보/상태 수정' })
-  update(@Param('id') id: string, @Body() updateWorkOrderDto: any) {
+  @ApiBody({ type: UpdateWorkOrderDto }) // Swagger에 Request Body를 명시적으로 표시
+  update(
+    @Param('id') id: string,
+    @Body() updateWorkOrderDto: UpdateWorkOrderDto, // @Body() 데코레이터 확인
+  ) {
     return this.workOrdersService.update(id, updateWorkOrderDto);
   }
 }
