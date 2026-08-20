@@ -35,7 +35,8 @@ export class POHeaderEntity {
   @Column({ name: 'total_amount', type: 'decimal', precision: 15, scale: 2 })
   totalAmount: number;
 
-  @Column({ type: 'enum', enum: POStatus, default: POStatus.DRAFT })
+  // 🛠️ SQLite 호환성을 위해 'enum' -> 'simple-enum'으로 변경
+  @Column({ type: 'simple-enum', enum: POStatus, default: POStatus.DRAFT })
   status: POStatus;
 
   @Column({ name: 'created_by', type: 'uuid' })

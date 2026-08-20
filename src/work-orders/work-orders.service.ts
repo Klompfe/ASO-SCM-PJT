@@ -3,157 +3,153 @@ import {
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { WorkOrder } from './entities/work-order.entity';
-import { WorkOrderStatus } from './entities/work-order-status.enum';
-import { Item } from '../items/entities/item.entity';
+import { WorkOrder, WorkOrderStatus } from './entities/work-order.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
-import { CreateWorkOrderDto } from './dto/create-work-order.dto';
-import { UpdateWorkOrderDto } from './dto/update-work-order.dto';
+import { Bom } from '../boms/entities/bom.entity';
+import { Item } from '../items/entities/item.entity';
+
+export interface CreateWorkOrderInput {
+  itemId?: number;
+  productId?: number;
+  targetQuantity: number;
+}
 
 @Injectable()
 export class WorkOrdersService {
+  private readonly logger = new Logger(WorkOrdersService.name);
+
   constructor(
     @InjectRepository(WorkOrder)
-    private readonly workOrderRepository: Repository<WorkOrder>,
+    private readonly woRepository: Repository<WorkOrder>,
+    @InjectRepository(Inventory)
+    private readonly inventoryRepository: Repository<Inventory>,
+    @InjectRepository(Bom)
+    private readonly bomRepository: Repository<Bom>,
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
     private readonly dataSource: DataSource,
   ) {}
 
-  /**
-   * 작업 지시서 생성
-   */
-  async create(createWorkOrderDto: CreateWorkOrderDto) {
-    const { itemId, quantity } = createWorkOrderDto;
-
-    const item = await this.itemRepository.findOne({
-      where: { id: +itemId },
-    });
-
-    if (!item) {
-      throw new NotFoundException(`ID가 ${itemId}인 품목을 찾을 수 없습니다.`);
+  async create(dto: CreateWorkOrderInput): Promise<WorkOrder> {
+    const targetItemId = dto.itemId || dto.productId;
+    if (!targetItemId) {
+      throw new BadRequestException('완제품 품목 ID가 필요합니다.');
     }
 
-    const workOrder = this.workOrderRepository.create({
-      item,
-      quantity: +quantity,
-      status: WorkOrderStatus.PENDING,
-    });
+    const item = await this.itemRepository.findOne({ where: { id: targetItemId } });
+    if (!item) {
+      throw new NotFoundException(`ID가 ${targetItemId}인 완제품을 찾을 수 없습니다.`);
+    }
 
-    return await this.workOrderRepository.save(workOrder);
+    const newWo = new WorkOrder();
+    newWo.itemId = targetItemId;
+    newWo.targetQuantity = dto.targetQuantity;
+    newWo.status = WorkOrderStatus.PENDING;
+
+    return await this.woRepository.save(newWo);
   }
 
-  /**
-   * 작업 지시서 전체 목록 조회
-   */
-  async findAll() {
-    return await this.workOrderRepository.find({
-      relations: ['item'],
-    });
+  async findAll(query?: { page?: number; limit?: number; status?: string }) {
+    const page = Math.max(1, Number(query?.page) || 1);
+    const limit = Math.max(1, Number(query?.limit) || 10);
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.woRepository.createQueryBuilder('wo');
+
+    if (query?.status) {
+      queryBuilder.andWhere('wo.status = :status', { status: query.status });
+    }
+
+    queryBuilder
+      .orderBy('wo.id', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [items, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      items,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
-  /**
-   * 작업 지시서 단일 상세 조회
-   */
-  async findOne(id: string) {
-    const workOrder = await this.workOrderRepository.findOne({
-      where: { id },
-      relations: ['item'],
-    });
-
-    if (!workOrder) {
+  async findOne(id: number): Promise<WorkOrder> {
+    const wo = await this.woRepository.findOne({ where: { id } });
+    if (!wo) {
       throw new NotFoundException(`ID가 ${id}인 작업 지시서를 찾을 수 없습니다.`);
     }
-
-    return workOrder;
+    return wo;
   }
 
-  /**
-   * 작업 지시서 수정 및 COMPLETED 전환 시 재고 연동 트랜잭션 처리
-   */
-  async update(id: string, updateWorkOrderDto: UpdateWorkOrderDto) {
+  async updateStatus(id: number, status: WorkOrderStatus): Promise<WorkOrder> {
+    const wo = await this.findOne(id);
+
+    if (wo.status === WorkOrderStatus.COMPLETED) {
+      throw new BadRequestException('이미 완료된 작업 지시서입니다.');
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      // 1. 트랜잭션 내에서 기존 작업 지시서 조회
-      const workOrder = await queryRunner.manager.findOne(WorkOrder, {
-        where: { id },
-        relations: ['item'],
-      });
+      wo.status = status;
+      const updatedWo = await queryRunner.manager.save(wo);
 
-      if (!workOrder) {
-        throw new NotFoundException(`ID가 ${id}인 작업 지시서를 찾을 수 없습니다.`);
-      }
-
-      // 2. 이미 완료 또는 취소된 작업 지시서의 수정 방지
-      if (
-        workOrder.status === WorkOrderStatus.COMPLETED ||
-        workOrder.status === WorkOrderStatus.CANCELLED
-      ) {
-        throw new BadRequestException(
-          `이미 ${workOrder.status} 상태인 작업 지시서는 변경할 수 없습니다.`,
-        );
-      }
-
-      // 3. 완료 상태로 전환되는지 체크
-      const isChangingToCompleted =
-        updateWorkOrderDto.status === WorkOrderStatus.COMPLETED;
-
-      // DTO 데이터 반영
-      if (updateWorkOrderDto.quantity) {
-        workOrder.quantity = +updateWorkOrderDto.quantity;
-      }
-      if (updateWorkOrderDto.status) {
-        workOrder.status = updateWorkOrderDto.status;
-      }
-
-      // 4. COMPLETED 전환 시 재고(Inventory) 수량 증감 처리
-      if (isChangingToCompleted) {
-        let inventory = await queryRunner.manager.findOne(Inventory, {
-          where: { item: { id: workOrder.item.id } },
+      if (status === WorkOrderStatus.COMPLETED) {
+        const boms = await queryRunner.manager.find(Bom, {
+          where: { parentItemId: wo.itemId },
         });
 
-        if (!inventory) {
-          inventory = queryRunner.manager.create(Inventory, {
-            item: workOrder.item,
-            quantity: workOrder.quantity,
-          });
-        } else {
-          inventory.quantity += workOrder.quantity;
+        for (const bom of boms) {
+          const requiredQty = bom.quantity * wo.targetQuantity;
+          let rawInventory = (await queryRunner.manager.findOne(Inventory, {
+            where: { itemId: bom.childItemId } as any,
+          })) as Inventory | null;
+
+          if (!rawInventory || rawInventory.quantity < requiredQty) {
+            throw new BadRequestException(`원자재(ID: ${bom.childItemId}) 재고가 부족합니다.`);
+          }
+
+          rawInventory.quantity -= requiredQty;
+          await queryRunner.manager.save(rawInventory);
         }
 
-        await queryRunner.manager.save(inventory);
+        let finishedInventory = (await queryRunner.manager.findOne(Inventory, {
+          where: { itemId: wo.itemId } as any,
+        })) as Inventory | null;
+
+        if (!finishedInventory) {
+          finishedInventory = queryRunner.manager.create(Inventory, {
+            itemId: wo.itemId,
+            quantity: 0,
+          });
+        }
+
+        finishedInventory.quantity += wo.targetQuantity;
+        await queryRunner.manager.save(finishedInventory);
       }
 
-      // 5. 작업 지시서 업데이트
-      const updatedWorkOrder = await queryRunner.manager.save(workOrder);
-
-      // 6. 성공 시 커밋
       await queryRunner.commitTransaction();
-      return updatedWorkOrder;
-
-    } catch (error: any) {
-      // 7. 실패 시 롤백 및 에러 핸들링
+      return updatedWo;
+    } catch (err) {
       await queryRunner.rollbackTransaction();
-
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
+      const error = err as Error;
+      if (error instanceof BadRequestException) {
         throw error;
       }
-
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new InternalServerErrorException(
-        `작업 지시서 업데이트 및 재고 연동 실패: ${errorMessage}`,
-      );
+      this.logger.error(`Failed to update WO status: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('작업 지시 상태 변경 중 오류가 발생했습니다.');
     } finally {
-      // 8. Connection 해제
       await queryRunner.release();
     }
   }

@@ -1,37 +1,50 @@
 import {
   Injectable,
-  CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { Reflector } from '@nestjs/core';
+import { AuthGuard } from '@nestjs/passport';
+import { IS_PUBLIC_KEY } from './public.decorator';
 
 @Injectable()
-export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+export class JwtAuthGuard extends AuthGuard('jwt') {
+  private readonly logger = new Logger(JwtAuthGuard.name);
 
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
-    const authHeader = request.headers.authorization;
+  constructor(private reflector: Reflector) {
+    super();
+  }
 
-    if (!authHeader) {
-      throw new UnauthorizedException('인증 토큰이 누락되었습니다.');
-    }
+  canActivate(context: ExecutionContext) {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
-    const [bearer, token] = authHeader.split(' ');
-
-    if (bearer !== 'Bearer' || !token) {
-      throw new UnauthorizedException('올바르지 않은 토큰 형식입니다.');
-    }
-
-    try {
-      const payload = this.jwtService.verify(token, {
-        secret: 'supersecretkey123',
-      });
-      request.user = payload;
+    if (isPublic) {
       return true;
-    } catch (error) {
-      throw new UnauthorizedException('유효하지 않거나 만료된 토큰입니다.');
     }
+
+    return super.canActivate(context);
+  }
+
+  handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
+    if (err || !user) {
+      const request = context.switchToHttp().getRequest();
+      const authHeader = request.headers.authorization;
+      this.logger.error(
+        `JWT Authentication failed. Path: ${request.url}, Header: ${
+          authHeader || 'None'
+        }, Reason: ${
+          info?.message || err?.message || 'Invalid or missing token'
+        }`,
+      );
+      throw (
+        err ||
+        new UnauthorizedException('유효하지 않거나 만료된 인증 토큰입니다.')
+      );
+    }
+    return user;
   }
 }

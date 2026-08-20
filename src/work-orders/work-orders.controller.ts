@@ -1,42 +1,47 @@
-import { Controller, Post, Get, Patch, Body, Param, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Query,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { WorkOrdersService } from './work-orders.service';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
-import { UpdateWorkOrderDto } from './dto/update-work-order.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { UpdateWorkOrderStatusDto } from './dto/update-work-order-status.dto';
+import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
 
-@ApiTags('work-orders')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@ApiTags('Work Orders (작업 지시 관리)')
 @Controller('work-orders')
 export class WorkOrdersController {
   constructor(private readonly workOrdersService: WorkOrdersService) {}
 
   @Post()
-  @ApiOperation({ summary: '작업 지시서 생성' })
+  @ApiOperation({ summary: '작업 지시 생성' })
   create(@Body() createWorkOrderDto: CreateWorkOrderDto) {
     return this.workOrdersService.create(createWorkOrderDto);
   }
 
   @Get()
-  @ApiOperation({ summary: '작업 지시서 전체 목록 조회' })
-  findAll() {
-    return this.workOrdersService.findAll();
+  @ApiOperation({ summary: '작업 지시 목록 조회 (페이징 & 검색 필터)' })
+  findAll(@Query() filterDto: GetWorkOrdersFilterDto) {
+    return this.workOrdersService.findAll(filterDto);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: '작업 지시서 단일 상세 조회' })
+  @ApiOperation({ summary: '단건 작업 지시 상세 조회' })
   findOne(@Param('id') id: string) {
     return this.workOrdersService.findOne(id);
   }
 
-  @Patch(':id')
-  @ApiOperation({ summary: '작업 지시서 정보/상태 수정' })
-  @ApiBody({ type: UpdateWorkOrderDto }) // Swagger에 Request Body를 명시적으로 표시
-  update(
+  @Patch(':id/status')
+  @ApiOperation({ summary: '작업 지시 상태 변경 (COMPLETED 시 원자재 차감 및 완제품 증대)' })
+  updateStatus(
     @Param('id') id: string,
-    @Body() updateWorkOrderDto: UpdateWorkOrderDto, // @Body() 데코레이터 확인
+    @Body() updateWorkOrderStatusDto: UpdateWorkOrderStatusDto,
   ) {
-    return this.workOrdersService.update(id, updateWorkOrderDto);
+    return this.workOrdersService.updateStatus(id, updateWorkOrderStatusDto);
   }
 }

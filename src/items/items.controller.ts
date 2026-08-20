@@ -1,50 +1,76 @@
-import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  ParseIntPipe,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { ItemsService } from './items.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { CreateBomDto } from './dto/create-bom.dto';
 
-@ApiTags('items')
+@ApiTags('품목 관리 API (Items)')
 @ApiBearerAuth()
 @Controller('items')
 export class ItemsController {
   constructor(private readonly itemsService: ItemsService) {}
 
-  @UseGuards(JwtAuthGuard)
-  @Get()
-  @ApiOperation({ summary: '전체 품목 목록 조회' })
-  findAll() {
-    return this.itemsService.findAll();
-  }
-
-  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '신규 품목 등록' })
+  @ApiResponse({ status: 201, description: '품목 생성 성공' })
+  @ApiResponse({ status: 400, description: '잘못된 요청 데이터' })
+  @ApiResponse({ status: 401, description: '인증 실패' })
   @Post()
-  @ApiOperation({ summary: '품목 생성' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        code: { type: 'string', example: 'ITEM-001' },
-        name: { type: 'string', example: '완제품 A' },
-        type: { type: 'string', example: 'PRODUCT' },
-      },
-    },
-  })
-  create(@Body() createItemDto: any) {
-    return this.itemsService.create(createItemDto);
+  async create(@Body() createItemDto: any) {
+    return await this.itemsService.create(createItemDto);
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Post('bom')
-  @ApiOperation({ summary: 'BOM 소요량 관계 등록' })
-  createBom(@Body() createBomDto: CreateBomDto) {
-    return this.itemsService.createBom(createBomDto);
+  @ApiOperation({ summary: '품목 목록 조회 (페이징 & 타입 필터)' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({ name: 'type', required: false, example: 'RAW_MATERIAL' })
+  @ApiResponse({ status: 200, description: '목록 조회 성공' })
+  @Get()
+  async findAll(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('type') type?: string,
+  ) {
+    return await this.itemsService.findAll({ page, limit, type });
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Get(':id/bom')
-  @ApiOperation({ summary: '하위 자재 BOM 목록 역추적 조회' })
-  getBom(@Param('id') id: string) {
-    return this.itemsService.getBom(id);
+  @ApiOperation({ summary: '특정 품목 상세 조회' })
+  @ApiResponse({ status: 200, description: '조회 성공' })
+  @ApiResponse({ status: 404, description: '품목을 찾을 수 없음' })
+  @Get(':id')
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    return await this.itemsService.findOne(id);
+  }
+
+  @ApiOperation({ summary: '품목 정보 수정' })
+  @ApiResponse({ status: 200, description: '수정 성공' })
+  @ApiResponse({ status: 404, description: '품목을 찾을 수 없음' })
+  @Patch(':id')
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateItemDto: any,
+  ) {
+    return await this.itemsService.update(id, updateItemDto);
+  }
+
+  @ApiOperation({ summary: '품목 삭제' })
+  @ApiResponse({ status: 200, description: '삭제 성공' })
+  @ApiResponse({ status: 404, description: '품목을 찾을 수 없음' })
+  @Delete(':id')
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    return await this.itemsService.remove(id);
   }
 }

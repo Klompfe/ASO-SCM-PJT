@@ -9,20 +9,27 @@ import {
 } from 'typeorm';
 import { Item } from '../../items/entities/item.entity';
 
-@Entity('inventories')
-export class Inventory {
+@Entity('boms')
+export class Bom {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: 'integer' })
-  itemId: number;
+  @Column({ type: 'integer', nullable: true })
+  parentItemId: number;
 
-  @Column({ type: 'real', default: 0 })
+  @Column({ type: 'integer', nullable: true })
+  childItemId: number;
+
+  @Column({ type: 'real', default: 1 })
   quantity: number;
 
   @ManyToOne(() => Item, { onDelete: 'CASCADE', nullable: true })
-  @JoinColumn({ name: 'itemId' })
-  item: Item;
+  @JoinColumn({ name: 'parentItemId' })
+  parentItem: Item;
+
+  @ManyToOne(() => Item, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'childItemId' })
+  childItem: Item;
 
   @CreateDateColumn()
   createdAt: Date;

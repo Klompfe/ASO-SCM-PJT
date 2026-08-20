@@ -2,35 +2,53 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
-  OneToMany,
 } from 'typeorm';
-import { Bom } from './bom.entity';
+import { Bom } from '../../boms/entities/bom.entity';
+
+export enum ItemType {
+  RAW_MATERIAL = 'RAW_MATERIAL',
+  FINISHED_GOOD = 'FINISHED_GOOD',
+  SUB_MATERIAL = 'SUB_MATERIAL',
+}
 
 @Entity('items')
 export class Item {
   @PrimaryGeneratedColumn()
-  id!: number;
+  id: number;
 
   @Column({ unique: true })
-  code!: string;
+  code: string;
 
   @Column()
-  name!: string;
+  name: string;
 
-  @Column()
-  type!: string;
+  @Column({
+    type: 'varchar',
+    default: ItemType.RAW_MATERIAL,
+  })
+  type: ItemType;
+
+  @Column({ default: 'EA', nullable: true })
+  unit?: string;
+
+  @Column({ nullable: true })
+  spec?: string;
+
+  @Column({ nullable: true })
+  description?: string;
 
   @OneToMany(() => Bom, (bom) => bom.parentItem)
-  parentBoms!: Bom[];
+  parentBoms?: Bom[];
 
   @OneToMany(() => Bom, (bom) => bom.childItem)
-  childBoms!: Bom[];
+  childBoms?: Bom[];
 
   @CreateDateColumn()
-  createdAt!: Date;
+  createdAt: Date;
 
   @UpdateDateColumn()
-  updatedAt!: Date;
+  updatedAt: Date;
 }

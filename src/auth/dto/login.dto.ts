@@ -1,14 +1,22 @@
+import { IsString, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
 
 export class LoginDto {
-  @ApiProperty({ example: 'user@example.com', description: '로그인 이메일' })
-  @IsEmail({}, { message: '올바른 이메일 형식이 아닙니다.' })
-  @IsNotEmpty({ message: '이메일을 입력해 주세요.' })
-  email: string;
-
-  @ApiProperty({ example: 'password123!', description: '로그인 비밀번호' })
+  @ApiProperty({
+    example: 'user1',
+    description: '사용자 아이디 (username)',
+    required: true,
+  })
   @IsString()
-  @IsNotEmpty({ message: '비밀번호를 입력해 주세요.' })
+  @IsNotEmpty({ message: 'username 필드는 필수 입력값입니다.' })
+  username: string;
+
+  @ApiProperty({
+    example: 'password123!',
+    description: '비밀번호',
+    required: true,
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'password 필드는 필수 입력값입니다.' })
   password: string;
 }

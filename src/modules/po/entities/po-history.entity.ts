@@ -13,25 +13,38 @@ export class POHistoryEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'po_id', type: 'uuid' })
-  poId: string;
+  @Column({ name: 'po_header_id', type: 'uuid' })
+  poHeaderId: string;
 
-  @Column({ name: 'from_status', type: 'enum', enum: POStatus })
+  @ManyToOne(() => POHeaderEntity, (header) => header.histories, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'po_header_id' })
+  poHeader: POHeaderEntity;
+
+  // 🛠️ SQLite 호환성을 위해 'enum' -> 'simple-enum'으로 변경
+  @Column({
+    name: 'from_status',
+    type: 'simple-enum',
+    enum: POStatus,
+    nullable: true,
+  })
   fromStatus: POStatus;
 
-  @Column({ name: 'to_status', type: 'enum', enum: POStatus })
+  // 🛠️ SQLite 호환성을 위해 'enum' -> 'simple-enum'으로 변경
+  @Column({
+    name: 'to_status',
+    type: 'simple-enum',
+    enum: POStatus,
+  })
   toStatus: POStatus;
 
   @Column({ name: 'changed_by', type: 'uuid' })
   changedBy: string;
 
-  @Column({ type: 'text', nullable: true })
-  remark: string;
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  comment: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
-
-  @ManyToOne(() => POHeaderEntity, (header) => header.histories, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'po_id' })
-  poHeader: POHeaderEntity;
 }

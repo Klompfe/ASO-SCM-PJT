@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -15,23 +16,26 @@ export enum WorkOrderStatus {
   CANCELLED = 'CANCELLED',
 }
 
-@Entity()
+@Entity('work_orders')
 export class WorkOrder {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
+  @PrimaryGeneratedColumn()
+  id: number;
 
-  @ManyToOne(() => Item, { eager: true })
-  item: Item;
+  @Column({ type: 'integer' })
+  itemId: number;
 
-  @Column({ type: 'int' })
-  quantity: number;
+  @Column({ type: 'real', default: 1 })
+  targetQuantity: number;
 
   @Column({
-    type: 'enum',
-    enum: WorkOrderStatus,
+    type: 'varchar',
     default: WorkOrderStatus.PENDING,
   })
   status: WorkOrderStatus;
+
+  @ManyToOne(() => Item, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'itemId' })
+  item: Item;
 
   @CreateDateColumn()
   createdAt: Date;
