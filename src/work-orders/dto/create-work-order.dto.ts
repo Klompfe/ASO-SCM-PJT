@@ -1,15 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsPositive } from 'class-validator';
+import { IsInt, Min } from 'class-validator';
 
 export class CreateWorkOrderDto {
-  @ApiProperty({ description: '품목 ID (Item ID)', example: 1 })
-  @IsNotEmpty({ message: 'itemId는 필수 입력 항목입니다.' })
-  @IsNumber({}, { message: 'itemId는 숫자 형태여야 합니다.' })
+  @ApiProperty({ description: '품목 ID', example: 1 })
+  @IsInt()
   itemId: number;
 
-  @ApiProperty({ description: '지시 수량', example: 10 })
-  @IsNotEmpty({ message: 'quantity는 필수 입력 항목입니다.' })
-  @IsNumber({}, { message: 'quantity는 숫자 형태여야 합니다.' })
-  @IsPositive({ message: 'quantity는 0보다 큰 양수여야 합니다.' })
-  quantity: number;
+  @ApiProperty({ description: '목표 생산 수량', example: 10 })
+  @IsInt()
+  @Min(1)
+  targetQuantity: number;
 }

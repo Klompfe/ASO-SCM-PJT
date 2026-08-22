@@ -3,51 +3,61 @@ import {
   Get,
   Post,
   Body,
-  Param,
   Patch,
-  Query,
+  Param,
+  Delete,
   ParseIntPipe,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { WorkOrdersService } from './work-orders.service';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
 import { UpdateWorkOrderStatusDto } from './dto/update-work-order-status.dto';
-import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
+import { WorkOrder } from './entities/work-order.entity';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Work Orders (작업 지시 관리)')
+@ApiBearerAuth()
 @Controller('work-orders')
+@UseGuards(JwtAuthGuard)
 export class WorkOrdersController {
-  constructor(private readonly workOrdersService: WorkOrdersService) {}
+  constructor(private readonly woService: WorkOrdersService) {}
 
   @Post()
   @ApiOperation({ summary: '작업 지시 생성' })
-  create(@Body() createWorkOrderDto: CreateWorkOrderDto) {
-    return this.workOrdersService.create({
-      itemId: createWorkOrderDto.itemId,
-      targetQuantity: createWorkOrderDto.quantity,
-    });
+  @ApiResponse({ status: 201, type: WorkOrder })
+  create(@Body() dto: CreateWorkOrderDto): Promise<WorkOrder> {
+    return this.woService.create(dto);
   }
 
   @Get()
-  @ApiOperation({ summary: '작업 지시 목록 조회 (페이징 & 검색 필터)' })
-  findAll(@Query() filterDto: GetWorkOrdersFilterDto) {
-    return this.workOrdersService.findAll(filterDto);
+  @ApiOperation({ summary: '작업 지시 전체 목록 조회' })
+  @ApiResponse({ status: 200, type: [WorkOrder] })
+  findAll(): Promise<WorkOrder[]> {
+    return this.woService.findAll();
   }
 
   @Get(':id')
-  @ApiOperation({ summary: '단건 작업 지시 상세 조회' })
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.workOrdersService.findOne(id);
+  @ApiOperation({ summary: '작업 지시 상세 조회' })
+  @ApiResponse({ status: 200, type: WorkOrder })
+  findOne(@Param('id', ParseIntPipe) id: number): Promise<WorkOrder> {
+    return this.woService.findOne(id);
   }
 
   @Patch(':id/status')
-  @ApiOperation({
-    summary: '작업 지시 상태 변경 (COMPLETED 시 원자재 차감 및 완제품 증대)',
-  })
+  @ApiOperation({ summary: '작업 지시 상태 변경' })
+  @ApiResponse({ status: 200, type: WorkOrder })
   updateStatus(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateWorkOrderStatusDto: UpdateWorkOrderStatusDto,
-  ) {
-    return this.workOrdersService.updateStatus(id, updateWorkOrderStatusDto.status);
+    @Body() dto: UpdateWorkOrderStatusDto,
+  ): Promise<WorkOrder> {
+    return this.woService.updateStatus(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: '작업 지시 삭제' })
+  @ApiResponse({ status: 200 })
+  remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
+    return this.woService.remove(id);
   }
 }
