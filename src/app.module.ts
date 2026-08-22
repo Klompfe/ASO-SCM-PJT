@@ -1,40 +1,71 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ConfigModule } from '@nestjs/config';
 
+// Entity Imports
+import { User } from './users/entities/user.entity';
+import { Item } from './items/entities/item.entity';
+import { Inventory } from './inventories/entities/inventory.entity';
+import { PurchaseOrder } from './purchase-orders/entities/purchase-order.entity';
+import { WorkOrder } from './work-orders/entities/work-order.entity';
+import { Supplier } from './suppliers/entities/supplier.entity';
+import { Shipment } from './shipments/entities/shipment.entity'; // Shipment 엔티티 추가
+
+// Module Imports
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ItemsModule } from './items/items.module';
+import { InventoriesModule } from './inventories/inventories.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
-import { JwtAuthGuard } from './auth/jwt-auth.guard';
 
 @Module({
   imports: [
+    // 환경 변수 전역 설정
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    TypeOrmModule.forRoot({
-      type: 'sqlite',
-      database: ':memory:',
-      entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: true,
-      dropSchema: true,
+
+    // 데이터베이스 동적 연결 설정 (SQLite / PostgreSQL 지원)
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const dbType = configService.get<string>('DB_TYPE') || 'postgres';
+
+        if (dbType === 'sqlite') {
+          return {
+            type: 'sqlite',
+            database: configService.get<string>('DB_DATABASE', 'scm_db.sqlite'),
+            entities: [User, Item, Inventory, PurchaseOrder, WorkOrder, Supplier, Shipment],
+            synchronize: true, // 개발용 자동 스키마 동기화
+            autoLoadEntities: true,
+          };
+        }
+
+        return {
+          type: 'postgres',
+          host: configService.get<string>('DB_HOST', 'localhost'),
+          port: configService.get<number>('DB_PORT', 5432),
+          username: configService.get<string>('DB_USERNAME', 'postgres'),
+          password: configService.get<string>('DB_PASSWORD', 'postgres'),
+          database: configService.get<string>('DB_DATABASE', 'scm_db'),
+          entities: [User, Item, Inventory, PurchaseOrder, WorkOrder, Supplier, Shipment],
+          synchronize: true,
+          autoLoadEntities: true,
+        };
+      },
     }),
+
+    // 도메인 기능 모듈
     AuthModule,
     UsersModule,
     ItemsModule,
+    InventoriesModule,
     PurchaseOrdersModule,
     WorkOrdersModule,
     SuppliersModule,
-  ],
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: JwtAuthGuard,
-    },
   ],
 })
 export class AppModule {}
