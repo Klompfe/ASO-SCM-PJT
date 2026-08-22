@@ -40,7 +40,7 @@ export class SuppliersService {
 
   async update(id: number, updateSupplierDto: UpdateSupplierDto): Promise<Supplier> {
     const supplier = await this.findOne(id);
-    
+
     if (updateSupplierDto.code && updateSupplierDto.code !== supplier.code) {
       const existing = await this.supplierRepository.findOne({
         where: { code: updateSupplierDto.code },
