@@ -4,6 +4,7 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { DataSource, Repository, QueryRunner } from 'typeorm';
 import { WorkOrdersService } from './work-orders.service';
 import { WorkOrder, WorkOrderStatus } from './entities/work-order.entity';
+import { Inventory } from '../inventories/entities/inventory.entity';
 import { Item, ItemType } from '../items/entities/item.entity';
 import { Bom } from '../items/entities/bom.entity';
 
@@ -24,9 +25,10 @@ describe('WorkOrdersService', () => {
   } as Item;
 
   const mockWorkOrder = {
-    id: 'wo-uuid-1',
+    id: 1,
+    itemId: 1,
     item: mockItem,
-    quantity: 10,
+    targetQuantity: 10,
     status: WorkOrderStatus.PENDING,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -66,6 +68,12 @@ describe('WorkOrdersService', () => {
           },
         },
         {
+          provide: getRepositoryToken(Inventory),
+          useValue: {
+            findOne: jest.fn(),
+          },
+        },
+        {
           provide: getRepositoryToken(Bom),
           useValue: {
             find: jest.fn(),
@@ -97,7 +105,7 @@ describe('WorkOrdersService', () => {
       workOrderRepository.create.mockReturnValue(mockWorkOrder);
       workOrderRepository.save.mockResolvedValue(mockWorkOrder);
 
-      const result = await service.create({ itemId: 1, quantity: 10 });
+      const result = await service.create({ itemId: 1, targetQuantity: 10 });
 
       expect(result).toEqual(mockWorkOrder);
     });
@@ -108,10 +116,11 @@ describe('WorkOrdersService', () => {
       const mockBom = {
         id: 1,
         quantity: 2,
-        childItem: { id: 2, name: '원사 B' },
+        parentItemId: 1,
+        childItemId: 2,
       };
-      const mockRawInventory = { id: 'inv-1', quantity: 100 };
-      const mockFinishedInventory = { id: 'inv-2', quantity: 10 };
+      const mockRawInventory = { id: 1, itemId: 2, quantity: 100 };
+      const mockFinishedInventory = { id: 2, itemId: 1, quantity: 10 };
 
       (queryRunner.manager.findOne as jest.Mock)
         .mockResolvedValueOnce(mockWorkOrder) // WorkOrder 조회
@@ -121,9 +130,7 @@ describe('WorkOrdersService', () => {
       (queryRunner.manager.find as jest.Mock).mockResolvedValue([mockBom]);
       (queryRunner.manager.save as jest.Mock).mockImplementation(async (e) => e);
 
-      const result = await service.updateStatus('wo-uuid-1', {
-        status: WorkOrderStatus.COMPLETED,
-      });
+      const result = await service.updateStatus(1, WorkOrderStatus.COMPLETED);
 
       expect(queryRunner.startTransaction).toHaveBeenCalled();
       expect(mockRawInventory.quantity).toBe(80); // 100 - (2 * 10) = 80

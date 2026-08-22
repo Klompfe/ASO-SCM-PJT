@@ -8,6 +8,8 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Item } from '../../items/entities/item.entity';
+import { Supplier } from '../../suppliers/entities/supplier.entity';
+import { Shipment } from '../../shipments/entities/shipment.entity';
 
 export enum PurchaseOrderStatus {
   PENDING = 'PENDING',
@@ -36,6 +38,26 @@ export class PurchaseOrder {
     default: PurchaseOrderStatus.PENDING,
   })
   status: PurchaseOrderStatus;
+
+  @Column({ nullable: true })
+  supplierId?: number;
+
+  @ManyToOne(() => Supplier, (supplier) => supplier.purchaseOrders, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'supplierId' })
+  supplier?: Supplier;
+
+  @Column({ nullable: true })
+  shipmentId?: number;
+
+  @ManyToOne(() => Shipment, (shipment) => shipment.purchaseOrders, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'shipmentId' })
+  shipment?: Shipment;
 
   @CreateDateColumn()
   createdAt: Date;

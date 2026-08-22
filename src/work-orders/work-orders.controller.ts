@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Query,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { WorkOrdersService } from './work-orders.service';
@@ -21,7 +22,10 @@ export class WorkOrdersController {
   @Post()
   @ApiOperation({ summary: '작업 지시 생성' })
   create(@Body() createWorkOrderDto: CreateWorkOrderDto) {
-    return this.workOrdersService.create(createWorkOrderDto);
+    return this.workOrdersService.create({
+      itemId: createWorkOrderDto.itemId,
+      targetQuantity: createWorkOrderDto.quantity,
+    });
   }
 
   @Get()
@@ -32,16 +36,18 @@ export class WorkOrdersController {
 
   @Get(':id')
   @ApiOperation({ summary: '단건 작업 지시 상세 조회' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseIntPipe) id: number) {
     return this.workOrdersService.findOne(id);
   }
 
   @Patch(':id/status')
-  @ApiOperation({ summary: '작업 지시 상태 변경 (COMPLETED 시 원자재 차감 및 완제품 증대)' })
+  @ApiOperation({
+    summary: '작업 지시 상태 변경 (COMPLETED 시 원자재 차감 및 완제품 증대)',
+  })
   updateStatus(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateWorkOrderStatusDto: UpdateWorkOrderStatusDto,
   ) {
-    return this.workOrdersService.updateStatus(id, updateWorkOrderStatusDto);
+    return this.workOrdersService.updateStatus(id, updateWorkOrderStatusDto.status);
   }
 }

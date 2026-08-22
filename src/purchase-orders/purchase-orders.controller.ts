@@ -31,7 +31,7 @@ export class PurchaseOrdersController {
     @Query('limit') limit?: number,
     @Query('status') status?: PurchaseOrderStatus,
   ) {
-    return this.poService.findAll(page, limit, status);
+    return this.poService.findAll({ page, limit, status });
   }
 
   @Get(':id')
@@ -44,7 +44,7 @@ export class PurchaseOrdersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateDto: UpdatePurchaseOrderStatusDto,
   ) {
-    return this.poService.updateStatus(id, updateDto);
+    return this.poService.updateStatus(id, updateDto.status);
   }
 
   @Patch(':id/cancel')

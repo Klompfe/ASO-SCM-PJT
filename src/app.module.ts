@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { ItemsModule } from './items/items.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 
 @Module({
@@ -27,6 +28,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
     ItemsModule,
     PurchaseOrdersModule,
     WorkOrdersModule,
+    SuppliersModule,
   ],
   providers: [
     {

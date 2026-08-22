@@ -7,6 +7,9 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Bom } from '../../boms/entities/bom.entity';
+import { Inventory } from '../../inventories/entities/inventory.entity';
+import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
+import { WorkOrder } from '../../work-orders/entities/work-order.entity';
 
 export enum ItemType {
   RAW_MATERIAL = 'RAW_MATERIAL',
@@ -45,6 +48,15 @@ export class Item {
 
   @OneToMany(() => Bom, (bom) => bom.childItem)
   childBoms?: Bom[];
+
+  @OneToMany(() => Inventory, (inventory) => inventory.item)
+  inventories?: Inventory[];
+
+  @OneToMany(() => PurchaseOrder, (po) => po.item)
+  purchaseOrders?: PurchaseOrder[];
+
+  @OneToMany(() => WorkOrder, (wo) => wo.item)
+  workOrders?: WorkOrder[];
 
   @CreateDateColumn()
   createdAt: Date;

@@ -58,7 +58,7 @@ export class SeedService implements OnApplicationBootstrap {
       const prodItem = queryRunner.manager.create(Item, {
         code: 'PROD-001',
         name: '직물 A',
-        type: ItemType?.PRODUCT || ('PRODUCT' as any),
+        type: ItemType?.FINISHED_GOOD || ('FINISHED_GOOD' as any),
       });
       const savedProdItem = await queryRunner.manager.save(prodItem);
 
