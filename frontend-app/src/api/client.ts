@@ -8,11 +8,20 @@ const apiClient = axios.create({
   },
 });
 
+// 로그인 직후 호출하여 인증 헤더 즉시 적용
+export const setAuthToken = (token: string | null) => {
+  if (token) {
+    apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    delete apiClient.defaults.headers.common['Authorization'];
+  }
+};
+
 // 요청 인터셉터
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token');
-    if (token) {
+    if (token && token !== 'undefined' && token !== 'null') {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
