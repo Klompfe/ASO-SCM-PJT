@@ -14,10 +14,10 @@ import {
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-  ApiQuery,
 } from '@nestjs/swagger';
 import { ItemsService } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
+import { GetItemsFilterDto } from './dto/get-items-filter.dto';
 
 @ApiTags('품목 관리 API (Items)')
 @ApiBearerAuth()
@@ -34,18 +34,11 @@ export class ItemsController {
     return await this.itemsService.create(createItemDto);
   }
 
-  @ApiOperation({ summary: '품목 목록 조회 (페이징 & 타입 필터)' })
-  @ApiQuery({ name: 'page', required: false, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, example: 10 })
-  @ApiQuery({ name: 'type', required: false, example: 'RAW_MATERIAL' })
+  @ApiOperation({ summary: '품목 목록 조회 (페이징 & 검색)' })
   @ApiResponse({ status: 200, description: '목록 조회 성공' })
   @Get()
-  async findAll(
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
-    @Query('type') type?: string,
-  ) {
-    return await this.itemsService.findAll({ page, limit, type });
+  async findAll(@Query() filter: GetItemsFilterDto) {
+    return await this.itemsService.findAll(filter);
   }
 
   @ApiOperation({ summary: '특정 품목 상세 조회' })

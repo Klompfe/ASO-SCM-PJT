@@ -3,8 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { WorkOrder } from './entities/work-order.entity';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
-import { UpdateWorkOrderStatusDto } from './dto/update-work-order-status.dto';
 import { Item } from '../items/entities/item.entity';
+import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
 
 @Injectable()
 export class WorkOrdersService {
@@ -30,11 +30,49 @@ export class WorkOrdersService {
     return await this.woRepository.save(wo);
   }
 
-  async findAll(): Promise<WorkOrder[]> {
-    return await this.woRepository.find({
-      relations: ['item'],
-      order: { id: 'DESC' },
-    });
+  async findAll(filter?: GetWorkOrdersFilterDto) {
+    const page = filter?.page || 1;
+    const limit = filter?.limit || 10;
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.woRepository.createQueryBuilder('wo')
+      .leftJoinAndSelect('wo.item', 'item');
+
+    if (filter?.status) {
+      queryBuilder.andWhere('wo.status = :status', { status: filter.status });
+    }
+
+    if (filter?.itemId) {
+      queryBuilder.andWhere('wo.itemId = :itemId', { itemId: filter.itemId });
+    }
+
+    if (filter?.startDate) {
+      queryBuilder.andWhere('wo.createdAt >= :startDate', { startDate: filter.startDate });
+    }
+
+    if (filter?.endDate) {
+      queryBuilder.andWhere('wo.createdAt <= :endDate', { endDate: filter.endDate });
+    }
+
+    queryBuilder
+      .orderBy('wo.id', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [items, total] = await queryBuilder.getManyAndCount();
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      items,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    };
   }
 
   async findOne(id: number): Promise<WorkOrder> {

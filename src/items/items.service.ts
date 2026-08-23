@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Item, ItemType } from './entities/item.entity';
+import { GetItemsFilterDto } from './dto/get-items-filter.dto';
 
 export interface CreateItemInput {
   code: string;
@@ -26,13 +27,6 @@ export interface UpdateItemInput {
   unit?: string;
   spec?: string;
   description?: string;
-}
-
-export interface ItemQueryFilter {
-  page?: number;
-  limit?: number;
-  type?: string;
-  keyword?: string;
 }
 
 @Injectable()
@@ -88,9 +82,9 @@ export class ItemsService {
     }
   }
 
-  async findAll(filter?: ItemQueryFilter) {
-    const page = Math.max(1, Number(filter?.page) || 1);
-    const limit = Math.max(1, Number(filter?.limit) || 10);
+  async findAll(filter?: GetItemsFilterDto) {
+    const page = filter?.page || 1;
+    const limit = filter?.limit || 10;
     const skip = (page - 1) * limit;
 
     const queryBuilder = this.itemRepository.createQueryBuilder('item');
