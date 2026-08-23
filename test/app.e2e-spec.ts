@@ -77,8 +77,6 @@ describe('SCM API (E2E Integration Test)', () => {
         code: `RAW_E2E_${Date.now()}`,
         name: 'E2E 원자재',
         type: 'RAW_MATERIAL',
-        unitPrice: 1000,
-        safetyStock: 10,
       })
       .expect(201);
     rawItemId = rawRes.body.data.id;
@@ -91,8 +89,6 @@ describe('SCM API (E2E Integration Test)', () => {
         code: `FIN_E2E_${Date.now()}`,
         name: 'E2E 완제품',
         type: 'FINISHED_GOOD',
-        unitPrice: 5000,
-        safetyStock: 5,
       })
       .expect(201);
     finishedItemId = finRes.body.data.id;

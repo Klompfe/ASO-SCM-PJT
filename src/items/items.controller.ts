@@ -17,6 +17,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { ItemsService } from './items.service';
+import { CreateItemDto } from './dto/create-item.dto';
 
 @ApiTags('품목 관리 API (Items)')
 @ApiBearerAuth()
@@ -29,7 +30,7 @@ export class ItemsController {
   @ApiResponse({ status: 400, description: '잘못된 요청 데이터' })
   @ApiResponse({ status: 401, description: '인증 실패' })
   @Post()
-  async create(@Body() createItemDto: any) {
+  async create(@Body() createItemDto: CreateItemDto) {
     return await this.itemsService.create(createItemDto);
   }
 

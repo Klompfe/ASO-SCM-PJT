@@ -10,12 +10,9 @@ import { Bom } from '../../boms/entities/bom.entity';
 import { Inventory } from '../../inventories/entities/inventory.entity';
 import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
 import { WorkOrder } from '../../work-orders/entities/work-order.entity';
+import { ItemType } from './item-type.enum';
 
-export enum ItemType {
-  RAW_MATERIAL = 'RAW_MATERIAL',
-  FINISHED_GOOD = 'FINISHED_GOOD',
-  SUB_MATERIAL = 'SUB_MATERIAL',
-}
+export { ItemType };
 
 @Entity('items')
 export class Item {

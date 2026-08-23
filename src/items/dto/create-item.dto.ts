@@ -1,24 +1,34 @@
-import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 import { ItemType } from '../entities/item-type.enum';
 
 export class CreateItemDto {
+  @ApiProperty({ description: '품목 코드' })
   @IsString()
   @IsNotEmpty()
   code: string;
 
+  @ApiProperty({ description: '품목 명' })
   @IsString()
   @IsNotEmpty()
   name: string;
 
+  @ApiProperty({ description: '품목 유형', enum: ItemType })
   @IsEnum(ItemType)
   type: ItemType;
 
+  @ApiProperty({ description: '단위', required: false })
   @IsString()
   @IsOptional()
   unit?: string;
 
-  @IsNumber()
-  @Min(0)
+  @ApiProperty({ description: '규격', required: false })
+  @IsString()
   @IsOptional()
-  price?: number;
+  spec?: string;
+
+  @ApiProperty({ description: '설명', required: false })
+  @IsString()
+  @IsOptional()
+  description?: string;
 }
