@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
+import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
 
 describe('SCM API (E2E Integration Test)', () => {
   let app: INestApplication;
@@ -24,6 +26,8 @@ describe('SCM API (E2E Integration Test)', () => {
         transform: true,
       }),
     );
+    app.useGlobalFilters(new HttpExceptionFilter());
+    app.useGlobalInterceptors(new TransformInterceptor());
     await app.init();
   });
 
@@ -47,7 +51,7 @@ describe('SCM API (E2E Integration Test)', () => {
       .send({ email: userDto.email, password: userDto.password })
       .expect(201);
 
-    jwtToken = loginRes.body.accessToken || loginRes.body.access_token;
+    jwtToken = loginRes.body.data.accessToken || loginRes.body.data.access_token;
   });
 
   it('Setup: Create Master Data (Supplier, Items)', async () => {
@@ -63,7 +67,7 @@ describe('SCM API (E2E Integration Test)', () => {
         phone: '010-0000-0000',
       })
       .expect(201);
-    supplierId = supRes.body.id;
+    supplierId = supRes.body.data.id;
 
     // 원자재 품목 생성
     const rawRes = await request(app.getHttpServer())
@@ -77,7 +81,7 @@ describe('SCM API (E2E Integration Test)', () => {
         safetyStock: 10,
       })
       .expect(201);
-    rawItemId = rawRes.body.id;
+    rawItemId = rawRes.body.data.id;
 
     // 완제품 품목 생성
     const finRes = await request(app.getHttpServer())
@@ -91,7 +95,7 @@ describe('SCM API (E2E Integration Test)', () => {
         safetyStock: 5,
       })
       .expect(201);
-    finishedItemId = finRes.body.id;
+    finishedItemId = finRes.body.data.id;
   });
 
   // 2. 구매 주문 (Purchase Orders) 테스트
@@ -106,8 +110,8 @@ describe('SCM API (E2E Integration Test)', () => {
           quantity: 100,
         })
         .expect(201);
-
-      poId = res.body.id;
+      
+      poId = res.body.data.id;
       expect(poId).toBeDefined();
     });
 
@@ -117,7 +121,7 @@ describe('SCM API (E2E Integration Test)', () => {
         .set('Authorization', `Bearer ${jwtToken}`)
         .expect(200);
 
-      expect(Array.isArray(res.body.items || res.body)).toBe(true);
+      expect(Array.isArray(res.body.data.items || res.body.data)).toBe(true);
     });
 
     it('PATCH /purchase-orders/:id/status - 입고 처리(RECEIVED)', async () => {
@@ -127,7 +131,7 @@ describe('SCM API (E2E Integration Test)', () => {
         .send({ status: 'RECEIVED' })
         .expect(200);
 
-      expect(res.body.status).toBe('RECEIVED');
+      expect(res.body.data.status).toBe('RECEIVED');
     });
   });
 
@@ -147,7 +151,7 @@ describe('SCM API (E2E Integration Test)', () => {
         })
         .expect(201);
 
-      woId = res.body.id;
+      woId = res.body.data.id;
       expect(woId).toBeDefined();
     });
 
@@ -157,7 +161,7 @@ describe('SCM API (E2E Integration Test)', () => {
         .set('Authorization', `Bearer ${jwtToken}`)
         .expect(200);
 
-      expect(Array.isArray(res.body.items || res.body)).toBe(true);
+      expect(Array.isArray(res.body.data.items || res.body.data)).toBe(true);
     });
 
     it('PATCH /work-orders/:id/status - 생산 완료(COMPLETED)', async () => {
@@ -167,7 +171,7 @@ describe('SCM API (E2E Integration Test)', () => {
         .send({ status: 'COMPLETED' })
         .expect(200);
 
-      expect(res.body.status).toBe('COMPLETED');
+      expect(res.body.data.status).toBe('COMPLETED');
     });
   });
 });
