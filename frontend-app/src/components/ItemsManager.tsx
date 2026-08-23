@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { getItems, createItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 
 export const ItemsManager: React.FC = () => {
@@ -11,11 +12,10 @@ export const ItemsManager: React.FC = () => {
     setLoading(true);
     try {
       const res = await getItems(filter);
-      // 백엔드 응답 구조에 따라 배열 추출 (응답이 바로 배열이거나 {data: []} 형태일 것으로 가정)
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setItems(data);
     } catch (error) {
-      console.error('Failed to load items:', error);
+      toast.error('아이템 목록을 불러오는 데 실패했습니다.');
       setItems([]);
     } finally {
       setLoading(false);
@@ -31,10 +31,11 @@ export const ItemsManager: React.FC = () => {
     setLoading(true);
     try {
       await createItem(newItem);
+      toast.success('아이템이 생성되었습니다.');
       loadItems();
       setNewItem({ code: '', name: '', type: 'RAW_MATERIAL' });
     } catch (error) {
-      console.error('Failed to create item:', error);
+      // toast.error는 Axios 인터셉터에서 처리됨
     } finally {
       setLoading(false);
     }
