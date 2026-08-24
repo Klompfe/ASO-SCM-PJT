@@ -8,16 +8,22 @@ import {
   Delete,
   Query,
   ParseIntPipe,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
+  ApiConsumes,
+  ApiBody,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ItemsService } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { GetItemsFilterDto } from './dto/get-items-filter.dto';
+import { BulkInsertDto } from './dto/bulk-insert-items.dto';
 
 @ApiTags('품목 관리 API (Items)')
 @ApiBearerAuth()
@@ -39,6 +45,30 @@ export class ItemsController {
   @Get()
   async findAll(@Query() filter: GetItemsFilterDto) {
     return await this.itemsService.findAll(filter);
+  }
+
+  @ApiOperation({ summary: '엑셀 파일 업로드 미리보기' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: '데이터 검증 결과 반환' })
+  @Post('upload-preview')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadPreview(@UploadedFile() file: Express.Multer.File) {
+    return await this.itemsService.uploadPreview(file);
+  }
+
+  @ApiOperation({ summary: '검증된 품목 대량 등록' })
+  @ApiResponse({ status: 201, description: '대량 저장 성공' })
+  @Post('bulk-insert')
+  async bulkInsert(@Body() bulkInsertDto: BulkInsertDto) {
+    return await this.itemsService.bulkInsert(bulkInsertDto.items, bulkInsertDto.policy);
   }
 
   @ApiOperation({ summary: '특정 품목 상세 조회' })
