@@ -27,23 +27,33 @@ export const LoginPage: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setLoading(true);
     try {
       if (isLoginMode) {
-        const { access_token } = await login({ email, password });
-        localStorage.setItem('access_token', access_token);
-        setAuthToken(access_token);
-        toast.success('로그인 성공!');
-        onLoginSuccess();
+        // Send both fields for compatibility
+        const res = await login({ email, username: email, password });
+        // Handle potential variations in backend token response keys
+        const token = res?.accessToken || res?.access_token || res?.token;
+        
+        if (token) {
+          localStorage.setItem('access_token', token);
+          setAuthToken(token);
+          toast.success('로그인 성공!');
+          onLoginSuccess();
+        } else {
+          throw new Error('토큰을 찾을 수 없습니다.');
+        }
       } else {
-        await register({ email, password, name });
+        await register({ email, username: email, password, name });
         toast.success('회원가입 완료! 로그인해주세요.');
         setIsLoginMode(true);
       }
-    } catch (error) {
-      toast.error(isLoginMode ? '로그인 실패. 정보를 확인하세요.' : '회원가입 실패.');
+    } catch (error: any) {
+      console.error('Login/Register error:', error);
+      const message = error.response?.data?.message || (isLoginMode ? '로그인 실패. 정보를 확인하세요.' : '회원가입 실패.');
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   };
-...
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="bg-white p-8 rounded-xl shadow-md border border-gray-200 w-full max-w-md">

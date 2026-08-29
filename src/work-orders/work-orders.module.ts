@@ -7,6 +7,7 @@ import { Bom } from '../boms/entities/bom.entity';
 import { WorkOrdersService } from './work-orders.service';
 import { WorkOrdersController } from './work-orders.controller';
 import { AuthModule } from '../auth/auth.module';
+import { VisionService } from './vision.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { AuthModule } from '../auth/auth.module';
     AuthModule,
   ],
   controllers: [WorkOrdersController],
-  providers: [WorkOrdersService],
+  providers: [WorkOrdersService, VisionService],
   exports: [WorkOrdersService],
 })
 export class WorkOrdersModule {}

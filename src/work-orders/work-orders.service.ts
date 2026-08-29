@@ -5,6 +5,7 @@ import { WorkOrder } from './entities/work-order.entity';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
 import { Item } from '../items/entities/item.entity';
 import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
+import { VisionService } from './vision.service';
 
 @Injectable()
 export class WorkOrdersService {
@@ -12,7 +13,12 @@ export class WorkOrdersService {
     @InjectRepository(WorkOrder)
     private readonly woRepository: Repository<WorkOrder>,
     private readonly dataSource: DataSource,
+    private readonly visionService: VisionService,
   ) {}
+
+  async analyzeWorkOrderImage(file: Express.Multer.File) {
+    return await this.visionService.analyzeWorkOrder(file);
+  }
 
   async create(dto: CreateWorkOrderDto): Promise<WorkOrder> {
     const item = await this.dataSource.getRepository(Item).findOne({

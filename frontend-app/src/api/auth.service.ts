@@ -1,6 +1,6 @@
 import apiClient from './client';
 
-export const login = async (credentials: { email: string; password: string }): Promise<{ access_token: string }> => {
+export const login = async (credentials: { email: string; password: string }): Promise<{ accessToken: string; user: any }> => {
   return await apiClient.post('/auth/login', credentials);
 };
 

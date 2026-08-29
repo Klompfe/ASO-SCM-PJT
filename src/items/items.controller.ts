@@ -1,3 +1,4 @@
+import 'multer';
 import {
   Controller,
   Get,
@@ -67,8 +68,8 @@ export class ItemsController {
   @ApiOperation({ summary: '검증된 품목 대량 등록' })
   @ApiResponse({ status: 201, description: '대량 저장 성공' })
   @Post('bulk-insert')
-  async bulkInsert(@Body() bulkInsertDto: BulkInsertDto) {
-    return await this.itemsService.bulkInsert(bulkInsertDto.items, bulkInsertDto.policy);
+  async bulkInsert(@Body() bulkInsertDto: any) {
+    return await this.itemsService.bulkInsert(bulkInsertDto.data, bulkInsertDto.policy);
   }
 
   @ApiOperation({ summary: '특정 품목 상세 조회' })

@@ -35,5 +35,5 @@ export const uploadPreview = (file: File): Promise<any> => {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 };
-export const bulkInsert = (items: any[], policy: 'OVERWRITE' | 'SKIP'): Promise<any> =>
-  apiClient.post('/items/bulk-insert', { items, policy });
+export const bulkInsert = (data: { styleInfo: any, matrix: any, materials: any[] }, policy: 'OVERWRITE' | 'SKIP'): Promise<any> =>
+  apiClient.post('/items/bulk-insert', { data, policy });

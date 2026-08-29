@@ -9,14 +9,19 @@ import {
   ParseIntPipe,
   UseGuards,
   Query,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  FileTypeValidator,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { WorkOrdersService } from './work-orders.service';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
 import { UpdateWorkOrderStatusDto } from './dto/update-work-order-status.dto';
 import { WorkOrder } from './entities/work-order.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('Work Orders (작업 지시 관리)')
 @ApiBearerAuth()
@@ -24,6 +29,29 @@ import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
 @UseGuards(JwtAuthGuard)
 export class WorkOrdersController {
   constructor(private readonly woService: WorkOrdersService) {}
+
+  @Post('upload-image')
+  @ApiOperation({ summary: '작업지시서 이미지 분석' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadImage(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [new FileTypeValidator({ fileType: '.(png|jpeg|jpg|pdf)' })],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return await this.woService.analyzeWorkOrderImage(file);
+  }
 
   @Post()
   @ApiOperation({ summary: '작업 지시 생성' })

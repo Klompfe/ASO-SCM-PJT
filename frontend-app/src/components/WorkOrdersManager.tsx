@@ -1,21 +1,48 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getWorkOrders, updateWorkOrderStatus, type GetWorkOrdersFilter, type WorkOrder } from '../api/workOrders.service';
+import { WorkOrderUploadModal } from './WorkOrderUploadModal';
+import { useNavigate } from 'react-router-dom'; // Assumed react-router usage
 
 export const WorkOrdersManager: React.FC = () => {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [filter, setFilter] = useState<GetWorkOrdersFilter>({});
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const navigate = useNavigate(); // For redirecting on auth error
+
+  const handleAuthError = (error: any) => {
+    // 401 Unauthorized handling
+    if (error.response?.status === 401 || error.status === 401) {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('token'); // Also check alternative key
+      toast.error('세션이 만료되었습니다. 다시 로그인해주세요.', { id: 'auth-error' });
+      navigate('/login');
+    } else {
+      toast.error(error.response?.data?.message || '오류가 발생했습니다.');
+    }
+  };
+
+  const getAuthHeader = () => {
+    const token = localStorage.getItem('access_token') || localStorage.getItem('token');
+    if (!token) {
+      throw { status: 401, message: '토큰이 없습니다.' };
+    }
+    return { Authorization: `Bearer ${token}` };
+  };
 
   const loadWorkOrders = useCallback(async () => {
     try {
+      // Explicit token check (though interceptor handles it, user asked for explicit handling)
+      getAuthHeader();
+      
       const res = await getWorkOrders(filter);
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setWorkOrders(data);
     } catch (error) {
-      toast.error('작업 지시 목록을 불러오는 데 실패했습니다.');
+      handleAuthError(error);
       setWorkOrders([]);
     }
-  }, [filter]);
+  }, [filter, navigate]);
 
   useEffect(() => {
     loadWorkOrders();
@@ -23,17 +50,21 @@ export const WorkOrdersManager: React.FC = () => {
 
   const handleUpdateStatus = async (id: number) => {
     try {
+      getAuthHeader();
       await updateWorkOrderStatus(id, { status: 'COMPLETED' });
       toast.success('작업 지시 상태가 변경되었습니다.');
       loadWorkOrders();
     } catch (error) {
-      // toast.error는 Axios 인터셉터에서 처리됨
+      handleAuthError(error);
     }
   };
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold text-gray-800">Work Orders</h2>
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-semibold text-gray-800">Work Orders</h2>
+        <button onClick={() => setIsModalOpen(true)} className="bg-purple-600 text-white px-4 py-2 rounded">작업지시서 이미지 업로드</button>
+      </div>
       
       <div className="bg-gray-50 p-4 rounded-lg">
         <label className="text-sm text-gray-600 block mb-2">Filter by Status</label>
@@ -73,6 +104,12 @@ export const WorkOrdersManager: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      <WorkOrderUploadModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSuccess={loadWorkOrders}
+      />
     </div>
   );
 };

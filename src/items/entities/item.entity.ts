@@ -40,6 +40,12 @@ export class Item {
   @Column({ nullable: true })
   description?: string;
 
+  @Column({ nullable: true })
+  vendor?: string;
+
+  @Column({ nullable: true })
+  composition?: string;
+
   @OneToMany(() => Bom, (bom) => bom.parentItem)
   parentBoms?: Bom[];
 

@@ -3,13 +3,20 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class LoginDto {
   @ApiProperty({
-    example: 'user1',
-    description: '사용자 아이디 (username)',
-    required: true,
+    example: 'test4@example.com',
+    description: '사용자 이메일',
+    required: false,
   })
   @IsString()
-  @IsNotEmpty({ message: 'username 필드는 필수 입력값입니다.' })
-  username: string;
+  email?: string;
+
+  @ApiProperty({
+    example: 'user1',
+    description: '사용자 아이디 (username)',
+    required: false,
+  })
+  @IsString()
+  username?: string;
 
   @ApiProperty({
     example: 'password123!',
