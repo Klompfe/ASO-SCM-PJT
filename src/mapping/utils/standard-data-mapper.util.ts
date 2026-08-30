@@ -1,52 +1,88 @@
 export interface StandardMaterial {
-  styleNo: string;
-  factory: string;
-  buyer: string;
-  itemCategory: string; // Color/Material name
-  itemName: string;     // Item Name
-  size: string;
-  quantity: number;
+  itemName: string;
+  orderQty: number;
+  colorOf: string;
+  colorUsed: string;
+  spec: string;
+  consumption: number;
+  requiredQty: number;
+  poDate: string;
+  poQty: number;
+  shipment1Date: string;
+  shipment1RcvdQty: number;
+  bln: number;
+  shipment2Date: string;
+  shipment2RcvdQty: number;
+  supplier: string;
+  unitPrice: number;
+  remarks: string;
+  status: string;
 }
 
 export class StandardDataMapper {
   static parse(csvData: string[][]): StandardMaterial[] {
-    if (csvData.length < 13) return [];
+    console.log('[StandardDataMapper] Parsing all columns...');
 
-    // 1. Extract Metadata (Line 2: Index 1, 7, 11, 15)
-    const metaRow = csvData[1];
-    const metadata = {
-      styleNo: metaRow[1] || '',
-      factory: metaRow[11] || '',
-      buyer: metaRow[15] || '',
+    const headerRowIndex = csvData.findIndex(row => 
+        row.some(cell => String(cell).trim().toUpperCase().includes('ITEM'))
+    );
+    if (headerRowIndex === -1) return [];
+    
+    const headers = csvData[headerRowIndex].map(h => h.trim().toUpperCase());
+    const getColIndex = (keywords: string[]) => headers.findIndex(h => keywords.some(kw => h.includes(kw)));
+
+    const colMap = {
+        itemName: getColIndex(['ITEM']),
+        orderQty: getColIndex(['QTY']),
+        colorOf: getColIndex(['COLOR']),
+        colorUsed: getColIndex(['COLOR USED']),
+        spec: getColIndex(['SPEC']),
+        consumption: getColIndex(['CON']),
+        requiredQty: getColIndex(['REQUIRED']),
+        poDate: getColIndex(['PO DATE']),
+        poQty: getColIndex(['PO QTY']),
+        shipment1Date: getColIndex(['SHIPMENT 1']),
+        shipment1RcvdQty: getColIndex(['RCVD 1']),
+        bln: getColIndex(['BLN']),
+        shipment2Date: getColIndex(['SHIPMENT 2']),
+        shipment2RcvdQty: getColIndex(['RCVD 2']),
+        supplier: getColIndex(['SUPPLIER']),
+        unitPrice: getColIndex(['PRICE']),
+        remarks: getColIndex(['REMARK']),
     };
 
-    // 2. Extract Data (Line 13 onwards)
-    const dataRows = csvData.slice(12);
-
     const results: StandardMaterial[] = [];
+    let lastItemName = '';
 
-    dataRows.forEach((row) => {
-      // Assuming structure based on provided sample analysis:
-      // Row[0]: Color, Row[1]: ItemName, Row[2]: Size (55), Row[3]: Size (66), Row[4]: Size (77)
-      const color = row[0];
-      const itemName = row[1];
-      
-      if (!color && !itemName) return; // Skip empty rows
+    for (let i = headerRowIndex + 1; i < csvData.length; i++) {
+        const row = csvData[i];
+        if (row.every(cell => !cell || cell.trim() === '')) continue;
 
-      // Process size columns
-      for (let i = 2; i <= 4; i++) {
-        const qty = parseFloat(row[i]) || 0;
-        if (qty > 0) {
-          results.push({
-            ...metadata,
-            itemCategory: color || 'N/A',
-            itemName: itemName || 'N/A',
-            size: i === 2 ? '55' : i === 3 ? '66.0' : '77.0',
-            quantity: qty,
-          });
-        }
-      }
-    });
+        const rawItemName = (row[colMap.itemName] || '').trim();
+        const itemName = rawItemName || lastItemName;
+        lastItemName = itemName;
+
+        results.push({
+            itemName,
+            orderQty: parseFloat(row[colMap.orderQty] || '0'),
+            colorOf: (row[colMap.colorOf] || '').trim(),
+            colorUsed: (row[colMap.colorUsed] || '').trim(),
+            spec: (row[colMap.spec] || '').trim(),
+            consumption: parseFloat(row[colMap.consumption] || '0'),
+            requiredQty: parseFloat(row[colMap.requiredQty] || '0'),
+            poDate: (row[colMap.poDate] || '').trim(),
+            poQty: parseFloat(row[colMap.poQty] || '0'),
+            shipment1Date: (row[colMap.shipment1Date] || '').trim(),
+            shipment1RcvdQty: parseFloat(row[colMap.shipment1RcvdQty] || '0'),
+            bln: parseFloat(row[colMap.bln] || '0'),
+            shipment2Date: (row[colMap.shipment2Date] || '').trim(),
+            shipment2RcvdQty: parseFloat(row[colMap.shipment2RcvdQty] || '0'),
+            supplier: (row[colMap.supplier] || '').trim(),
+            unitPrice: parseFloat(row[colMap.unitPrice] || '0'),
+            remarks: (row[colMap.remarks] || '').trim(),
+            status: 'MAPPED'
+        });
+    }
 
     return results;
   }

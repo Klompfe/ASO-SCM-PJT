@@ -12,8 +12,7 @@ import { Supplier } from './suppliers/entities/supplier.entity';
 import { Shipment } from './shipments/entities/shipment.entity'; // Shipment 엔티티 추가
 import { MappingRule } from './mapping/entities/mapping-rule.entity';
 import { Style, Material, Color, Size } from './master/entities/master.entities';
-import { Bom } from './transaction/entities/bom.entity';
-import { Receiving } from './transaction/entities/transaction.entities';
+import { Bom, Receiving } from './transaction/entities/transaction.entities';
 
 // Module Imports
 import { AuthModule } from './auth/auth.module';
@@ -26,6 +25,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 import { MappingModule } from './mapping/mapping.module';
 import { MasterModule } from './master/master.module';
+import { TransactionModule } from './transaction/transaction.module';
 
 @Module({
   imports: [
@@ -76,6 +76,7 @@ import { MasterModule } from './master/master.module';
     ShipmentsModule,
     MappingModule,
     MasterModule,
+    TransactionModule,
   ],
 })
 export class AppModule {}

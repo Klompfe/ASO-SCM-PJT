@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn } from 'typeorm';
 import { Style, Material } from '../../master/entities/master.entities';
+import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
 
 @Entity('tx_bom')
 export class Bom {
@@ -34,27 +35,6 @@ export class Bom {
   changedBy: string;
 }
 
-@Entity('tx_purchase_orders')
-export class PurchaseOrder {
-  @PrimaryGeneratedColumn()
-  id: number;
-
-  @Column({ unique: true })
-  poNumber: string;
-
-  @ManyToOne(() => Style)
-  style: Style;
-
-  @Column()
-  orderDate: Date;
-
-  @Column('decimal')
-  orderQty: number;
-
-  @Column({ nullable: true })
-  traceabilityKey: string;
-}
-
 @Entity('tx_receiving')
 export class Receiving {
   @PrimaryGeneratedColumn()
@@ -72,7 +52,7 @@ export class Receiving {
   @Column('decimal')
   balanceQty: number;
 
-  @ManyToOne(() => PurchaseOrder)
+  @ManyToOne(() => PurchaseOrder, (po) => po.id)
   purchaseOrder: PurchaseOrder;
 
   @Column({ nullable: true })

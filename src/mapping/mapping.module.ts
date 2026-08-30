@@ -6,9 +6,10 @@ import { Style } from '../master/entities/master.entities';
 import { MappingService } from './services/mapping.service';
 import { ValidationService } from './services/validation.service';
 import { MappingController } from './mapping.controller';
+import { ItemsModule } from '../items/items.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([MappingRule, Item, Style])],
+  imports: [TypeOrmModule.forFeature([MappingRule, Item, Style]), ItemsModule],
   controllers: [MappingController],
   providers: [MappingService, ValidationService],
   exports: [MappingService, ValidationService],
