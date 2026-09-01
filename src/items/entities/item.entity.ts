@@ -6,7 +6,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Bom } from '../../boms/entities/bom.entity';
+import { Bom } from './bom.entity';
 import { Inventory } from '../../inventories/entities/inventory.entity';
 import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
 import { WorkOrder } from '../../work-orders/entities/work-order.entity';
@@ -46,12 +46,6 @@ export class Item {
   @Column({ nullable: true })
   composition?: string;
 
-  @OneToMany(() => Bom, (bom) => bom.parentItem)
-  parentBoms?: Bom[];
-
-  @OneToMany(() => Bom, (bom) => bom.childItem)
-  childBoms?: Bom[];
-
   @OneToMany(() => Inventory, (inventory) => inventory.item)
   inventories?: Inventory[];
 
@@ -60,6 +54,12 @@ export class Item {
 
   @OneToMany(() => WorkOrder, (wo) => wo.item)
   workOrders?: WorkOrder[];
+
+  @OneToMany(() => Bom, (bom) => bom.parentItem)
+  parentBoms?: Bom[];
+
+  @OneToMany(() => Bom, (bom) => bom.childItem)
+  childBoms?: Bom[];
 
   @CreateDateColumn()
   createdAt: Date;

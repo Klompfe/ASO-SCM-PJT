@@ -3,7 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MappingRule } from '../entities/mapping-rule.entity';
 import { Item } from '../../items/entities/item.entity';
-import { StandardDataMapper, StandardMaterial } from '../utils/standard-data-mapper.util';
+import { StandardDataMapper } from '../utils/standard-data-mapper.util';
+import { StandardMaterial } from '../interfaces/standard-material.interface';
 
 export interface RawError {
   row: number;
@@ -27,11 +28,14 @@ export class MappingService {
 
     // 2. Lookup & Enrich (Business Mapping)
     const enrichedData = await Promise.all(mappedData.map(async (item, index) => {
+      // Fallback logic
+      const category = item.itemCategory || item.itemName;
+      
       // Lookup existing item
-      const itemEntity = await this.itemRepository.findOne({ where: { name: item.itemCategory } }); // Simplified lookup logic
+      const itemEntity = await this.itemRepository.findOne({ where: { name: category } }); 
       
       if (!itemEntity) {
-        rawErrors.push({ row: index, message: `Item/Color not found: ${item.itemCategory}` });
+        rawErrors.push({ row: index, message: `Item/Color not found: ${category}` });
         return { ...item, status: 'NEW_MASTER_CANDIDATE' };
       }
 

@@ -186,6 +186,21 @@ export class ItemsService {
     }
   }
 
+  async clearAll(): Promise<{ success: boolean; message: string }> {
+    try {
+      await this.itemRepository.clear();
+      this.logger.log('All items cleared successfully.');
+      return {
+        success: true,
+        message: '모든 품목 데이터가 성공적으로 초기화되었습니다.',
+      };
+    } catch (err) {
+      const error = err as Error;
+      this.logger.error(`Failed to clear items: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('품목 전체 삭제 중 오류가 발생했습니다.');
+    }
+  }
+
   async uploadPreview(file: Express.Multer.File) {
     if (!file || !file.buffer) {
       throw new BadRequestException('엑셀 파일이 존재하지 않거나 올바르지 않습니다.');

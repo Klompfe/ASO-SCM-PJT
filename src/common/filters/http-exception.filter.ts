@@ -9,8 +9,8 @@ import {
 import { Request, Response } from 'express';
 
 @Catch()
-export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(HttpExceptionFilter.name);
+export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger('GlobalExceptionFilter');
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -22,39 +22,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const exceptionResponse =
+    const message =
       exception instanceof HttpException
         ? exception.getResponse()
-        : null;
+        : (exception as Error).message;
 
-    let message: string | string[] = 'Internal server error';
-    let error = 'Internal Server Error';
-
-    if (exception instanceof HttpException) {
-      if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
-        const resObj = exceptionResponse as any;
-        message = resObj.message || exception.message;
-        error = resObj.error || exception.name;
-      } else {
-        message = exception.message;
-      }
-    } else {
-      const err = exception as Error;
-      message = err.message || String(exception);
-      if (err.stack) {
-        this.logger.error(`Unhandled Exception: ${err.message}`, err.stack);
-      } else {
-        this.logger.error(`Unhandled Exception: ${err}`);
-      }
-    }
-
-    response.status(status).json({
-      success: false,
+    const errorResponse = {
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request.url,
-      message,
-      error,
-    });
+      method: request.method,
+      message: message,
+    };
+
+    this.logger.error(
+      `[ERROR] ${request.method} ${request.url} - Status: ${status} - Message: ${JSON.stringify(message)}`,
+      (exception as Error).stack,
+    );
+
+    response.status(status).json(errorResponse);
   }
 }

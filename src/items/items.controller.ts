@@ -98,4 +98,11 @@ export class ItemsController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.itemsService.remove(id);
   }
-}
+
+  @ApiOperation({ summary: '모든 품목 데이터 초기화' })
+  @ApiResponse({ status: 200, description: '초기화 성공' })
+  @Delete('clear/all')
+  async clearAll() {
+    return await this.itemsService.clearAll();
+  }
+  }

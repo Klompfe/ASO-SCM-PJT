@@ -1,27 +1,8 @@
-export interface StandardMaterial {
-  itemName: string;
-  orderQty: number;
-  colorOf: string;
-  colorUsed: string;
-  spec: string;
-  consumption: number;
-  requiredQty: number;
-  poDate: string;
-  poQty: number;
-  shipment1Date: string;
-  shipment1RcvdQty: number;
-  bln: number;
-  shipment2Date: string;
-  shipment2RcvdQty: number;
-  supplier: string;
-  unitPrice: number;
-  remarks: string;
-  status: string;
-}
+import { StandardMaterial } from '../interfaces/standard-material.interface';
 
 export class StandardDataMapper {
   static parse(csvData: string[][]): StandardMaterial[] {
-    console.log('[StandardDataMapper] Parsing all columns...');
+    console.log('[StandardDataMapper] Parsing with normalization...');
 
     const headerRowIndex = csvData.findIndex(row => 
         row.some(cell => String(cell).trim().toUpperCase().includes('ITEM'))
@@ -54,33 +35,53 @@ export class StandardDataMapper {
     const results: StandardMaterial[] = [];
     let lastItemName = '';
 
+    const RAW_MATERIAL_KEYWORDS = ['OUT-SHELL', 'COMBINATION', 'LINING'];
+
     for (let i = headerRowIndex + 1; i < csvData.length; i++) {
         const row = csvData[i];
         if (row.every(cell => !cell || cell.trim() === '')) continue;
 
+        // N1: Forward fill
         const rawItemName = (row[colMap.itemName] || '').trim();
         const itemName = rawItemName || lastItemName;
         lastItemName = itemName;
 
+        // N2: Keywords extraction
+        let code = '';
+        for (const kw of RAW_MATERIAL_KEYWORDS) {
+            if (itemName.toUpperCase().includes(kw)) {
+                code = kw;
+                break;
+            }
+        }
+
+        // N4: DB Type Normalization
+        const dbType = RAW_MATERIAL_KEYWORDS.some(kw => itemName.toUpperCase().includes(kw)) ? 'RAW_MATERIAL' : 'GENERAL';
+
+        // N3: Number conversion
+        const toNum = (val: string | undefined) => parseFloat(val || '0') || 0;
+
         results.push({
+            code,
             itemName,
-            orderQty: parseFloat(row[colMap.orderQty] || '0'),
+            orderQty: toNum(row[colMap.orderQty]),
             colorOf: (row[colMap.colorOf] || '').trim(),
             colorUsed: (row[colMap.colorUsed] || '').trim(),
             spec: (row[colMap.spec] || '').trim(),
-            consumption: parseFloat(row[colMap.consumption] || '0'),
-            requiredQty: parseFloat(row[colMap.requiredQty] || '0'),
+            consumption: toNum(row[colMap.consumption]),
+            requiredQty: toNum(row[colMap.requiredQty]),
             poDate: (row[colMap.poDate] || '').trim(),
-            poQty: parseFloat(row[colMap.poQty] || '0'),
+            poQty: toNum(row[colMap.poQty]),
             shipment1Date: (row[colMap.shipment1Date] || '').trim(),
-            shipment1RcvdQty: parseFloat(row[colMap.shipment1RcvdQty] || '0'),
-            bln: parseFloat(row[colMap.bln] || '0'),
+            shipment1RcvdQty: toNum(row[colMap.shipment1RcvdQty]),
+            bln: toNum(row[colMap.bln]),
             shipment2Date: (row[colMap.shipment2Date] || '').trim(),
-            shipment2RcvdQty: parseFloat(row[colMap.shipment2RcvdQty] || '0'),
+            shipment2RcvdQty: toNum(row[colMap.shipment2RcvdQty]),
             supplier: (row[colMap.supplier] || '').trim(),
-            unitPrice: parseFloat(row[colMap.unitPrice] || '0'),
+            unitPrice: toNum(row[colMap.unitPrice]),
             remarks: (row[colMap.remarks] || '').trim(),
-            status: 'MAPPED'
+            status: 'MAPPED',
+            dbType
         });
     }
 

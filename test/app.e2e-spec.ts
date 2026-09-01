@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
-import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
 
 describe('SCM API (E2E Integration Test)', () => {
@@ -26,7 +26,7 @@ describe('SCM API (E2E Integration Test)', () => {
         transform: true,
       }),
     );
-    app.useGlobalFilters(new HttpExceptionFilter());
+    app.useGlobalFilters(new AllExceptionsFilter());
     app.useGlobalInterceptors(new TransformInterceptor());
     await app.init();
   });

@@ -1,5 +1,5 @@
 import { PipeTransform, Injectable, BadRequestException } from '@nestjs/common';
-import { StandardMaterial } from '../utils/standard-data-mapper.util';
+import { StandardMaterial } from '../interfaces/standard-material.interface';
 
 export interface ValidationError {
   row: number;
@@ -12,9 +12,14 @@ export class MappingValidationPipe implements PipeTransform {
     const errors: ValidationError[] = [];
 
     value.forEach((item, index) => {
-      if (!item.styleNo) errors.push({ row: index, message: 'Style No is missing' });
-      if (!item.itemCategory) errors.push({ row: index, message: 'Color/Category is missing' });
-      if (item.quantity <= 0) errors.push({ row: index, message: 'Quantity must be greater than 0' });
+      // Fallback validation
+      const styleNo = item.styleNo || item.code;
+      const category = item.itemCategory || item.itemName;
+      const quantity = item.quantity ?? item.orderQty ?? 0;
+
+      if (!styleNo) errors.push({ row: index, message: 'Style No (or code) is missing' });
+      if (!category) errors.push({ row: index, message: 'Item Category (or name) is missing' });
+      if (quantity <= 0) errors.push({ row: index, message: 'Quantity (or orderQty) must be greater than 0' });
     });
 
     return { data: value, errors };

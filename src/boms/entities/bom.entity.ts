@@ -1,39 +1,21 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne,
-  JoinColumn,
-  CreateDateColumn,
-  UpdateDateColumn,
-} from 'typeorm';
-import { Item } from '../../items/entities/item.entity';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany } from 'typeorm';
+import { MasterStyle } from '../../styles/entities/master-style.entity';
+import { BomItem } from './bom-item.entity';
 
-@Entity('boms')
+@Entity()
 export class Bom {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: 'integer', nullable: true })
-  parentItemId: number;
+  @Column()
+  bomNo: string;
 
-  @Column({ type: 'integer', nullable: true })
-  childItemId: number;
+  @Column()
+  version: string;
 
-  @Column({ type: 'real', default: 1 })
-  quantity: number;
+  @ManyToOne(() => MasterStyle, (style) => style.boms)
+  style: MasterStyle;
 
-  @ManyToOne(() => Item, { onDelete: 'CASCADE', nullable: true })
-  @JoinColumn({ name: 'parentItemId' })
-  parentItem: Item;
-
-  @ManyToOne(() => Item, { onDelete: 'CASCADE', nullable: true })
-  @JoinColumn({ name: 'childItemId' })
-  childItem: Item;
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
+  @OneToMany(() => BomItem, (bomItem) => bomItem.bom)
+  items: BomItem[];
 }
