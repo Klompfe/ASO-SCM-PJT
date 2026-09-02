@@ -12,7 +12,7 @@ import { Supplier } from './suppliers/entities/supplier.entity';
 import { Shipment } from './shipments/entities/shipment.entity'; // Shipment 엔티티 추가
 import { MappingRule } from './mapping/entities/mapping-rule.entity';
 import { Style, Material, Color, Size } from './master/entities/master.entities';
-import { Bom, Receiving } from './transaction/entities/transaction.entities';
+import { Receiving } from './transaction/entities/transaction.entities';
 
 // Module Imports
 import { AuthModule } from './auth/auth.module';
@@ -45,7 +45,7 @@ import { TransactionModule } from './transaction/transaction.module';
           return {
             type: 'sqlite',
             database: configService.get<string>('DB_DATABASE', 'scm_db.sqlite'),
-            entities: [User, Item, Inventory, PurchaseOrder, WorkOrder, Supplier, Shipment, MappingRule, Style, Material, Color, Size, Bom, Receiving],
+            entities: [User, Item, Inventory, PurchaseOrder, WorkOrder, Supplier, Shipment, MappingRule, Style, Material, Color, Size, Receiving],
             synchronize: true, // 개발용 자동 스키마 동기화
             autoLoadEntities: true,
           };
@@ -58,7 +58,7 @@ import { TransactionModule } from './transaction/transaction.module';
           username: configService.get<string>('DB_USERNAME', 'postgres'),
           password: configService.get<string>('DB_PASSWORD', 'postgres'),
           database: configService.get<string>('DB_DATABASE', 'scm_db'),
-          entities: [User, Item, Inventory, PurchaseOrder, WorkOrder, Supplier, Shipment, MappingRule, Style, Material, Color, Size, Bom, Receiving],
+          entities: [User, Item, Inventory, PurchaseOrder, WorkOrder, Supplier, Shipment, MappingRule, Style, Material, Color, Size, Receiving],
           synchronize: true,
           autoLoadEntities: true,
         };
