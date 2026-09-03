@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { APP_GUARD } from '@nestjs/core';
 
 // Entity Imports
 // 아래 엔티티들은 각 도메인 모듈의 TypeOrmModule.forFeature()를 통해 이미 등록되며,
@@ -10,6 +11,7 @@ import { Material, Color, Size } from './master/entities/master.entities';
 
 // Module Imports
 import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { UsersModule } from './users/users.module';
 import { ItemsModule } from './items/items.module';
 import { InventoriesModule } from './inventories/inventories.module';
@@ -71,6 +73,12 @@ import { TransactionModule } from './transaction/transaction.module';
     MappingModule,
     MasterModule,
     TransactionModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
   ],
 })
 export class AppModule {}
