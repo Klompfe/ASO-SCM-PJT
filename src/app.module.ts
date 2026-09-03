@@ -3,16 +3,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 // Entity Imports
-import { User } from './users/entities/user.entity';
-import { Item } from './items/entities/item.entity';
-import { Inventory } from './inventories/entities/inventory.entity';
-import { PurchaseOrder } from './purchase-orders/entities/purchase-order.entity';
-import { WorkOrder } from './work-orders/entities/work-order.entity';
-import { Supplier } from './suppliers/entities/supplier.entity';
-import { Shipment } from './shipments/entities/shipment.entity'; // Shipment 엔티티 추가
-import { MappingRule } from './mapping/entities/mapping-rule.entity';
-import { Style, Material, Color, Size } from './master/entities/master.entities';
-import { Receiving } from './transaction/entities/transaction.entities';
+// 아래 엔티티들은 각 도메인 모듈의 TypeOrmModule.forFeature()를 통해 이미 등록되며,
+// autoLoadEntities: true가 그 등록을 자동으로 반영하므로 여기서 중복 나열하지 않는다.
+// Material/Color/Size는 이들을 forFeature로 등록하는 모듈이 없어 여기서만 로드된다.
+import { Material, Color, Size } from './master/entities/master.entities';
 
 // Module Imports
 import { AuthModule } from './auth/auth.module';
@@ -45,7 +39,7 @@ import { TransactionModule } from './transaction/transaction.module';
           return {
             type: 'sqlite',
             database: configService.get<string>('DB_DATABASE', 'scm_db.sqlite'),
-            entities: [User, Item, Inventory, PurchaseOrder, WorkOrder, Supplier, Shipment, MappingRule, Style, Material, Color, Size, Receiving],
+            entities: [Material, Color, Size],
             synchronize: true, // 개발용 자동 스키마 동기화
             autoLoadEntities: true,
           };
@@ -58,7 +52,7 @@ import { TransactionModule } from './transaction/transaction.module';
           username: configService.get<string>('DB_USERNAME', 'postgres'),
           password: configService.get<string>('DB_PASSWORD', 'postgres'),
           database: configService.get<string>('DB_DATABASE', 'scm_db'),
-          entities: [User, Item, Inventory, PurchaseOrder, WorkOrder, Supplier, Shipment, MappingRule, Style, Material, Color, Size, Receiving],
+          entities: [Material, Color, Size],
           synchronize: true,
           autoLoadEntities: true,
         };
