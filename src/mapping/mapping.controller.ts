@@ -6,7 +6,7 @@ import { MappingService } from './services/mapping.service';
 import { ValidationService } from './services/validation.service';
 import { StyleValidatorService } from './services/style-validator.service';
 import { StagingParseRaw } from './entities/staging-parse-raw.entity';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ApiTags, ApiBearerAuth, ApiBody, ApiConsumes } from '@nestjs/swagger';
 import { SectionParser } from './utils/section-parser.util';
 import { ExcelParser } from './utils/excel-parser.util';
