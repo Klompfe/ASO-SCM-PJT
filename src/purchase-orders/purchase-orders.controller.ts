@@ -7,19 +7,16 @@ import {
   Param,
   Delete,
   ParseIntPipe,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
 import { PurchaseOrder } from './entities/purchase-order.entity';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Purchase Orders (구매 주문 관리)')
 @ApiBearerAuth()
 @Controller('purchase-orders')
-@UseGuards(JwtAuthGuard)
 export class PurchaseOrdersController {
   constructor(private readonly poService: PurchaseOrdersService) {}
 

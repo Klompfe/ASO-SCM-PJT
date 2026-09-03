@@ -5,13 +5,11 @@ import {
   Param,
   Body,
   ParseIntPipe,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { IsInt, Min } from 'class-validator'; // IsMin -> Min으로 수정
 import { InventoriesService } from './inventories.service';
 import { Inventory } from './entities/inventory.entity';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 class StockTransactionDto {
   @ApiProperty({ description: '수량', example: 10 })
@@ -23,7 +21,6 @@ class StockTransactionDto {
 @ApiTags('Inventories (재고 관리)')
 @ApiBearerAuth()
 @Controller('inventories')
-@UseGuards(JwtAuthGuard)
 export class InventoriesController {
   constructor(private readonly inventoriesService: InventoriesService) {}
 

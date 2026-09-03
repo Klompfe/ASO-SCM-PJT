@@ -7,7 +7,6 @@ import {
   Param,
   Delete,
   ParseIntPipe,
-  UseGuards,
   Query,
   UseInterceptors,
   UploadedFile,
@@ -19,14 +18,12 @@ import { WorkOrdersService } from './work-orders.service';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
 import { UpdateWorkOrderStatusDto } from './dto/update-work-order-status.dto';
 import { WorkOrder } from './entities/work-order.entity';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('Work Orders (작업 지시 관리)')
 @ApiBearerAuth()
 @Controller('work-orders')
-@UseGuards(JwtAuthGuard)
 export class WorkOrdersController {
   constructor(private readonly woService: WorkOrdersService) {}
 
