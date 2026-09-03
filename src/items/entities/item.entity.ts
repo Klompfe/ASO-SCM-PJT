@@ -6,7 +6,6 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Bom } from './bom.entity';
 import { Inventory } from '../../inventories/entities/inventory.entity';
 import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
 import { WorkOrder } from '../../work-orders/entities/work-order.entity';
@@ -46,6 +45,11 @@ export class Item {
   @Column({ nullable: true })
   composition?: string;
 
+  // FINISHED_GOOD 타입 Item이 속한 MasterStyle.styleNo. 모듈 간 순환 의존을 피하기 위해
+  // 관계 대신 값만 저장하며, MasterStyle 조회는 서비스 레이어에서 styleNo로 별도 수행한다.
+  @Column({ nullable: true })
+  styleNo?: string;
+
   @OneToMany(() => Inventory, (inventory) => inventory.item)
   inventories?: Inventory[];
 
@@ -54,12 +58,6 @@ export class Item {
 
   @OneToMany(() => WorkOrder, (wo) => wo.item)
   workOrders?: WorkOrder[];
-
-  @OneToMany(() => Bom, (bom) => bom.parentItem)
-  parentBoms?: Bom[];
-
-  @OneToMany(() => Bom, (bom) => bom.childItem)
-  childBoms?: Bom[];
 
   @CreateDateColumn()
   createdAt: Date;

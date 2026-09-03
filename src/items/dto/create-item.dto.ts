@@ -31,4 +31,9 @@ export class CreateItemDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @ApiProperty({ description: 'FINISHED_GOOD Item이 속한 MasterStyle의 styleNo', required: false })
+  @IsString()
+  @IsOptional()
+  styleNo?: string;
 }
