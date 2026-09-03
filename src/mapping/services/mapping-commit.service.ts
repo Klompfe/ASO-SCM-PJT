@@ -64,7 +64,7 @@ export class MappingCommitService {
 
         await queryRunner.manager.save(BomItem, {
           bom,
-          materialId: (material.id as unknown) as number,
+          material,
           category: item.category || 'GENERAL',
           colorCode: item.colorCode || 'N/A',
           spec: item.spec || 'N/A',

@@ -2,7 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany } from 'ty
 import { MasterStyle } from '../../styles/entities/master-style.entity';
 import { BomItem } from './bom-item.entity';
 
-@Entity()
+@Entity('bom_master')
 export class Bom {
   @PrimaryGeneratedColumn()
   id: number;

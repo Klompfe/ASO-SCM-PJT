@@ -1,7 +1,8 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
 import { Bom } from './bom.entity';
+import { Item } from '../../items/entities/item.entity';
 
-@Entity()
+@Entity('bom_item_details')
 export class BomItem {
   @PrimaryGeneratedColumn()
   id: number;
@@ -9,9 +10,8 @@ export class BomItem {
   @ManyToOne(() => Bom, (bom) => bom.items)
   bom: Bom;
 
-  // Assuming materialId comes from a separate MasterMaterial entity not defined here yet
-  @Column()
-  materialId: number;
+  @ManyToOne(() => Item)
+  material: Item;
 
   @Column()
   category: string; // 겉감, 안감 등

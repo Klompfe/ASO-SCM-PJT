@@ -38,7 +38,7 @@ export class StandardDataProcessingService {
         // BOM Transaction DB
         const bom = queryRunner.manager.create(Bom, {
           style: style as any,
-          items: [{ materialId: material.id, category: dto.itemCategory, consumption: Number(dto.conAmount) || 0, requiredQty: 0, colorCode: 'N/A', spec: dto.spec, supplier: 'N/A', unitPrice: 0, remarks: 'N/A' }] as any,
+          items: [{ material, category: dto.itemCategory, consumption: Number(dto.conAmount) || 0, requiredQty: 0, colorCode: 'N/A', spec: dto.spec, supplier: 'N/A', unitPrice: 0, remarks: 'N/A' }] as any,
         });
         await queryRunner.manager.save(bom);
       }
