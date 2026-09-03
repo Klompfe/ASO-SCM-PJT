@@ -7,7 +7,7 @@
 ## 1. 아키텍처 설계 원칙 (Architectural Principles)
 - **모듈화 및 단일 책임 원칙 (Modular & SRP)**: 각 도메인 영역(인증, 품목, 재고, 발주, 작업지시 등)은 자체 모듈, 서비스, 컨트롤러 및 엔티티를 가지며 고유의 책임에 집중합니다.
 - **트랜잭션 ACID 보장 (Transactional ACID)**: 상태 변화가 유기적으로 연쇄 반응하는 SCM 도메인 특성상, 일관성(Consistency)과 격리성(Isolation)을 유지하기 위해 TypeORM `QueryRunner`를 사용한 명시적 트랜잭션을 적용합니다.
-- **안전한 권한 제어 (Multi-tenancy & Security)**: 전역 `JwtAuthGuard`, `RolesGuard` 및 행 수준 보안(RLS, Row Level Security) 가드를 통해 테넌트 및 역할별 데이터를 엄격히 격리합니다.
+- **안전한 권한 제어 (Security)**: 전역 `JwtAuthGuard`를 통해 인증을 강제합니다. (RLS/멀티테넌시는 4절 참고 — v2 설계와 함께 제거됨)
 
 ---
 
@@ -71,9 +71,10 @@
 
 ---
 
-## 4. 행 수준 보안 (Row Level Security, RLS) 및 공통 가드
-- **RLS 세션 Guard**: `rls-session.guard.ts`는 요청을 보내는 사용자 세션을 DB 커넥션 내 RLS 변수로 주입합니다. 이를 통해 동일 데이터베이스 내에서 사용자 또는 테넌트 간 데이터 영역이 강제로 차단 및 격리되도록 동작합니다.
-- **RLS Cleanup Interceptor**: 요청이 종료된 후 RLS 전역 변수가 다른 커넥션 요청에 오염되지 않도록 청소(`rls-cleanup.interceptor.ts`) 작업을 처리합니다.
+## 4. 행 수준 보안 (Row Level Security, RLS) 및 공통 가드 — **[삭제됨, PR-015]**
+> `modules/po`(v2) 설계와 함께 제거됨. 사유: 2주간 방치된 스텁, RLS는 SQLite 비호환, 프론트 미참조. 아래는 과거 설계 기록으로만 남김.
+- ~~**RLS 세션 Guard**: `rls-session.guard.ts`는 요청을 보내는 사용자 세션을 DB 커넥션 내 RLS 변수로 주입합니다. 이를 통해 동일 데이터베이스 내에서 사용자 또는 테넌트 간 데이터 영역이 강제로 차단 및 격리되도록 동작합니다.~~
+- ~~**RLS Cleanup Interceptor**: 요청이 종료된 후 RLS 전역 변수가 다른 커넥션 요청에 오염되지 않도록 청소(`rls-cleanup.interceptor.ts`) 작업을 처리합니다.~~
 
 ---
 
