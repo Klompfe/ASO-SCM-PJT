@@ -1,4 +1,4 @@
-import { Entity, PrimaryColumn, Column, OneToMany, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryColumn, Column, OneToMany, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToOne, JoinColumn } from 'typeorm';
 
 export enum ProductionType {
   FOB = 'FOB',
@@ -89,4 +89,3 @@ export class StyleLogistics {
   @JoinColumn({ name: 'styleNo' })
   style: Style;
 }
-import { ManyToOne, OneToOne, JoinColumn } from 'typeorm';
