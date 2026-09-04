@@ -8,7 +8,7 @@ import { StyleValidatorService } from './services/style-validator.service';
 import { StagingParseRaw } from './entities/staging-parse-raw.entity';
 import { ApiTags, ApiBearerAuth, ApiBody, ApiConsumes } from '@nestjs/swagger';
 import { SectionParser } from './utils/section-parser.util';
-import { ExcelParser } from './utils/excel-parser.util';
+import { ExcelParser, CellMergeRange } from './utils/excel-parser.util';
 import * as iconv from 'iconv-lite';
 
 @ApiTags('데이터 매핑 API')
@@ -38,20 +38,23 @@ export class MappingController {
     if (!file) throw new Error('No file');
     
     let rows: string[][];
+    let merges: CellMergeRange[] = [];
     const isExcel = file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls');
-    
+
     let parseResult: any;
     let errorMessage: string | null = null;
 
     try {
         if (isExcel) {
-            rows = ExcelParser.parse(file.buffer);
+            const parsed = ExcelParser.parse(file.buffer);
+            rows = parsed.rows;
+            merges = parsed.merges;
         } else {
             let content = file.buffer.toString('utf-8');
             if (content.includes('\uFFFD')) content = iconv.decode(file.buffer, 'euc-kr');
             rows = content.split(/\r?\n/).map(line => line.split(','));
         }
-        parseResult = SectionParser.parse(rows);
+        parseResult = SectionParser.parse(rows, merges);
     } catch (e) {
         errorMessage = (e as Error).message;
     }
