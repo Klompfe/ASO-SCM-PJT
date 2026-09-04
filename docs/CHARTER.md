@@ -1,5 +1,7 @@
 # SCM 백엔드 시스템 헌장 (Project Charter)
 
+> Status: 최종 검증 2026-09-04, PR-001~019 반영
+
 본 프로젝트 헌장은 **NestJS, TypeORM, TypeScript 기반 SCM(공급망 관리) 백엔드 시스템**의 사업적/기술적 비전, 목표 범위 및 핵심 품질 지표를 정의합니다.
 
 ---
@@ -13,8 +15,8 @@ SCM 백엔드 시스템은 원자재 수급, 자재명세서(BOM) 관리, 재고
 ## 2. 핵심 도메인 모델 (Core Domain Models)
 
 ### 2.1 품목 및 BOM (Item & Bill of Materials)
-- **품목 (Item)**: 완제품, 반제품, 원자재 등 모든 관리 품목의 마스터 데이터.
-- **BOM (자재명세서)**: 제품 생산에 필요한 하위 자재들의 소요량 관계 매핑 정보. 생산 및 재고 소요량 산출의 기초가 됨.
+- **품목 (Item)**: 완제품, 반제품, 원자재 등 모든 관리 품목의 마스터 데이터. `FINISHED_GOOD` 타입 Item은 `styleNo`로 소속 `MasterStyle`을 값으로만 참조함(관계 대신 값 참조 — 모듈 간 순환 의존 방지 목적).
+- **BOM (자재명세서)**: `Bom`(스타일 단위 헤더, `style`로 `MasterStyle`을 `@ManyToOne` 참조)과 `BomItem`(하위 원자재 라인, `material`로 `Item`을 `@ManyToOne` 참조 + `consumption`(단위 소요량) + `requiredQty`)의 1:N 구조. `src/boms/`의 `BomsModule`이 두 엔티티를 전담 소유하며, `mapping`/`items`/`work-orders` 모듈이 이를 import해 사용함. 같은 style에 Bom이 여러 개 생성될 수 있는 알려진 이슈가 있어, 재고 차감 시에는 `id DESC`로 가장 최근 Bom 하나만 사용함.
 
 ### 2.2 공급업체 및 조달 (Supplier & Procurement)
 - **공급업체 (Supplier)**: 원자재를 납품하는 외부 파트너 정보.
@@ -36,7 +38,8 @@ SCM 백엔드 시스템은 원자재 수급, 자재명세서(BOM) 관리, 재고
 1. **발주(PO) 상태 전이와 재고 연동**:
    - `PENDING` -> `RECEIVED` 상태 변경 시, 발주된 품목의 수량이 해당 품목의 재고(`Inventory.quantity`)에 실시간 누적되어야 함.
 2. **작업지시(WO) 완료와 BOM 기반 재고 연동**:
-   - `IN_PROGRESS` -> `COMPLETED` 상태 변경 시, 완제품의 BOM 구조를 확인하여 모든 하위 원자재(`childItemId`)의 재고를 소요량만큼 차감하고 완제품(`itemId`)의 재고를 지시 수량만큼 가산해야 함.
+   - `IN_PROGRESS` -> `COMPLETED` 상태 변경 시, 완제품 `Item.styleNo`로 `MasterStyle`을 찾고 그 style의 최신 `Bom`(`id DESC`)을 조회함. styleNo 미설정이거나 해당 style에 Bom이 없으면 재고 로직 없이 상태만 변경(warn 로그).
+   - Bom의 각 `BomItem`(`material` = 원자재 Item)에 대해 필요량 = `consumption * targetQuantity`를 계산하여 모든 하위 원자재의 재고를 차감하고 완제품(`item`)의 재고를 지시 수량만큼 가산해야 함.
    - 단 하나의 원자재라도 재고가 부족할 경우 전체 트랜잭션을 롤백하고 실패 처리해야 함.
 
 ---
