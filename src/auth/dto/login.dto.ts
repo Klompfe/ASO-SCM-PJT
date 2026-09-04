@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class LoginDto {
@@ -7,6 +7,7 @@ export class LoginDto {
     description: '사용자 이메일',
     required: false,
   })
+  @IsOptional()
   @IsString()
   email?: string;
 
@@ -15,6 +16,7 @@ export class LoginDto {
     description: '사용자 아이디 (username)',
     required: false,
   })
+  @IsOptional()
   @IsString()
   username?: string;
 
