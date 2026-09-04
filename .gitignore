@@ -41,3 +41,6 @@ Thumbs.db
 *.tsbuildinfo
 desktop.ini
 *.ini
+
+# Local design reference docs (not part of the repo)
+docs/design/
