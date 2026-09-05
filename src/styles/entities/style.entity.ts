@@ -16,7 +16,9 @@ export class Style {
   @Column()
   itemType: string;
 
-  @Column({ type: 'enum', enum: ProductionType })
+  // Shipment/PurchaseOrder와 동일한 패턴: SQLite가 'enum' 컬럼 타입을 지원하지 않아
+  // varchar + enum 메타데이터로 선언한다(Postgres에서도 동일하게 동작).
+  @Column({ type: 'varchar', enum: ProductionType })
   productionType: ProductionType;
 
   @Column({ type: 'date' })

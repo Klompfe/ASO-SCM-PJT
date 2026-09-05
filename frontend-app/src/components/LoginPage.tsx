@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { login, register } from '../api/auth.service';
 import { setAuthToken } from '../api/client';
+import { getErrorMessage } from '../utils/errorMessage';
 
 interface LoginProps {
   onLoginSuccess: () => void;
@@ -47,7 +48,7 @@ export const LoginPage: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       }
     } catch (error: any) {
       console.error('Login/Register error:', error);
-      const message = error.response?.data?.message || (isLoginMode ? '로그인 실패. 정보를 확인하세요.' : '회원가입 실패.');
+      const message = getErrorMessage(error, isLoginMode ? '로그인 실패. 정보를 확인하세요.' : '회원가입 실패.');
       toast.error(message);
     } finally {
       setLoading(false);

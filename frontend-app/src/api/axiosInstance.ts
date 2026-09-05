@@ -1,5 +1,6 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { getErrorMessage } from '../utils/errorMessage';
 
 // Flag to prevent repetitive toast alerts and duplicate redirect processes on concurrent 401s
 let isRedirecting = false;
@@ -75,7 +76,7 @@ axiosInstance.interceptors.response.use(
     
     // Default error handling: only toast if we are not in the middle of a 401 redirect
     if (!isRedirecting) {
-      const message = error.response?.data?.message || '알 수 없는 오류가 발생했습니다.';
+      const message = getErrorMessage(error, '알 수 없는 오류가 발생했습니다.');
       toast.error(message);
     }
     return Promise.reject(error);

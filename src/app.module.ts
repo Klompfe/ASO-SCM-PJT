@@ -22,6 +22,7 @@ import { ShipmentsModule } from './shipments/shipments.module';
 import { MappingModule } from './mapping/mapping.module';
 import { MasterModule } from './master/master.module';
 import { TransactionModule } from './transaction/transaction.module';
+import { StylesModule } from './styles/styles.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { TransactionModule } from './transaction/transaction.module';
     MappingModule,
     MasterModule,
     TransactionModule,
+    StylesModule,
   ],
   providers: [
     {
