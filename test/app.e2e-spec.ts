@@ -103,6 +103,7 @@ describe('SCM API (E2E Integration Test)', () => {
           supplierId: supplierId,
           itemId: rawItemId,
           quantity: 100,
+          unitPrice: 5.5,
         })
         .expect(201);
       

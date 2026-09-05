@@ -32,6 +32,11 @@ export class PurchaseOrder {
   @Column({ type: 'int' })
   quantity: number;
 
+  // 기존(마이그레이션 이전) 행에는 값이 없을 수 있어 컬럼 자체는 nullable로 두되,
+  // 신규 생성은 CreatePurchaseOrderDto에서 필수값으로 강제한다.
+  @Column({ type: 'decimal', nullable: true })
+  unitPrice?: number;
+
   @Column({
     type: 'varchar',
     enum: PurchaseOrderStatus,

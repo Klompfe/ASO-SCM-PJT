@@ -11,21 +11,31 @@ import { getSuppliers, type Supplier } from '../api/suppliers.service';
 import { getItems, type Item } from '../api/items.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
-const emptyForm: CreatePurchaseOrder = { supplierId: 0, itemId: 0, quantity: 1 };
+const emptyForm: CreatePurchaseOrder = { supplierId: 0, itemId: 0, quantity: 1, unitPrice: 0 };
 
-export const PurchaseOrdersManager: React.FC = () => {
+interface PurchaseOrdersManagerProps {
+  prefillItemId?: number | null;
+  onPrefillConsumed?: () => void;
+}
+
+export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ prefillItemId, onPrefillConsumed }) => {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newPo, setNewPo] = useState<CreatePurchaseOrder>(emptyForm);
+  const [filterSupplierId, setFilterSupplierId] = useState(0);
+  const [filterItemId, setFilterItemId] = useState(0);
 
   const loadPurchaseOrders = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await getPurchaseOrders();
+      const res = await getPurchaseOrders({
+        supplierId: filterSupplierId || undefined,
+        itemId: filterItemId || undefined,
+      });
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setPurchaseOrders(data);
     } catch (err: any) {
@@ -34,7 +44,7 @@ export const PurchaseOrdersManager: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterSupplierId, filterItemId]);
 
   const loadOptions = useCallback(async () => {
     try {
@@ -53,14 +63,29 @@ export const PurchaseOrdersManager: React.FC = () => {
 
   useEffect(() => {
     loadPurchaseOrders();
+  }, [loadPurchaseOrders]);
+
+  useEffect(() => {
     loadOptions();
-  }, [loadPurchaseOrders, loadOptions]);
+  }, [loadOptions]);
+
+  // Items(자재명세) 화면에서 "발주하기"로 넘어온 경우, 해당 품목을 폼에 미리 선택해 둔다.
+  useEffect(() => {
+    if (prefillItemId) {
+      setNewPo((prev) => ({ ...prev, itemId: prefillItemId }));
+      onPrefillConsumed?.();
+    }
+  }, [prefillItemId, onPrefillConsumed]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!newPo.supplierId || !newPo.itemId) {
       setError('공급업체와 품목을 선택해 주세요.');
+      return;
+    }
+    if (!newPo.unitPrice || newPo.unitPrice <= 0) {
+      setError('품목 단가를 입력해 주세요.');
       return;
     }
     try {
@@ -133,15 +158,42 @@ export const PurchaseOrdersManager: React.FC = () => {
           <label className="text-sm text-gray-600 mb-1">수량</label>
           <input type="number" min={1} className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.quantity} onChange={(e) => setNewPo({ ...newPo, quantity: Number(e.target.value) })} />
         </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">단가</label>
+          <input type="number" min={0} step="0.01" className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.unitPrice} onChange={(e) => setNewPo({ ...newPo, unitPrice: Number(e.target.value) })} />
+        </div>
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700" disabled={loading}>발주 생성</button>
       </form>
+
+      <div className="flex flex-wrap gap-4 items-end bg-gray-50 p-4 rounded-lg">
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">업체별 조회</label>
+          <select className="border border-gray-300 rounded px-3 py-2 w-56" value={filterSupplierId} onChange={(e) => setFilterSupplierId(Number(e.target.value))}>
+            <option value={0}>전체 업체</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">품목별 조회</label>
+          <select className="border border-gray-300 rounded px-3 py-2 w-56" value={filterItemId} onChange={(e) => setFilterItemId(Number(e.target.value))}>
+            <option value={0}>전체 품목</option>
+            {items.map((i) => (
+              <option key={i.id} value={i.id}>{i.name} ({i.code})</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
         <table className="w-full">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="px-4 py-2 text-left">품목</th>
-              <th className="px-4 py-2 text-left">수량</th>
+              <th className="px-4 py-2 text-right">수량</th>
+              <th className="px-4 py-2 text-right">단가</th>
+              <th className="px-4 py-2 text-right">총액</th>
               <th className="px-4 py-2 text-left">공급업체</th>
               <th className="px-4 py-2 text-left">상태</th>
               <th className="px-4 py-2 text-left">Action</th>
@@ -151,7 +203,9 @@ export const PurchaseOrdersManager: React.FC = () => {
             {purchaseOrders.map((po) => (
               <tr key={po.id} className="hover:bg-gray-50">
                 <td className="px-4 py-2">{po.item?.name ?? `#${po.itemId}`}</td>
-                <td className="px-4 py-2">{po.quantity}</td>
+                <td className="px-4 py-2 text-right">{po.quantity}</td>
+                <td className="px-4 py-2 text-right">{po.unitPrice ?? '-'}</td>
+                <td className="px-4 py-2 text-right">{po.unitPrice != null ? (po.unitPrice * po.quantity).toLocaleString() : '-'}</td>
                 <td className="px-4 py-2">{po.supplier?.name ?? '-'}</td>
                 <td className="px-4 py-2">{statusBadge(po.status)}</td>
                 <td className="px-4 py-2 space-x-2 whitespace-nowrap">

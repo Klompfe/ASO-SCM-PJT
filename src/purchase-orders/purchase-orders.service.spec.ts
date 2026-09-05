@@ -78,6 +78,7 @@ describe('PurchaseOrdersService', () => {
         supplierId: 1,
         itemId: 1,
         quantity: 100,
+        unitPrice: 12.5,
       };
 
       const mockSupplier = { id: 1, name: '테스트 공급사' };

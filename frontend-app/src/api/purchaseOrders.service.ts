@@ -5,6 +5,7 @@ export interface PurchaseOrder {
   itemId: number;
   item?: { id: number; code: string; name: string };
   quantity: number;
+  unitPrice?: number;
   status: 'PENDING' | 'RECEIVED' | 'CANCELLED';
   supplierId?: number;
   supplier?: { id: number; code: string; name: string };
@@ -15,10 +16,18 @@ export interface CreatePurchaseOrder {
   supplierId: number;
   itemId: number;
   quantity: number;
+  unitPrice: number;
   notes?: string;
 }
 
-export const getPurchaseOrders = (): Promise<any> => apiClient.get('/purchase-orders');
+export interface GetPurchaseOrdersFilter {
+  supplierId?: number;
+  itemId?: number;
+  status?: 'PENDING' | 'RECEIVED' | 'CANCELLED';
+}
+
+export const getPurchaseOrders = (filter?: GetPurchaseOrdersFilter): Promise<any> =>
+  apiClient.get('/purchase-orders', { params: filter });
 export const createPurchaseOrder = (data: CreatePurchaseOrder): Promise<any> =>
   apiClient.post('/purchase-orders', data);
 export const updatePurchaseOrderStatus = (

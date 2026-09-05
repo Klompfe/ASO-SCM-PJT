@@ -8,7 +8,11 @@ import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
 import { getErrorMessage } from '../utils/errorMessage';
 
-export const ItemsManager: React.FC = () => {
+interface ItemsManagerProps {
+  onOrderItem?: (itemId: number) => void;
+}
+
+export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   // 스타일별 자재명세(BOM) 조회
   const [searchStyleNo, setSearchStyleNo] = useState('');
   const [searchRddFrom, setSearchRddFrom] = useState('');
@@ -243,6 +247,7 @@ export const ItemsManager: React.FC = () => {
                     <th className="px-4 py-2 text-left">공급업체</th>
                     <th className="px-4 py-2 text-right">단가</th>
                     <th className="px-4 py-2 text-left">비고</th>
+                    <th className="px-4 py-2 text-left">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -258,6 +263,16 @@ export const ItemsManager: React.FC = () => {
                       <td className="px-4 py-2">{it.supplier}</td>
                       <td className="px-4 py-2 text-right">{it.unitPrice}</td>
                       <td className="px-4 py-2">{it.remarks}</td>
+                      <td className="px-4 py-2">
+                        {onOrderItem && it.material?.id && (
+                          <button
+                            onClick={() => onOrderItem(it.material.id)}
+                            className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-blue-700 whitespace-nowrap"
+                          >
+                            발주하기
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
