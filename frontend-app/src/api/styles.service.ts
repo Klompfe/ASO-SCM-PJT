@@ -11,6 +11,7 @@ export interface StyleOverview {
   cmtPrice: number | null;
   fobPrice: number | null;
   status: string;
+  styleName: string | null;
 }
 
 export interface MasterStyle {
