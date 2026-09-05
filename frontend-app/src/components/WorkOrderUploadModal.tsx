@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { uploadWorkOrderImage } from '../api/workOrders.service';
 
@@ -13,6 +13,28 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
   const [aiResult, setAiResult] = useState<any>(null);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+
+  // 파일을 브라우저 창에 드롭하면 기본 동작은 그 파일을 새 페이지로 여는 것이라
+  // (드롭 영역 밖에서도) preventDefault로 항상 막아둔다 — 그렇지 않으면 드롭 영역을
+  // 살짝 벗어나 드롭했을 때 파일이 새 탭에서 열려버린다.
+  useEffect(() => {
+    if (!isOpen) return;
+    const preventDefault = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', preventDefault);
+    window.addEventListener('drop', preventDefault);
+    return () => {
+      window.removeEventListener('dragover', preventDefault);
+      window.removeEventListener('drop', preventDefault);
+    };
+  }, [isOpen]);
+
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) setFile(dropped);
+  };
 
   const handleUpload = async () => {
     if (!file) return;
@@ -44,8 +66,25 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
         
         {step === 1 && (
           <div className="space-y-4">
-            <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            <button onClick={handleUpload} className="bg-blue-600 text-white px-4 py-2 rounded" disabled={!file || loading}>AI 분석 시작</button>
+            <label
+              onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+              onDragLeave={() => setDragActive(false)}
+              onDrop={handleDrop}
+              className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg p-8 cursor-pointer text-center ${dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50'}`}
+            >
+              <input
+                type="file"
+                accept="application/pdf,image/*"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+              <span className="text-gray-600">
+                {file ? file.name : '여기로 파일을 드래그하거나 클릭하여 선택하세요 (PDF, 이미지)'}
+              </span>
+            </label>
+            <button onClick={handleUpload} className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50" disabled={!file || loading}>
+              {loading ? '분석 중...' : 'AI 분석 시작'}
+            </button>
           </div>
         )}
 
