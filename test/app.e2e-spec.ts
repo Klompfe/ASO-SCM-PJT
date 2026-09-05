@@ -23,6 +23,7 @@ describe('SCM API (E2E Integration Test)', () => {
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
+        forbidNonWhitelisted: true,
         transform: true,
       }),
     );
@@ -38,7 +39,6 @@ describe('SCM API (E2E Integration Test)', () => {
   // 1. 인증 및 마스터 데이터 준비
   it('Setup: Register & Login', async () => {
     const userDto = {
-      username: 'e2euser',
       email: 'e2e@scm.com',
       password: 'password123!',
       name: 'E2E Tester',
@@ -62,9 +62,8 @@ describe('SCM API (E2E Integration Test)', () => {
       .send({
         code: `SUP_E2E_${Date.now()}`,
         name: 'E2E 테스트 공급사',
-        contactPerson: '테스터',
         email: 'e2e@supplier.com',
-        phone: '010-0000-0000',
+        contactPhone: '010-0000-0000',
       })
       .expect(201);
     supplierId = supRes.body.data.id;
@@ -138,12 +137,8 @@ describe('SCM API (E2E Integration Test)', () => {
         .post('/work-orders')
         .set('Authorization', `Bearer ${jwtToken}`)
         .send({
-          orderNumber: `WO_E2E_${Date.now()}`,
           itemId: finishedItemId,
-          targetQuantity: 20, // quantity -> targetQuantity 로 필드명 보정
-          startDate: new Date().toISOString().split('T')[0],
-          dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-          status: 'PLANNED',
+          targetQuantity: 20,
         })
         .expect(201);
 
