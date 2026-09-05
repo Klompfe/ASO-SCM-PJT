@@ -1,12 +1,16 @@
-import { Controller, Get, Post, Body, Patch } from '@nestjs/common';
+import { Controller, Get, Post, Body } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { StylesService } from './styles.service';
+import { CreateMasterStyleDto } from './dto/create-master-style.dto';
 
-@Controller('styles')
+@ApiTags('마스터 스타일')
+@ApiBearerAuth()
+@Controller('master-styles')
 export class StylesController {
   constructor(private readonly stylesService: StylesService) {}
 
   @Post()
-  create(@Body() dto: any) {
+  create(@Body() dto: CreateMasterStyleDto) {
     return this.stylesService.create(dto);
   }
 
