@@ -1,9 +1,29 @@
 import { StandardMaterial } from '../interfaces/standard-material.interface';
 import { Logger, BadRequestException } from '@nestjs/common';
-import { CellMergeRange } from './excel-parser.util';
+import { CellMergeRange, ParsedWorkbookSheet } from './excel-parser.util';
+
+export interface ParsedSheetResult {
+  sheetName: string;
+  styleOverview?: { styleNo: string; totalQty: number; factory: string; buyer: string; shipDate: string };
+  bomItems?: any[];
+  parseError?: string;
+}
 
 export class SectionParser {
   private static readonly logger = new Logger('SectionParser');
+
+  // 시트 배열을 순회하며 시트별로 독립적으로 파싱한다. 한 시트가 예외를 던져도 전체가
+  // 죽지 않고 그 시트만 parseError로 표시하고 나머지는 계속 처리한다(부분 실패 허용).
+  static parseWorkbook(sheets: ParsedWorkbookSheet[]): ParsedSheetResult[] {
+    return sheets.map((sheet) => {
+      try {
+        const { styleOverview, bomItems } = this.parse(sheet.rows, sheet.merges);
+        return { sheetName: sheet.sheetName, styleOverview, bomItems };
+      } catch (e) {
+        return { sheetName: sheet.sheetName, parseError: (e as Error).message };
+      }
+    });
+  }
 
   static parse(rawData: string[][], merges: CellMergeRange[] = []) {
     try {

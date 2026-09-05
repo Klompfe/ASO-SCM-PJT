@@ -8,7 +8,7 @@ import { StyleValidatorService } from './services/style-validator.service';
 import { StagingParseRaw } from './entities/staging-parse-raw.entity';
 import { ApiTags, ApiBearerAuth, ApiBody, ApiConsumes } from '@nestjs/swagger';
 import { SectionParser } from './utils/section-parser.util';
-import { ExcelParser, CellMergeRange } from './utils/excel-parser.util';
+import { ExcelParser, ParsedWorkbookSheet } from './utils/excel-parser.util';
 import * as iconv from 'iconv-lite';
 
 @ApiTags('데이터 매핑 API')
@@ -36,49 +36,42 @@ export class MappingController {
   async parseExcel(@UploadedFile() file: Express.Multer.File) {
     console.log('[API REQUEST] POST /mapping/parse');
     if (!file) throw new Error('No file');
-    
-    let rows: string[][];
-    let merges: CellMergeRange[] = [];
+
     const isExcel = file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls');
 
-    let parseResult: any;
-    let errorMessage: string | null = null;
-
-    try {
-        if (isExcel) {
-            const parsed = ExcelParser.parse(file.buffer);
-            rows = parsed.rows;
-            merges = parsed.merges;
-        } else {
-            let content = file.buffer.toString('utf-8');
-            if (content.includes('\uFFFD')) content = iconv.decode(file.buffer, 'euc-kr');
-            rows = content.split(/\r?\n/).map(line => line.split(','));
-        }
-        parseResult = SectionParser.parse(rows, merges);
-    } catch (e) {
-        errorMessage = (e as Error).message;
+    let sheets: ParsedWorkbookSheet[];
+    if (isExcel) {
+      sheets = ExcelParser.parseWorkbook(file.buffer).sheets;
+    } else {
+      let content = file.buffer.toString('utf-8');
+      if (content.includes('�')) content = iconv.decode(file.buffer, 'euc-kr');
+      const rows = content.split(/\r?\n/).map(line => line.split(','));
+      sheets = [{ sheetName: file.originalname, rows, merges: [] }];
     }
 
-    // Save to Staging
-    await this.stagingRepo.save({
-        fileName: file.originalname,
-        raw_header_json: parseResult ? JSON.stringify(parseResult.styleOverview) : null,
-        raw_bom_json: parseResult ? JSON.stringify(parseResult.bomItems) : null,
-        error_message: errorMessage
-    });
+    const parsedSheets = SectionParser.parseWorkbook(sheets);
 
-    if (errorMessage) throw new Error(errorMessage);
-    
-    const { styleOverview, bomItems } = parseResult;
-    const styleNoFromDoc = styleOverview.styleNo;
-    const validation = this.styleValidator.validate(file.originalname, styleNoFromDoc);
-    
-    return {
-      success: true,
-      styleNo: validation.docStyle || 'N/A',
-      matchStatus: validation.matchStatus,
-      overview: styleOverview,
-      bomItems: bomItems.map((item: any, idx: number) => ({ id: idx + 1, ...item }))
-    };
+    // 시트별로 Staging에 원본 파싱 결과(성공/실패 모두)를 남긴다.
+    await Promise.all(
+      parsedSheets.map((sheet) =>
+        this.stagingRepo.save({
+          fileName: `${file.originalname} :: ${sheet.sheetName}`,
+          raw_header_json: sheet.styleOverview ? JSON.stringify(sheet.styleOverview) : null,
+          raw_bom_json: sheet.bomItems ? JSON.stringify(sheet.bomItems) : null,
+          error_message: sheet.parseError || null,
+        }),
+      ),
+    );
+
+    // matchStatus(파일명 vs STYLE NO)는 시트 하나당 파일 하나를 전제로 한 검증이라
+    // 다중 시트 응답에서는 더 이상 의미가 없다 — 검증 방식은 별도로 다시 논의한다.
+    return parsedSheets.map((sheet) => ({
+      sheetName: sheet.sheetName,
+      styleNo: sheet.styleOverview?.styleNo,
+      matchStatus: null,
+      overview: sheet.styleOverview,
+      bomItems: sheet.bomItems?.map((item: any, idx: number) => ({ id: idx + 1, ...item })),
+      parseError: sheet.parseError,
+    }));
   }
 }
