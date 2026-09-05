@@ -76,3 +76,22 @@ export const commitWorkOrderAnalysis = (result: AiWorkOrderResult): Promise<any>
   apiClient.post('/work-orders/commit-analysis', result);
 export const getWorkOrderSpec = (styleNo: string): Promise<any> =>
   apiClient.get('/work-orders/spec', { params: { styleNo } });
+
+export interface AiUsageLog {
+  id: number;
+  pageCount: number;
+  promptTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
+  chargedAmountKrw: number;
+  createdAt: string;
+}
+
+export interface AiUsageSummary {
+  totalCalls: number;
+  totalChargedKrw: number;
+  totalCostUsd: number;
+}
+
+export const getAiUsage = (): Promise<any> => apiClient.get('/work-orders/ai-usage');
+export const getAiUsageSummary = (): Promise<any> => apiClient.get('/work-orders/ai-usage/summary');

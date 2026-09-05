@@ -12,6 +12,7 @@ import { Inventory } from '../inventories/entities/inventory.entity';
 import { MappingCommitService } from '../mapping/services/mapping-commit.service';
 import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
 import { WorkOrderSpecsService } from './work-order-specs.service';
+import { AiUsageLogService } from './ai-usage-log.service';
 
 @Injectable()
 export class WorkOrdersService {
@@ -24,10 +25,26 @@ export class WorkOrdersService {
     private readonly visionService: VisionService,
     private readonly mappingCommitService: MappingCommitService,
     private readonly workOrderSpecsService: WorkOrderSpecsService,
+    private readonly aiUsageLogService: AiUsageLogService,
   ) {}
 
-  async analyzeWorkOrderImage(file: Express.Multer.File) {
-    return await this.visionService.analyzeWorkOrder(file);
+  async analyzeWorkOrderImage(file: Express.Multer.File, userId: number) {
+    const { results, usage } = await this.visionService.analyzeWorkOrder(file);
+    // 목업 응답(usage.pageCount === 0)은 실제 API 비용이 없으므로 과금 로그를 남기지 않는다.
+    let chargedAmountKrw = 0;
+    if (usage.pageCount > 0) {
+      const log = await this.aiUsageLogService.log(userId, usage.pageCount, usage.promptTokens, usage.outputTokens);
+      chargedAmountKrw = log.chargedAmountKrw;
+    }
+    return { results, chargedAmountKrw };
+  }
+
+  async getAiUsageForUser(userId: number) {
+    return this.aiUsageLogService.findByUser(userId);
+  }
+
+  async getAiUsageSummaryForUser(userId: number) {
+    return this.aiUsageLogService.getSummaryByUser(userId);
   }
 
   // AI 분석 결과(오더개요+자재명세+작업명세) 하나를 실제로 저장한다.
