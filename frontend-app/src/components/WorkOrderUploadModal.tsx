@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { uploadWorkOrderImage, commitWorkOrderAnalysis, type AiWorkOrderResult } from '../api/workOrders.service';
+import { uploadWorkOrderImage, commitWorkOrderAnalysis, getAiUsageSummary, type AiWorkOrderResult, type AiUsageSummary } from '../api/workOrders.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
 interface Props {
@@ -17,6 +17,15 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
   const [savedIndexes, setSavedIndexes] = useState<Set<number>>(new Set());
   const [dragActive, setDragActive] = useState(false);
+  const [lastChargeKrw, setLastChargeKrw] = useState<number | null>(null);
+  const [usageSummary, setUsageSummary] = useState<AiUsageSummary | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    getAiUsageSummary()
+      .then((res) => setUsageSummary(res))
+      .catch(() => setUsageSummary(null));
+  }, [isOpen]);
 
   // 파일을 브라우저 창에 드롭하면 기본 동작은 그 파일을 새 페이지로 여는 것이라
   // (드롭 영역 밖에서도) preventDefault로 항상 막아둔다 — 그렇지 않으면 드롭 영역을
@@ -44,10 +53,16 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     setLoading(true);
     try {
       const res = await uploadWorkOrderImage(file);
-      const data: AiWorkOrderResult[] = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
+      const data: AiWorkOrderResult[] = Array.isArray(res?.results) ? res.results : [];
+      const charge: number = typeof res?.chargedAmountKrw === 'number' ? res.chargedAmountKrw : 0;
       setResults(data);
+      setLastChargeKrw(charge);
       setSavedIndexes(new Set());
       setStep(2);
+      if (charge > 0) {
+        toast.success(`AI 분석 완료 — ${charge.toLocaleString()}원 과금되었습니다.`);
+        getAiUsageSummary().then((r) => setUsageSummary(r)).catch(() => {});
+      }
     } catch (e) {
       toast.error(getErrorMessage(e, 'AI 분석 실패'));
     } finally {
@@ -75,6 +90,7 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     setResults([]);
     setStep(1);
     setSavedIndexes(new Set());
+    setLastChargeKrw(null);
     onClose();
   };
 
@@ -84,7 +100,14 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
         <div className="p-6 overflow-y-auto flex-1 min-h-0">
-          <h3 className="text-xl font-bold mb-4">작업지시서 이미지 업로드</h3>
+          <div className="flex justify-between items-baseline mb-4">
+            <h3 className="text-xl font-bold">작업지시서 이미지 업로드</h3>
+            {usageSummary && (
+              <span className="text-xs text-gray-400">
+                누적 AI 분석 {usageSummary.totalCalls}건 · 누적 과금 {usageSummary.totalChargedKrw.toLocaleString()}원
+              </span>
+            )}
+          </div>
 
           {step === 1 && (
             <div className="space-y-4">
@@ -112,7 +135,9 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
 
           {step === 2 && (
             <div className="space-y-6">
-              <p className="text-sm text-gray-500">{results.length}건 분석됨 — 각 항목을 확인 후 개별 저장하세요.</p>
+              <p className="text-sm text-gray-500">
+                {results.length}건 분석됨{lastChargeKrw != null && lastChargeKrw > 0 ? ` — 이번 분석 요금 ${lastChargeKrw.toLocaleString()}원` : ''} — 각 항목을 확인 후 개별 저장하세요.
+              </p>
               {results.map((result, index) => (
                 <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-3">
                   <div className="flex justify-between items-center">

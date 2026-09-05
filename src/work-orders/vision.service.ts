@@ -3,6 +3,17 @@ import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
 
+export interface AiAnalysisUsage {
+  pageCount: number;
+  promptTokens: number;
+  outputTokens: number; // candidatesTokenCount + thoughtsTokenCount
+}
+
+export interface AiAnalysisOutcome {
+  results: AiWorkOrderResultDto[];
+  usage: AiAnalysisUsage;
+}
+
 const RESPONSE_SCHEMA = {
   type: SchemaType.ARRAY,
   items: {
@@ -88,9 +99,10 @@ export class VisionService {
     }
   }
 
-  async analyzeWorkOrder(file: Express.Multer.File): Promise<AiWorkOrderResultDto[]> {
+  async analyzeWorkOrder(file: Express.Multer.File): Promise<AiAnalysisOutcome> {
     if (!this.genAI) {
-      return this.mockResult();
+      // 목업 응답은 실제 API 비용이 없으므로 pageCount=0으로 반환해 과금 로그를 남기지 않는다.
+      return { results: this.mockResult(), usage: { pageCount: 0, promptTokens: 0, outputTokens: 0 } };
     }
 
     const model = this.genAI.getGenerativeModel({
@@ -103,7 +115,7 @@ export class VisionService {
     });
 
     try {
-      const result = await model.generateContent([
+      const result = await this.generateWithRetry(model, [
         { inlineData: { data: file.buffer.toString('base64'), mimeType: file.mimetype } },
         { text: PROMPT },
       ]);
@@ -112,10 +124,47 @@ export class VisionService {
         this.logger.warn(`Gemini 응답이 정상 종료되지 않음(finishReason=${finishReason}) - 응답이 잘렸을 수 있습니다.`);
       }
       const text = result.response.text();
-      return JSON.parse(text) as AiWorkOrderResultDto[];
+      const parsed = JSON.parse(text) as AiWorkOrderResultDto[];
+
+      // 페이지 수 = 결과 배열 길이(스타일 1개 = 페이지 1개)로 근사한다 — 실측 검증 완료
+      // (6페이지 파일→6건, 16페이지 파일→16건 정확히 일치, PR-055 참고).
+      // outputTokens = totalTokenCount - promptTokenCount로 계산한다: SDK 타입 정의에
+      // thoughtsTokenCount가 아직 없지만(실제 API 응답에는 존재) 이 뺄셈이 candidates+
+      // thoughts를 정확히 포함한다는 걸 실측으로 확인했고, Google이 과금 대상 출력 항목을
+      // 추가해도 계속 정확하다.
+      const usageMetadata = result.response.usageMetadata;
+      const promptTokens = usageMetadata?.promptTokenCount ?? 0;
+      const totalTokens = usageMetadata?.totalTokenCount ?? 0;
+      const usage: AiAnalysisUsage = {
+        pageCount: parsed.length,
+        promptTokens,
+        outputTokens: Math.max(0, totalTokens - promptTokens),
+      };
+      return { results: parsed, usage };
     } catch (err) {
       this.logger.error(`Gemini 작업지시서 분석 실패: ${(err as Error).message}`);
       throw new InternalServerErrorException('작업지시서 AI 분석에 실패했습니다.');
+    }
+  }
+
+  // Gemini가 일시적으로 과부하(503)이거나 rate limit(429)에 걸리는 경우가 실제로 발생한다
+  // (PR-055 실측 확인) — 과금되는 유료 기능이 일시적 오류로 그냥 실패하지 않도록 짧게
+  // 재시도한다. 그 외 에러(404 모델명 오류, 400 잘못된 요청 등)는 재시도해도 소용없으므로
+  // 즉시 던진다.
+  private async generateWithRetry(model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>, parts: any[]) {
+    const delaysMs = [2000, 5000];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await model.generateContent(parts);
+      } catch (err) {
+        const message = (err as Error).message || '';
+        const isTransient = /\[(503|429)/.test(message);
+        if (!isTransient || attempt >= delaysMs.length) {
+          throw err;
+        }
+        this.logger.warn(`Gemini 일시적 오류(${attempt + 1}번째 재시도 대기 중): ${message}`);
+        await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+      }
     }
   }
 

@@ -22,6 +22,7 @@ import { WorkOrder } from './entities/work-order.entity';
 import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
+import { GetUser } from '../auth/decorators/get-user.decorator';
 
 @ApiTags('Work Orders (작업 지시 관리)')
 @ApiBearerAuth()
@@ -48,8 +49,21 @@ export class WorkOrdersController {
       }),
     )
     file: Express.Multer.File,
+    @GetUser() user: any,
   ) {
-    return await this.woService.analyzeWorkOrderImage(file);
+    return await this.woService.analyzeWorkOrderImage(file, user.userId);
+  }
+
+  @Get('ai-usage')
+  @ApiOperation({ summary: '내 작업지시서 AI 분석 사용량/과금 이력 조회' })
+  async getAiUsage(@GetUser() user: any) {
+    return this.woService.getAiUsageForUser(user.userId);
+  }
+
+  @Get('ai-usage/summary')
+  @ApiOperation({ summary: '내 작업지시서 AI 분석 누적 사용량/과금 요약' })
+  async getAiUsageSummary(@GetUser() user: any) {
+    return this.woService.getAiUsageSummaryForUser(user.userId);
   }
 
   @Post('commit-analysis')
