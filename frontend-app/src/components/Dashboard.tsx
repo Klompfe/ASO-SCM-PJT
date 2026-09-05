@@ -31,20 +31,21 @@ export const Dashboard: React.FC = () => {
       try {
         const [items, wo, shipments] = await Promise.all([
           getItems({}).catch(() => []),
-          getWorkOrders({}).catch(() => []),
+          getWorkOrders({ limit: 100 }).catch(() => []),
           getShipments().catch(() => [])
         ]);
 
+        // GET /items, GET /work-orders는 배열이 아니라 페이지네이션 객체({items, meta})를
+        // 반환한다(Shipments/Suppliers처럼 배열을 바로 주는 API와 다름) — PR-038에서 발견.
+        const itemsList = Array.isArray(items) ? items : (items?.items ?? []);
+        const itemsTotal = Array.isArray(items) ? items.length : (items?.meta?.total ?? itemsList.length);
+        const woList = Array.isArray(wo) ? wo : (wo?.items ?? []);
+        const shipmentsList = Array.isArray(shipments) ? shipments : (shipments?.data ?? []);
+
         setStats({
-          items: Array.isArray(items) 
-            ? items.length 
-            : (Array.isArray(items?.data) ? items.data.length : 0),
-          workOrders: Array.isArray(wo) 
-            ? wo.filter((item: any) => item?.status !== 'COMPLETED').length 
-            : (Array.isArray(wo?.data) ? wo.data.filter((item: any) => item?.status !== 'COMPLETED').length : 0),
-          shipments: Array.isArray(shipments) 
-            ? shipments.length 
-            : (Array.isArray(shipments?.data) ? shipments.data.length : 0),
+          items: itemsTotal,
+          workOrders: woList.filter((item: any) => item?.status !== 'COMPLETED').length,
+          shipments: shipmentsList.length,
         });
       } catch (error) {
         handleAuthError(error);

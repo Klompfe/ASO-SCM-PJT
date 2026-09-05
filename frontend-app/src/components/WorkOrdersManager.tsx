@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { getWorkOrders, updateWorkOrderStatus, type GetWorkOrdersFilter, type WorkOrder } from '../api/workOrders.service';
 import { WorkOrderUploadModal } from './WorkOrderUploadModal';
 import { useNavigate } from 'react-router-dom'; // Assumed react-router usage
+import { getErrorMessage } from '../utils/errorMessage';
 
 export const WorkOrdersManager: React.FC = () => {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
@@ -18,7 +19,7 @@ export const WorkOrdersManager: React.FC = () => {
       toast.error('세션이 만료되었습니다. 다시 로그인해주세요.', { id: 'auth-error' });
       navigate('/login');
     } else {
-      toast.error(error.response?.data?.message || '오류가 발생했습니다.');
+      toast.error(getErrorMessage(error, '오류가 발생했습니다.'));
     }
   };
 
@@ -36,7 +37,8 @@ export const WorkOrdersManager: React.FC = () => {
       getAuthHeader();
       
       const res = await getWorkOrders(filter);
-      const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
+      // GET /work-orders는 배열이 아니라 페이지네이션 객체({items, meta})를 반환한다.
+      const data = Array.isArray(res) ? res : (res && Array.isArray(res.items) ? res.items : []);
       setWorkOrders(data);
     } catch (error) {
       handleAuthError(error);

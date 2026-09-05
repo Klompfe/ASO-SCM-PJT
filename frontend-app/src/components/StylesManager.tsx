@@ -1,22 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { getStyles, createStyle, type Style } from '../api/styles.service';
+import { getErrorMessage } from '../utils/errorMessage';
 
 export const StylesManager: React.FC = () => {
   const [productionType, setProductionType] = useState<'FOB' | 'CMT'>('FOB');
   const [formData, setFormData] = useState<any>({
     styleNo: '', brand: '', itemType: '', targetRdd: '', totalQty: 0, cmtPrice: 0, fobPrice: 0
   });
+  const [styles, setStyles] = useState<Style[]>([]);
+  const [selectedStyle, setSelectedStyle] = useState<any>(null);
+
+  const loadStyles = useCallback(async () => {
+    try {
+      const res = await getStyles();
+      const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
+      setStyles(data);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '스타일 목록을 불러오는 데 실패했습니다.'));
+      setStyles([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStyles();
+  }, [loadStyles]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch('/styles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, productionType })
-      });
+      await createStyle({ ...formData, productionType });
       toast.success('스타일이 등록되었습니다.');
-    } catch (e) { toast.error('등록 실패'); }
+      loadStyles();
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '스타일 등록에 실패했습니다.'));
+    }
   };
 
   const calculateDDay = (rdd: string) => {
@@ -24,12 +42,11 @@ export const StylesManager: React.FC = () => {
     return Math.ceil(diff / (1000 * 3600 * 24));
   };
 
-  const [selectedStyle, setSelectedStyle] = useState<any>(null);
-  const styles: any[] = []; // Placeholder
-
   return (
     <div className="p-6">
       <h2 className="text-2xl font-bold mb-4">Styles Management</h2>
+      {/* 참고(PR-038): GET /styles는 라우트 충돌로 항상 빈 목록을 반환한다(styles.service.ts 주석 참고).
+          등록(POST)은 정상 동작하지만 아래 목록에는 반영되지 않는다 — 별도 백엔드 라우트 정리가 필요하다. */}
       <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow mb-6">
         <div className="grid grid-cols-3 gap-4 mb-4">
           <input className="border p-2" placeholder="Style No" onChange={e => setFormData({...formData, styleNo: e.target.value})} />
@@ -44,7 +61,7 @@ export const StylesManager: React.FC = () => {
         {productionType === 'FOB' && <input className="border p-2 mb-4 w-full" placeholder="FOB Price" type="number" onChange={e => setFormData({...formData, fobPrice: Number(e.target.value)})} />}
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">스타일 등록</button>
       </form>
-      
+
       <table className="w-full border-collapse border">
         <thead><tr className="bg-gray-100"><th>Style</th><th>Type</th><th>RDD</th><th>D-Day</th></tr></thead>
         <tbody>

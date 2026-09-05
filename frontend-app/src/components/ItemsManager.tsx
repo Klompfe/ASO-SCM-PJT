@@ -4,6 +4,7 @@ import { getItems, createItem, type GetItemsFilter, type CreateItem, type Item }
 import { parseMappingFile, checkStyleExists, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
+import { getErrorMessage } from '../utils/errorMessage';
 
 export const ItemsManager: React.FC = () => {
   const [items, setItems] = useState<Item[]>([]);
@@ -21,10 +22,11 @@ export const ItemsManager: React.FC = () => {
     setLoading(true);
     try {
       const res = await getItems(filter);
-      const data = Array.isArray(res.data) ? res.data : (res && Array.isArray(res) ? res : []);
+      // GET /items는 배열이 아니라 페이지네이션 객체({items, meta})를 반환한다.
+      const data = Array.isArray(res) ? res : (res && Array.isArray(res.items) ? res.items : []);
       setItems(data);
     } catch (error) {
-      toast.error('아이템 목록을 불러오는 데 실패했습니다.');
+      toast.error(getErrorMessage(error, '아이템 목록을 불러오는 데 실패했습니다.'));
       setItems([]);
     } finally {
       setLoading(false);
@@ -77,7 +79,7 @@ export const ItemsManager: React.FC = () => {
       setExistsMap(Object.fromEntries(results));
     } catch (err: any) {
       console.error(err);
-      setError(err.response?.data?.message || '파일 분석에 실패했습니다.');
+      setError(getErrorMessage(err, '파일 분석에 실패했습니다.'));
     } finally {
       setLoading(false);
     }
