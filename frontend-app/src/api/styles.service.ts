@@ -31,5 +31,12 @@ export interface CreateMasterStyle {
   fobPrice?: number;
 }
 
-export const getMasterStyles = (): Promise<any> => apiClient.get('/master-styles');
+export interface FindMasterStylesFilter {
+  styleNo?: string;
+  targetRddFrom?: string;
+  targetRddTo?: string;
+}
+
+export const getMasterStyles = (filter?: FindMasterStylesFilter): Promise<any> =>
+  apiClient.get('/master-styles', { params: filter });
 export const createMasterStyle = (data: CreateMasterStyle): Promise<any> => apiClient.post('/master-styles', data);
