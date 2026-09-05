@@ -126,7 +126,7 @@ function App() {
         <button className={`${tabButtonStyle} ${activeTab === 'dashboard' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('dashboard')}>Dashboard</button>
         <button className={`${tabButtonStyle} ${activeTab === 'items' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('items')}>Items</button>
         <button className={`${tabButtonStyle} ${activeTab === 'workOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('workOrders')}>Work Orders</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'styles' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('styles')}>Styles</button>
+        <button className={`${tabButtonStyle} ${activeTab === 'styles' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('styles')}>오더관리</button>
         <button className={`${tabButtonStyle} ${activeTab === 'shipments' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('shipments')}>Shipments</button>
         <button className={`${tabButtonStyle} ${activeTab === 'suppliers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('suppliers')}>Suppliers</button>
         <button className={`${tabButtonStyle} ${activeTab === 'purchaseOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('purchaseOrders')}>Purchase Orders</button>
