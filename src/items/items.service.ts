@@ -20,6 +20,7 @@ export interface CreateItemInput {
   unit?: string;
   spec?: string;
   description?: string;
+  styleNo?: string;
 }
 
 export interface UpdateItemInput {
@@ -29,6 +30,7 @@ export interface UpdateItemInput {
   unit?: string;
   spec?: string;
   description?: string;
+  styleNo?: string;
 }
 
 @Injectable()
@@ -46,6 +48,13 @@ export class ItemsService {
 
     if (!dto.code || !dto.name || !dto.type) {
       throw new BadRequestException('품목 코드, 이름, 타입은 필수 입력 항목입니다.');
+    }
+
+    // styleNo는 FINISHED_GOOD이 소속 MasterStyle을 값으로 참조하기 위한 필드다(CHARTER.md 2.1).
+    // 원자재/반제품은 여러 스타일의 BOM에서 공유되는 자원이라 특정 styleNo에 귀속시키는 것이
+    // 도메인 모델과 맞지 않으므로 명시적으로 막는다.
+    if (dto.styleNo && dto.type !== ItemType.FINISHED_GOOD) {
+      throw new BadRequestException('styleNo는 FINISHED_GOOD 타입 품목에만 지정할 수 있습니다.');
     }
 
     const existingItem = await this.itemRepository.findOne({
@@ -68,6 +77,7 @@ export class ItemsService {
       newItem.unit = dto.unit || 'EA';
       if (dto.spec) newItem.spec = dto.spec;
       if (dto.description) newItem.description = dto.description;
+      if (dto.styleNo) newItem.styleNo = dto.styleNo;
 
       const savedItem = await queryRunner.manager.save(newItem);
       await queryRunner.commitTransaction();
@@ -151,12 +161,20 @@ export class ItemsService {
       }
     }
 
+    if (dto.styleNo) {
+      const effectiveType = (dto.type as ItemType) || item.type;
+      if (effectiveType !== ItemType.FINISHED_GOOD) {
+        throw new BadRequestException('styleNo는 FINISHED_GOOD 타입 품목에만 지정할 수 있습니다.');
+      }
+    }
+
     if (dto.code) item.code = dto.code;
     if (dto.name) item.name = dto.name;
     if (dto.type) item.type = dto.type as ItemType;
     if (dto.unit) item.unit = dto.unit;
     if (dto.spec !== undefined) item.spec = dto.spec;
     if (dto.description !== undefined) item.description = dto.description;
+    if (dto.styleNo !== undefined) item.styleNo = dto.styleNo;
 
     try {
       const updatedItem = await this.itemRepository.save(item);
