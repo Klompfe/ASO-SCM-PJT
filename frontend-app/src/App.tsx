@@ -4,6 +4,8 @@ import { ItemsManager } from './components/ItemsManager';
 import { WorkOrdersManager } from './components/WorkOrdersManager';
 import { ShipmentsManager } from './components/ShipmentsManager';
 import { StylesManager } from './components/StylesManager';
+import { SuppliersManager } from './components/SuppliersManager';
+import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { LoginPage } from './components/LoginPage';
 import './App.css';
 
@@ -33,7 +35,7 @@ function App() {
   });
   
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'purchaseOrders'>('dashboard');
 
   useEffect(() => {
     try {
@@ -92,6 +94,8 @@ function App() {
         case 'workOrders': return <WorkOrdersManager />;
         case 'styles': return <StylesManager />;
         case 'shipments': return <ShipmentsManager />;
+        case 'suppliers': return <SuppliersManager />;
+        case 'purchaseOrders': return <PurchaseOrdersManager />;
         default: 
           // Routing Fallback: If unknown, default to Dashboard
           return <Dashboard />;
@@ -124,6 +128,8 @@ function App() {
         <button className={`${tabButtonStyle} ${activeTab === 'workOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('workOrders')}>Work Orders</button>
         <button className={`${tabButtonStyle} ${activeTab === 'styles' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('styles')}>Styles</button>
         <button className={`${tabButtonStyle} ${activeTab === 'shipments' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('shipments')}>Shipments</button>
+        <button className={`${tabButtonStyle} ${activeTab === 'suppliers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('suppliers')}>Suppliers</button>
+        <button className={`${tabButtonStyle} ${activeTab === 'purchaseOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('purchaseOrders')}>Purchase Orders</button>
       </nav>
 
       <main className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 min-h-[400px]">
