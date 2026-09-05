@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { getItems, createItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
 import { getBomByStyleNo, type BomDetail } from '../api/boms.service';
-import { parseMappingFile, checkStyleExists, type ParsedStyleResult } from '../api/mapping.service';
+import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
 import { getErrorMessage } from '../utils/errorMessage';
@@ -35,6 +35,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   const [selectedStyle, setSelectedStyle] = useState<ParsedStyleResult | null>(null);
   const [parsedStyles, setParsedStyles] = useState<ParsedStyleResult[]>([]);
   const [existsMap, setExistsMap] = useState<Record<string, boolean>>({});
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(0);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,6 +141,63 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
     setModalOpen(true);
   };
 
+  // 파싱 실패했거나 이미 등록된(existsMap[styleNo]===true) 스타일은 제외한다 — 이미 등록된
+  // 스타일을 다시 커밋하면 BOM/BOM Item이 중복으로 쌓인다(MappingPreviewModal의 개별 승인과
+  // 동일한 제약, mapping-commit.service.ts가 덮어쓰기를 지원하지 않기 때문).
+  const handleBulkApprove = async () => {
+    const targets = parsedStyles.filter(
+      (s): s is ParsedStyleResult & { styleNo: string } => !!s.styleNo && !s.parseError && !existsMap[s.styleNo],
+    );
+    if (targets.length === 0) {
+      toast.error('일괄 승인할 대상이 없습니다(파싱 실패했거나 이미 등록된 스타일은 제외됩니다).');
+      return;
+    }
+    const skippedCount = parsedStyles.length - targets.length;
+    if (!window.confirm(`${targets.length}개 스타일을 일괄 승인합니다${skippedCount > 0 ? ` (${skippedCount}개는 파싱 실패/이미 등록되어 제외)` : ''}. 계속할까요?`)) {
+      return;
+    }
+
+    setBulkApproving(true);
+    setBulkProgress(0);
+    let successCount = 0;
+    const failedStyleNos: string[] = [];
+
+    // 병렬로 돌리면 mapping-commit.service.ts의 "동일 이름 자재 없으면 새로 생성" 로직이
+    // 서로 다른 시트에서 같은 자재명을 참조할 때 경합해 중복 생성될 수 있어 순차 실행한다.
+    for (const style of targets) {
+      try {
+        await commitMapping({
+          styleNo: style.styleNo,
+          overviewData: style.overview,
+          bomItems: style.bomItems || [],
+        });
+        successCount++;
+      } catch {
+        failedStyleNos.push(style.styleNo);
+      }
+      setBulkProgress((p) => p + 1);
+    }
+
+    setBulkApproving(false);
+    if (failedStyleNos.length === 0) {
+      toast.success(`일괄 승인 완료: ${successCount}개 성공${skippedCount > 0 ? `, ${skippedCount}개 제외` : ''}`);
+    } else {
+      toast.error(`일괄 승인 완료: ${successCount}개 성공, ${failedStyleNos.length}개 실패(${failedStyleNos.join(', ')})`);
+    }
+
+    const results = await Promise.all(
+      targets.map(async (s) => {
+        try {
+          const { exists } = await checkStyleExists(s.styleNo);
+          return [s.styleNo, exists] as const;
+        } catch {
+          return [s.styleNo, false] as const;
+        }
+      }),
+    );
+    setExistsMap((prev) => ({ ...prev, ...Object.fromEntries(results) }));
+  };
+
   const handleModalRefresh = async () => {
     if (selectedStyle?.styleNo) {
       try {
@@ -172,7 +231,16 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
       {parsedStyles.length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-lg font-semibold text-gray-800">업로드된 스타일 목록 ({parsedStyles.length}개) — 한 줄을 클릭해 상세를 확인하고 개별 승인하세요</h3>
+          <div className="flex justify-between items-center gap-4">
+            <h3 className="text-lg font-semibold text-gray-800">업로드된 스타일 목록 ({parsedStyles.length}개) — 한 줄을 클릭해 상세를 확인하고 개별 승인하거나, 아래 버튼으로 일괄 승인하세요</h3>
+            <button
+              onClick={handleBulkApprove}
+              disabled={bulkApproving}
+              className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+            >
+              {bulkApproving ? `일괄 승인 중... (${bulkProgress}/${parsedStyles.length})` : '일괄 승인'}
+            </button>
+          </div>
           <StyleReviewList styles={parsedStyles} existsMap={existsMap} onSelect={handleSelectStyle} />
         </div>
       )}
