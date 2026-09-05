@@ -1,6 +1,6 @@
 # API-프론트엔드 엔드포인트 매핑표
 
-> Status: 2026-09-05 기준 작성 (PR-037, 작업목록 9번/P2-9 산출물)
+> Status: 2026-09-05 최초 작성 (PR-037, 작업목록 9번/P2-9 산출물), styles/master 섹션 PR-042에서 최신화
 >
 > 백엔드 컨트롤러 전체(`src/**/*.controller.ts`)와 프론트엔드 `frontend-app/src/api/*.service.ts` +
 > 컴포넌트에서 실제로 호출하는 코드를 대조해 작성했다. "호출 프론트"가 없는 행은 **미사용**으로 표시한다.
@@ -83,14 +83,21 @@
 | POST /inventories/:id/stock-in | - | **미사용** |
 | POST /inventories/:id/stock-out | - | **미사용** |
 
-## styles / master ⚠️ 요주의
+## styles / master
 
-| 메서드/경로 | 등록 상태 | 프론트 함수 | 호출 컴포넌트 |
-|---|---|---|---|
-| GET /styles (`master/style.controller.ts`, `MasterModule`) | `app.module.ts`에 등록되어 **실제로 동작함** | - | **미사용** — `StylesManager.tsx`는 이 GET을 아예 호출하지 않고 `const styles: any[] = []; // Placeholder`로 항상 빈 배열만 표시 |
-| POST /styles, GET /styles (`styles/styles.controller.ts`, `StylesModule`) | **`StylesModule`이 `app.module.ts`에 import되어 있지 않아 라우트 자체가 존재하지 않음(항상 404)** | - | `StylesManager.tsx`가 `fetch('/styles', {method:'POST', ...})`로 이 경로를 호출 시도 |
+> **PR-038/040 이후 최신화(2026-09-05)**: 이전 버전 문서는 GET/POST /styles가 라우트 충돌·미등록으로
+> 동작하지 않는다고 기록했으나, PR-038(StylesModule 등록 + axiosInstance 전환)과 PR-040(MasterModule의
+> 경쟁 컨트롤러 삭제)을 거치며 해소되었다. curl로 POST 후 GET 재조회해 실제 반영됨을 확인했다.
 
-> **발견된 별개의 버그(이번 PR 범위 밖, 수정하지 않음)**: `StylesManager.tsx`는 (1) 존재하지도 않는 라우트를 호출하고, (2) `axiosInstance`가 아니라 baseURL 없는 raw `fetch('/styles', ...)`를 직접 써서 `Authorization` 헤더도 붙지 않는다(과거 `MappingPreviewModal.tsx`에서 발견됐던 것과 동일한 유형의 문제). 즉 Styles 등록 화면은 현재 실질적으로 완전히 동작하지 않는다.
+| 메서드/경로 | 프론트 함수 | 호출 컴포넌트 |
+|---|---|---|
+| POST /styles (`styles/styles.controller.ts`, `StylesModule`) | `styles.service.ts:createStyle` | `StylesManager.tsx` |
+| GET /styles (`styles/styles.controller.ts`, `StylesModule`) | `styles.service.ts:getStyles` | `StylesManager.tsx` |
+
+> 참고: `master/master.entities.ts`의 `Style`(`master_styles` 테이블) 엔티티는 PR-040에서 컨트롤러/서비스가
+> 제거되어 API로 노출되지 않는다(엔티티 등록만 남아있음 — `transaction/entities/bom.entity.ts`의 미등록 참조
+> 때문). 이 표의 `styles`는 별개의 `StylesModule`/`styles` 테이블이며, 실제 프로덕션 BOM/WorkOrder 로직이
+> 쓰는 `MasterStyle`(`master_style` 테이블)과도 다른 엔티티다 — 세 엔티티의 장기 통합 여부는 미결정 상태다.
 
 ## receivings
 

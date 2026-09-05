@@ -45,8 +45,6 @@ export const StylesManager: React.FC = () => {
   return (
     <div className="p-6">
       <h2 className="text-2xl font-bold mb-4">Styles Management</h2>
-      {/* 참고(PR-038): GET /styles는 라우트 충돌로 항상 빈 목록을 반환한다(styles.service.ts 주석 참고).
-          등록(POST)은 정상 동작하지만 아래 목록에는 반영되지 않는다 — 별도 백엔드 라우트 정리가 필요하다. */}
       <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow mb-6">
         <div className="grid grid-cols-3 gap-4 mb-4">
           <input className="border p-2" placeholder="Style No" onChange={e => setFormData({...formData, styleNo: e.target.value})} />
