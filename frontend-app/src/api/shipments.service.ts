@@ -18,3 +18,5 @@ export interface CreateShipment {
 
 export const getShipments = (): Promise<any> => apiClient.get('/shipments');
 export const createShipment = (data: CreateShipment): Promise<any> => apiClient.post('/shipments', data);
+export const updateShipmentStatus = (id: number, status: string): Promise<any> =>
+  apiClient.patch(`/shipments/${id}/status`, { status });

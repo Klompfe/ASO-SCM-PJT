@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getShipments, createShipment, type CreateShipment, type Shipment } from '../api/shipments.service';
+import { getShipments, createShipment, updateShipmentStatus, type CreateShipment, type Shipment } from '../api/shipments.service';
 
 export const ShipmentsManager: React.FC = () => {
   const [shipments, setShipments] = useState<Shipment[]>([]);
@@ -28,6 +28,16 @@ export const ShipmentsManager: React.FC = () => {
       toast.success('출하가 생성되었습니다.');
       loadShipments();
       setNewShipment({ shipmentNumber: '' });
+    } catch (error) {
+      // toast.error는 Axios 인터셉터에서 처리됨
+    }
+  };
+
+  const handleDeliver = async (id: number) => {
+    try {
+      await updateShipmentStatus(id, 'DELIVERED');
+      toast.success('배송 완료 처리되었습니다.');
+      loadShipments();
     } catch (error) {
       // toast.error는 Axios 인터셉터에서 처리됨
     }
@@ -71,6 +81,7 @@ export const ShipmentsManager: React.FC = () => {
             <tr>
               <th className="px-4 py-2 text-left">Shipment Number</th>
               <th className="px-4 py-2 text-left">Status</th>
+              <th className="px-4 py-2 text-left">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -81,6 +92,16 @@ export const ShipmentsManager: React.FC = () => {
                   <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800">
                     {s.status}
                   </span>
+                </td>
+                <td className="px-4 py-2">
+                  {s.status === 'SHIPPING' && (
+                    <button
+                      onClick={() => handleDeliver(s.id)}
+                      className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-blue-700"
+                    >
+                      배송 완료 처리
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
