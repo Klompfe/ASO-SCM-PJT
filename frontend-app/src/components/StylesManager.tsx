@@ -46,10 +46,11 @@ export const StylesManager: React.FC = () => {
     <div className="p-6">
       <h2 className="text-2xl font-bold mb-4">Styles Management</h2>
       <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow mb-6">
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-4 gap-4 mb-4">
           <input className="border p-2" placeholder="Style No" onChange={e => setFormData({...formData, styleNo: e.target.value})} />
           <input className="border p-2" placeholder="Brand" onChange={e => setFormData({...formData, brand: e.target.value})} />
           <input className="border p-2" placeholder="Item Type" onChange={e => setFormData({...formData, itemType: e.target.value})} />
+          <input className="border p-2" type="date" aria-label="Target RDD" value={formData.targetRdd} onChange={e => setFormData({...formData, targetRdd: e.target.value})} required />
         </div>
         <div className="mb-4">
           <label className="mr-4"><input type="radio" value="FOB" checked={productionType === 'FOB'} onChange={() => setProductionType('FOB')} /> FOB</label>
