@@ -2,7 +2,7 @@
 
 > 분석 기준: GitHub `Klompfe/ASO-SCM-PJT` main 브랜치, 커밋 `4457b2e` 기준
 > 정렬 기준: 비즈니스 정합성에 미치는 영향도 순 (P0 = 즉시 / P1 = 이번 스프린트 / P2 = 다음 스프린트)
-> Status: 최종 검증 2026-09-04, PR-001~019 반영 — P0-1/2/3, P1-4/5/6 전부 해결 완료(아래 각 항목 커밋 해시 참고)
+> Status: 최종 검증 2026-09-05, PR-001~041 반영 — P0-1/2/3, P1-4/5/6, P2-7/8/9 전부 해결 완료(아래 각 항목 커밋 해시 참고)
 
 ---
 
@@ -71,20 +71,22 @@
 
 ## P2 — 다음 스프린트 (문서/품질 개선)
 
-### [ ] 7. 설계 문서와 실제 코드 동기화
-- [ ] `docs/02_MODULE_RELATIONS.md`, `docs/ARCHITECTURE.md`에 "현재 미구현" 상태 명시(위 P0-1, P0-2 항목이 해결되기 전까지)
-- [ ] 문서에 "Status: 설계됨 / 구현됨 / 폐기됨" 같은 상태 태그 추가하여 향후 동일한 혼선 방지
+### [x] 7. 설계 문서와 실제 코드 동기화
+- **해결 완료 (2026-09-04)**: 커밋 `7cedb59`(`docs: sync CHARTER/ARCHITECTURE/specs with actual implementation`)
+- [x] `docs/02_MODULE_RELATIONS.md`, `docs/ARCHITECTURE.md`에 상태 태그 반영 — 해당 시점엔 P0-1/P0-2가 이미 해결된 뒤라 "미구현" 표기 대상은 없었고, 대신 5.1/5.2절에 "— 구현됨" 태그로 실제 구현 상태를 명시함
+- [x] 문서 상단에 `> Status: 최종 검증 2026-09-04, PR-001~019 반영` 태그 추가(`CHARTER.md`, `ARCHITECTURE.md`, `02_MODULE_RELATIONS.md` 등) — 향후 동일 혼선 방지용 관행으로 정착
 
-### [ ] 8. 회귀 방지용 E2E 테스트 보강
-- **문제**: 정확히 이런 종류의 회귀(핵심 로직이 테스트 통과를 위해 삭제됨)를 막을 수 있는 통합 테스트 부재.
-- [ ] "PO RECEIVED → Inventory 증가" e2e 테스트 추가
-- [ ] "WO COMPLETED → BOM 기반 원자재 차감/완제품 가산" e2e 테스트 추가
-- [ ] "재고 부족 시 WO 완료 실패 + 롤백" e2e 테스트 추가
-- [ ] CI에 e2e 테스트 필수 통과 조건으로 반영 (현재 CI 설정 확인 필요 — Actions 워크플로 파일 미확인됨)
+### [x] 8. 회귀 방지용 E2E 테스트 보강
+- **해결 완료 (2026-09-04~05, PR-033/036)**
+- [x] "PO RECEIVED → Inventory 증가" e2e 테스트 추가 — `test/inventory-flow.e2e-spec.ts`(커밋 `e96fe5a`)
+- [x] "WO COMPLETED → BOM 기반 원자재 차감/완제품 가산" e2e 테스트 추가 — 동일 파일, 같은 커밋
+- [x] "재고 부족 시 WO 완료 실패 + 롤백" e2e 테스트 추가 — 동일 파일, 같은 커밋
+- [x] CI에 e2e 테스트 필수 통과 조건으로 반영 — `.github/workflows/ci.yml`(커밋 `8e24a4c`, PR-036), `continue-on-error` 없이 실패 시 CI 자체가 실패하도록 구성됨
 
-### [ ] 9. 프론트엔드 기능 커버리지 확대
-- [ ] 백엔드엔 있지만 프론트 화면이 없는 `purchase-orders`, `suppliers` 매니저 컴포넌트 추가
-- [ ] API 명세(Swagger)와 프론트 `api/*.service.ts` 간 엔드포인트 매핑표 작성하여 불일치 사전 점검
+### [x] 9. 프론트엔드 기능 커버리지 확대
+- **해결 완료 (2026-09-04, PR-037)**
+- [x] 백엔드엔 있지만 프론트 화면이 없던 `purchase-orders`, `suppliers` 매니저 컴포넌트 추가 — `SuppliersManager.tsx`/`PurchaseOrdersManager.tsx`(커밋 `2533429`)
+- [x] API 명세(Swagger)와 프론트 `api/*.service.ts` 간 엔드포인트 매핑표 작성 — `docs/API-FRONTEND-MAPPING.md`(커밋 `df7e476`), 이후 PR-038/040 변경사항 반영해 지속 갱신 중
 
 ---
 
@@ -98,6 +100,6 @@
 | 4 | ~~modules/po v2 채택 여부 결정~~ → 삭제 완료(PR-015) | P1 | 아키텍처 방향성 | ✅ `380b0ec` |
 | 5 | Shipments 백엔드 구현/정리 | P1 | 프론트-백엔드 정합 | ✅ `da9bdb4` |
 | 6 | auth 중복 파일 정리 | P1 | 보안/유지보수성 | ✅ `ed6c97b` |
-| 7 | 문서-코드 동기화 | P2 | 문서 신뢰도 | - |
-| 8 | 회귀 방지 E2E 테스트 | P2 | 품질 안정성 | - |
-| 9 | 프론트 기능 커버리지 확대 | P2 | 사용성 | - |
+| 7 | 문서-코드 동기화 | P2 | 문서 신뢰도 | ✅ `7cedb59` |
+| 8 | 회귀 방지 E2E 테스트 | P2 | 품질 안정성 | ✅ `e96fe5a`+`8e24a4c` |
+| 9 | 프론트 기능 커버리지 확대 | P2 | 사용성 | ✅ `2533429` |
