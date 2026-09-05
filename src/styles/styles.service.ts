@@ -14,8 +14,22 @@ export class StylesService {
     private readonly overviewRepository: Repository<StyleOverview>,
   ) {}
 
-  async findAll(): Promise<MasterStyle[]> {
-    return this.masterStyleRepository.find({ relations: ['overview'] });
+  async findAll(filter?: { styleNo?: string; targetRddFrom?: string; targetRddTo?: string }): Promise<MasterStyle[]> {
+    const qb = this.masterStyleRepository
+      .createQueryBuilder('style')
+      .leftJoinAndSelect('style.overview', 'overview');
+
+    if (filter?.styleNo) {
+      qb.andWhere('style.styleNo LIKE :styleNo', { styleNo: `%${filter.styleNo}%` });
+    }
+    if (filter?.targetRddFrom) {
+      qb.andWhere('overview.targetRdd >= :targetRddFrom', { targetRddFrom: filter.targetRddFrom });
+    }
+    if (filter?.targetRddTo) {
+      qb.andWhere('overview.targetRdd <= :targetRddTo', { targetRddTo: filter.targetRddTo });
+    }
+
+    return qb.getMany();
   }
 
   async create(dto: CreateMasterStyleDto): Promise<MasterStyle> {

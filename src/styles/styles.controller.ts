@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { StylesService } from './styles.service';
 import { CreateMasterStyleDto } from './dto/create-master-style.dto';
+import { FindMasterStylesDto } from './dto/find-master-styles.dto';
 
 @ApiTags('마스터 스타일')
 @ApiBearerAuth()
@@ -15,7 +16,7 @@ export class StylesController {
   }
 
   @Get()
-  findAll() {
-    return this.stylesService.findAll();
+  findAll(@Query() query: FindMasterStylesDto) {
+    return this.stylesService.findAll(query);
   }
 }
