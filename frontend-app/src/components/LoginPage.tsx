@@ -27,11 +27,10 @@ export const LoginPage: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setLoading(true);
     try {
       if (isLoginMode) {
-        // Send both fields for compatibility
+        // 백엔드가 email/username 둘 다 로그인 아이디로 허용하므로 email 값을 둘 다에 채워 보낸다.
         const res = await login({ email, username: email, password });
-        // Handle potential variations in backend token response keys
-        const token = res?.accessToken || res?.access_token || res?.token;
-        
+        const token = res?.accessToken;
+
         if (token) {
           localStorage.setItem('access_token', token);
           setAuthToken(token);
@@ -41,7 +40,8 @@ export const LoginPage: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           throw new Error('토큰을 찾을 수 없습니다.');
         }
       } else {
-        await register({ email, username: email, password, name });
+        // RegisterDto는 username을 받지 않는다(whitelist 위반으로 400) — email/password/name만 전송.
+        await register({ email, password, name });
         toast.success('회원가입 완료! 로그인해주세요.');
         setIsLoginMode(true);
       }
