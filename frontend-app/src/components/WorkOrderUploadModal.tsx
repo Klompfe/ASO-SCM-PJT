@@ -19,6 +19,8 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
   const [dragActive, setDragActive] = useState(false);
   const [lastChargeKrw, setLastChargeKrw] = useState<number | null>(null);
   const [usageSummary, setUsageSummary] = useState<AiUsageSummary | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(0);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -85,6 +87,44 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     }
   };
 
+  // Style No.를 못 읽은 항목은 백엔드가 거부하므로(WorkOrdersService.commitAnalysis) 제외하고,
+  // 병렬 실행하면 서로 다른 스타일이 같은 자재명을 참조할 때 mapping-commit의 "없으면 새로
+  // 생성" 로직이 경합할 수 있어(PR-052와 동일한 이유) 순차 실행한다.
+  const handleBulkSave = async () => {
+    const targets = results
+      .map((result, index) => ({ result, index }))
+      .filter(({ result, index }) => !!result.overview.styleNo && !savedIndexes.has(index));
+
+    if (targets.length === 0) {
+      toast.error('일괄 저장할 대상이 없습니다(Style No. 인식 실패 또는 이미 저장됨은 제외됩니다).');
+      return;
+    }
+
+    setBulkSaving(true);
+    setBulkProgress(0);
+    let successCount = 0;
+    const failed: string[] = [];
+
+    for (const { result, index } of targets) {
+      try {
+        await commitWorkOrderAnalysis(result);
+        setSavedIndexes((prev) => new Set(prev).add(index));
+        successCount++;
+      } catch {
+        failed.push(result.overview.styleNo ?? `#${index + 1}`);
+      }
+      setBulkProgress((p) => p + 1);
+    }
+
+    setBulkSaving(false);
+    if (failed.length === 0) {
+      toast.success(`일괄 저장 완료: ${successCount}건 성공`);
+    } else {
+      toast.error(`일괄 저장 완료: ${successCount}건 성공, ${failed.length}건 실패(${failed.join(', ')})`);
+    }
+    onSuccess();
+  };
+
   const handleClose = () => {
     setFile(null);
     setResults([]);
@@ -135,9 +175,18 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
 
           {step === 2 && (
             <div className="space-y-6">
-              <p className="text-sm text-gray-500">
-                {results.length}건 분석됨{lastChargeKrw != null && lastChargeKrw > 0 ? ` — 이번 분석 요금 ${lastChargeKrw.toLocaleString()}원` : ''} — 각 항목을 확인 후 개별 저장하세요.
-              </p>
+              <div className="flex justify-between items-center gap-4">
+                <p className="text-sm text-gray-500">
+                  {results.length}건 분석됨{lastChargeKrw != null && lastChargeKrw > 0 ? ` — 이번 분석 요금 ${lastChargeKrw.toLocaleString()}원` : ''} — 각 항목을 확인 후 개별 저장하거나, 일괄저장하세요.
+                </p>
+                <button
+                  onClick={handleBulkSave}
+                  disabled={bulkSaving}
+                  className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+                >
+                  {bulkSaving ? `일괄저장 중... (${bulkProgress}/${results.length})` : '일괄저장'}
+                </button>
+              </div>
               {results.map((result, index) => (
                 <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-3">
                   <div className="flex justify-between items-center">
