@@ -78,6 +78,41 @@ describe('SectionParser - 실제 원본 엑셀 전 시트 회귀 테스트', () 
     expect(styleOverview.buyer).toBe('미도컴퍼니');
   });
 
+  it('MB62SLM103Z: 병합 없이 시트 끝 여백행만 이어지는 POLY BAG은 forward-fill로 부풀려지지 않고 정확히 1번만 나와야 한다', () => {
+    // POLY BAG은 시트의 마지막 실제 데이터 행이고 그 뒤로는 병합되지 않은 완전 공백 행만
+    // 이어진다(시트 물리적 범위(!ref)의 여백). 과거에는 ITEM 칸이 비면 무조건 forward-fill
+    // 했기 때문에 이 공백 행들이 전부 POLY BAG으로 흡수되어 13개까지 부풀려졌었다.
+    const { rows, merges } = readSheet('MB62SLM103Z');
+    const { bomItems } = SectionParser.parse(rows, merges);
+
+    const polyBagRows = bomItems.filter((item: any) => item.itemName.includes('POLY BAG'));
+    expect(polyBagRows).toHaveLength(1);
+  });
+
+  it('MB6YHMP102Z-1: 병합 그룹 시작행이 완전 공백이어도 직전 자재 이름으로 흡수되지 않아야 한다', () => {
+    // "심 지" 항목(row 24) 바로 다음의 새 병합 그룹 시작행(row 27)이 모든 컬럼이 빈 값인
+    // 완전 공백 행인데, 과거에는 forward-fill로 "심 지"의 두 번째 항목으로 잘못 흡수됐었다.
+    const { rows, merges } = readSheet('MB6YHMP102Z-1');
+    const { bomItems } = SectionParser.parse(rows, merges);
+
+    const interliningRows = bomItems.filter((item: any) => item.itemName.includes('INTERLINING') && item.itemName.includes('M-250'));
+    expect(interliningRows).toHaveLength(1);
+  });
+
+  it('ITEM 칸이 비어도 요척/사용칼라 등 다른 값이 있으면 진짜 사이즈별 세부 행이므로 forward-fill을 그대로 유지해야 한다', () => {
+    // section-parser.util.ts의 blank-row 판정은 ITEM 칸뿐 아니라 요척/사용칼라/규격까지
+    // 모두 비어있을 때만 스킵한다. 그중 하나라도 값이 있으면(예: 같은 자재의 다른 색상 소요량)
+    // 여전히 forward-fill로 이름을 물려받아 별도 항목으로 유지되어야 한다 — 이번 수정이
+    // CARE LABEL/PRICE TAG류의 "진짜 사이즈별 다중행" 처리를 깨뜨리지 않았는지 확인한다.
+    const { rows, merges } = readSheet('MB62SLM103Z');
+    const { bomItems } = SectionParser.parse(rows, merges);
+
+    const careLabel = bomItems.filter((item: any) => item.itemName.includes('CARE LABEL'));
+    const priceTag = bomItems.filter((item: any) => item.itemName.includes('PRICE TAG'));
+    expect(careLabel).toHaveLength(1);
+    expect(priceTag).toHaveLength(1);
+  });
+
   it('헤더 레이아웃이 어긋나 totalQty를 숫자로 읽지 못하면 조용히 넘어가지 않고 예외를 던져야 한다', () => {
     // 실제 시트 데이터를 그대로 쓰되, QTY 값이 있어야 할 자리(index 8)를 비워
     // "레이블만 있고 값이 없는" 깨진 레이아웃을 재현한다.

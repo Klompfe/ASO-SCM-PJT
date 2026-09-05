@@ -84,6 +84,18 @@ export class SectionParser {
       if (!row) continue;
 
       const rawItemName = row[0]?.trim();
+
+      // ITEM 칸이 비어있어도 요척/사용칼라/규격 등 다른 값이 하나라도 있으면 진짜 사이즈별
+      // 세부 수량 행(forward-fill 대상, 예: CARE LABEL/PRICE TAG)이다. 반대로 ITEM 칸을 포함해
+      // 이 값들까지 전부 비어있으면 시트 서식상의 빈 여백 행일 뿐이므로(예: POLY BAG 뒤에
+      // 이어지는 시트 끝 공백 행들) forward-fill로 이름을 물려받아 별도 항목을 만들지 않는다.
+      const isBlankRow =
+        !rawItemName &&
+        !row[consIndex]?.toString().trim() &&
+        !row[2]?.toString().trim() &&
+        !row[8]?.toString().trim();
+      if (isBlankRow) continue;
+
       const itemName = rawItemName || lastItemName;
       lastItemName = itemName;
 
