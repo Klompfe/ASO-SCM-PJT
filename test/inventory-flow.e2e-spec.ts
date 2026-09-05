@@ -58,7 +58,7 @@ describe('Inventory 연동 회귀 테스트 (PO RECEIVED / WO COMPLETED)', () =>
     const res = await request(app.getHttpServer())
       .post('/purchase-orders')
       .set('Authorization', `Bearer ${jwtToken}`)
-      .send({ supplierId, itemId, quantity })
+      .send({ supplierId, itemId, quantity, unitPrice: 10 })
       .expect(201);
     return res.body.data.id as number;
   };

@@ -19,6 +19,12 @@ export class GetPurchaseOrdersFilterDto extends PaginationQueryDto {
   @IsNumber()
   itemId?: number;
 
+  @ApiPropertyOptional({ description: '공급업체 ID 필터' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  supplierId?: number;
+
   @ApiPropertyOptional({ description: '조회 시작일 (YYYY-MM-DD)' })
   @IsOptional()
   @IsString()

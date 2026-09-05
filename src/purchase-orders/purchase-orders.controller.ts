@@ -7,11 +7,13 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
+import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto';
 import { PurchaseOrder } from './entities/purchase-order.entity';
 
 @ApiTags('Purchase Orders (구매 주문 관리)')
@@ -28,10 +30,10 @@ export class PurchaseOrdersController {
   }
 
   @Get()
-  @ApiOperation({ summary: '구매 주문 전체 목록 조회' })
+  @ApiOperation({ summary: '구매 주문 전체 목록 조회 (상태/품목/공급업체/기간 필터 지원)' })
   @ApiResponse({ status: 200, type: [PurchaseOrder] })
-  findAll(): Promise<PurchaseOrder[]> {
-    return this.poService.findAll();
+  findAll(@Query() filter: GetPurchaseOrdersFilterDto): Promise<PurchaseOrder[]> {
+    return this.poService.findAll(filter);
   }
 
   @Get(':id')

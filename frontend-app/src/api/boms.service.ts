@@ -1,6 +1,7 @@
 import apiClient from './client';
 
 export interface BomItemMaterial {
+  id: number;
   code: string;
   name: string;
   type: string;

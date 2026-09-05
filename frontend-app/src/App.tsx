@@ -36,6 +36,13 @@ function App() {
   
   // Explicit tab type handling with fallback
   const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'purchaseOrders'>('dashboard');
+  // Items(자재명세) 화면에서 "발주하기"를 누르면 이 값을 채우고 Purchase Orders 탭으로 이동한다.
+  const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(null);
+
+  const handleOrderItem = (itemId: number) => {
+    setPoPrefillItemId(itemId);
+    setActiveTab('purchaseOrders');
+  };
 
   useEffect(() => {
     try {
@@ -90,12 +97,12 @@ function App() {
       // Safe rendering switch
       switch (activeTab) {
         case 'dashboard': return <Dashboard />;
-        case 'items': return <ItemsManager />;
+        case 'items': return <ItemsManager onOrderItem={handleOrderItem} />;
         case 'workOrders': return <WorkOrdersManager />;
         case 'styles': return <StylesManager />;
         case 'shipments': return <ShipmentsManager />;
         case 'suppliers': return <SuppliersManager />;
-        case 'purchaseOrders': return <PurchaseOrdersManager />;
+        case 'purchaseOrders': return <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />;
         default: 
           // Routing Fallback: If unknown, default to Dashboard
           return <Dashboard />;

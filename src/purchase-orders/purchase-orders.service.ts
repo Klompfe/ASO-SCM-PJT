@@ -4,6 +4,7 @@ import { Repository, DataSource } from 'typeorm';
 import { PurchaseOrder, PurchaseOrderStatus } from './entities/purchase-order.entity';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
+import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto';
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
@@ -35,6 +36,7 @@ export class PurchaseOrdersService {
 
     const po = this.poRepository.create({
       quantity: dto.quantity,
+      unitPrice: dto.unitPrice,
       supplier,
       item,
     });
@@ -42,11 +44,31 @@ export class PurchaseOrdersService {
     return await this.poRepository.save(po);
   }
 
-  async findAll(): Promise<PurchaseOrder[]> {
-    return await this.poRepository.find({
-      relations: ['supplier', 'item', 'shipment'],
-      order: { id: 'DESC' },
-    });
+  async findAll(filter?: GetPurchaseOrdersFilterDto): Promise<PurchaseOrder[]> {
+    const qb = this.poRepository
+      .createQueryBuilder('po')
+      .leftJoinAndSelect('po.supplier', 'supplier')
+      .leftJoinAndSelect('po.item', 'item')
+      .leftJoinAndSelect('po.shipment', 'shipment')
+      .orderBy('po.id', 'DESC');
+
+    if (filter?.status) {
+      qb.andWhere('po.status = :status', { status: filter.status });
+    }
+    if (filter?.itemId) {
+      qb.andWhere('po.itemId = :itemId', { itemId: filter.itemId });
+    }
+    if (filter?.supplierId) {
+      qb.andWhere('po.supplierId = :supplierId', { supplierId: filter.supplierId });
+    }
+    if (filter?.startDate) {
+      qb.andWhere('po.createdAt >= :startDate', { startDate: filter.startDate });
+    }
+    if (filter?.endDate) {
+      qb.andWhere('po.createdAt <= :endDate', { endDate: filter.endDate });
+    }
+
+    return qb.getMany();
   }
 
   async findOne(id: number): Promise<PurchaseOrder> {
