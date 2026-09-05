@@ -61,7 +61,7 @@ export const ItemsManager: React.FC = () => {
       const res = await axiosInstance.post('/mapping/parse', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      setPreviewData(res.data);
+      setPreviewData(res);
       setValidationErrors(res.rawErrors || []);
       setModalOpen(true);
     } catch (err: any) {
@@ -96,15 +96,11 @@ export const ItemsManager: React.FC = () => {
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50" disabled={loading}>Create</button>
       </form>
 
-      <MappingPreviewModal 
+      <MappingPreviewModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        rows={previewData?.rows ?? []}
-        onConfirm={async (mappings) => {
-            console.log('Mapping confirmed:', mappings);
-            setModalOpen(false);
-            loadItems();
-        }}
+        data={previewData}
+        onRefresh={loadItems}
       />
       
       <div className="flex gap-4 p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
