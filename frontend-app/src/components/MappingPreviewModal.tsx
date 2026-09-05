@@ -49,7 +49,8 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-7xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg w-full max-w-7xl max-h-[90vh] flex flex-col">
+      <div className="p-6 overflow-y-auto flex-1 min-h-0">
 
         {/* Style Overview Card */}
         <div className="bg-gray-50 p-4 rounded border mb-6">
@@ -97,17 +98,18 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
             </tbody>
           </table>
         </div>
+      </div>
 
-        <div className="mt-6 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 bg-gray-300 rounded">닫기</button>
-          <button
-            onClick={handleCommit}
-            disabled={saving}
-            className={`px-4 py-2 text-white rounded disabled:bg-gray-400 ${alreadyExists ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-blue-600 hover:bg-blue-700'}`}
-          >
-            {alreadyExists ? '재승인(덮어쓰기)' : '저장 및 승인'}
-          </button>
-        </div>
+      <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2 flex-shrink-0">
+        <button onClick={onClose} className="px-4 py-2 bg-gray-300 rounded">닫기</button>
+        <button
+          onClick={handleCommit}
+          disabled={saving}
+          className={`px-4 py-2 text-white rounded disabled:bg-gray-400 ${alreadyExists ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+        >
+          {alreadyExists ? '재승인(덮어쓰기)' : '저장 및 승인'}
+        </button>
+      </div>
       </div>
     </div>
   );
