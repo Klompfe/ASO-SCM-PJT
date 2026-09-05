@@ -15,6 +15,11 @@ export class MappingCommitService {
     private readonly dataSource: DataSource,
   ) {}
 
+  async checkExists(styleNo: string): Promise<{ exists: boolean }> {
+    const style = await this.dataSource.manager.findOne(MasterStyle, { where: { styleNo } });
+    return { exists: !!style };
+  }
+
   async commit(payload: CommitMappingDto) {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
