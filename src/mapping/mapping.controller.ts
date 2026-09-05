@@ -3,7 +3,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MappingService } from './services/mapping.service';
-import { ValidationService } from './services/validation.service';
 import { StyleValidatorService } from './services/style-validator.service';
 import { StagingParseRaw } from './entities/staging-parse-raw.entity';
 import { ApiTags, ApiBearerAuth, ApiBody, ApiConsumes } from '@nestjs/swagger';
@@ -17,7 +16,6 @@ import * as iconv from 'iconv-lite';
 export class MappingController {
   constructor(
     private readonly mappingService: MappingService,
-    private readonly validationService: ValidationService,
     private readonly styleValidator: StyleValidatorService,
     @InjectRepository(StagingParseRaw) private readonly stagingRepo: Repository<StagingParseRaw>,
   ) {}
