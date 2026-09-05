@@ -10,6 +10,8 @@ import { VisionService } from './vision.service';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
+import { MappingCommitService } from '../mapping/services/mapping-commit.service';
+import { WorkOrderSpecsService } from './work-order-specs.service';
 
 describe('WorkOrdersService', () => {
   let service: WorkOrdersService;
@@ -55,6 +57,15 @@ describe('WorkOrdersService', () => {
     analyzeWorkOrder: jest.fn(),
   };
 
+  const mockMappingCommitService = {
+    commit: jest.fn(),
+  };
+
+  const mockWorkOrderSpecsService = {
+    save: jest.fn(),
+    findByStyleNo: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     mockDataSource.getRepository.mockImplementation((entity: any) => {
@@ -79,6 +90,14 @@ describe('WorkOrdersService', () => {
         {
           provide: VisionService,
           useValue: mockVisionService,
+        },
+        {
+          provide: MappingCommitService,
+          useValue: mockMappingCommitService,
+        },
+        {
+          provide: WorkOrderSpecsService,
+          useValue: mockWorkOrderSpecsService,
         },
       ],
     }).compile();

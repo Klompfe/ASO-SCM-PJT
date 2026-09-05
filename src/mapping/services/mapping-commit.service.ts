@@ -47,6 +47,12 @@ export class MappingCommitService {
         buyer: overviewData.buyer,
         firstShipDate: overviewData.shipDate ? new Date(overviewData.shipDate) : null,
         status: StyleOverviewStatus.PENDING_APPROVAL,
+        // Excel 매핑 커밋 경로는 아래 필드를 보내지 않아 그대로 null로 남는다.
+        styleName: overviewData.styleName ?? null,
+        brand: overviewData.brand ?? null,
+        itemType: overviewData.itemType ?? null,
+        productionType: overviewData.productionType ?? null,
+        targetRdd: overviewData.targetRdd ? new Date(overviewData.targetRdd) : null,
         style,
       });
       style.overview = overview;
