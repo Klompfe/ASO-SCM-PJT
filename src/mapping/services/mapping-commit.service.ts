@@ -2,11 +2,12 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { MasterStyle } from '../../styles/entities/master-style.entity';
-import { StyleOverview } from '../../styles/entities/style-overview.entity';
+import { StyleOverview, StyleOverviewStatus } from '../../styles/entities/style-overview.entity';
 import { Bom } from '../../boms/entities/bom.entity';
 import { BomItem } from '../../boms/entities/bom-item.entity';
 import { ImportFile, ImportStatus } from '../../imports/entities/import-file.entity';
 import { Item, ItemType } from '../../items/entities/item.entity';
+import { CommitMappingDto } from '../dto/commit-mapping.dto';
 
 @Injectable()
 export class MappingCommitService {
@@ -14,7 +15,7 @@ export class MappingCommitService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async commit(payload: any) {
+  async commit(payload: CommitMappingDto) {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -34,10 +35,14 @@ export class MappingCommitService {
       if (!style) {
         style = queryRunner.manager.create(MasterStyle, { styleNo });
       }
-      
+
       const overview = queryRunner.manager.create(StyleOverview, {
-        ...overviewData,
-        style
+        factory: overviewData.factory,
+        totalQty: overviewData.totalQty,
+        buyer: overviewData.buyer,
+        firstShipDate: overviewData.shipDate ? new Date(overviewData.shipDate) : null,
+        status: StyleOverviewStatus.PENDING_APPROVAL,
+        style,
       });
       style.overview = overview;
       await queryRunner.manager.save(style);
@@ -68,10 +73,10 @@ export class MappingCommitService {
           category: item.category || 'GENERAL',
           colorCode: item.colorCode || 'N/A',
           spec: item.spec || 'N/A',
-          consumption: parseFloat(item.consumption) || 0,
-          requiredQty: parseFloat(item.requiredQty) || 0,
+          consumption: item.consumption ?? 0,
+          requiredQty: item.requiredQty ?? 0,
           supplier: item.supplier || 'N/A',
-          unitPrice: parseFloat(item.unitPrice) || 0,
+          unitPrice: item.unitPrice ?? 0,
           remarks: item.remarks || 'N/A'
         });
       }
