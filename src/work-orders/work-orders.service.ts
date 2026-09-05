@@ -9,6 +9,9 @@ import { VisionService } from './vision.service';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
+import { MappingCommitService } from '../mapping/services/mapping-commit.service';
+import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
+import { WorkOrderSpecsService } from './work-order-specs.service';
 
 @Injectable()
 export class WorkOrdersService {
@@ -19,10 +22,53 @@ export class WorkOrdersService {
     private readonly woRepository: Repository<WorkOrder>,
     private readonly dataSource: DataSource,
     private readonly visionService: VisionService,
+    private readonly mappingCommitService: MappingCommitService,
+    private readonly workOrderSpecsService: WorkOrderSpecsService,
   ) {}
 
   async analyzeWorkOrderImage(file: Express.Multer.File) {
     return await this.visionService.analyzeWorkOrder(file);
+  }
+
+  // AI 분석 결과(오더개요+자재명세+작업명세) 하나를 실제로 저장한다.
+  // 오더개요+자재명세는 mapping-commit.service.ts의 기존 커밋 로직을 그대로 재사용해
+  // Excel 매핑 커밋과 동일한 MasterStyle/StyleOverview/Bom/BomItem 생성 경로를 탄다.
+  async commitAnalysis(result: AiWorkOrderResultDto) {
+    const styleNo = result.overview.styleNo;
+    if (!styleNo) {
+      throw new BadRequestException('Style No.를 읽지 못했습니다 — 저장 전에 직접 입력해 주세요.');
+    }
+
+    await this.mappingCommitService.commit({
+      styleNo,
+      overviewData: {
+        styleNo,
+        factory: result.overview.factory || '',
+        totalQty: result.overview.totalQty ?? 0,
+        buyer: result.overview.buyer || '',
+        styleName: result.overview.styleName ?? undefined,
+        brand: result.overview.brand ?? undefined,
+        itemType: result.overview.itemType ?? undefined,
+        productionType: result.overview.productionType ?? undefined,
+        targetRdd: result.overview.targetRdd ?? undefined,
+      },
+      bomItems: result.bomItems.map((b) => ({
+        category: b.category ?? undefined,
+        itemName: b.itemName,
+        spec: b.spec ?? undefined,
+        colorCode: b.colorCode ?? undefined,
+        consumption: b.consumption ?? undefined,
+        requiredQty: b.requiredQty ?? undefined,
+        supplier: b.supplier ?? undefined,
+        remarks: b.remarks ?? undefined,
+      })),
+    });
+
+    return this.workOrderSpecsService.save(styleNo, result.workNotes, result.sizeSpecs);
+  }
+
+  async findSpecByStyleNo(styleNo: string) {
+    return this.workOrderSpecsService.findByStyleNo(styleNo);
   }
 
   async create(dto: CreateWorkOrderDto): Promise<WorkOrder> {

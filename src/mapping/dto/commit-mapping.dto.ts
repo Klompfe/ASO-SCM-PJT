@@ -2,12 +2,14 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsEnum,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
+import { ProductionType } from '../../styles/entities/style-overview.entity';
 
 export class CommitOverviewDto {
   @ApiProperty({ example: 'MB62SLM103Z' })
@@ -34,6 +36,33 @@ export class CommitOverviewDto {
   @IsOptional()
   @IsString()
   shipDate?: string;
+
+  // 아래 6개는 PR-054에서 추가 — 작업지시서 AI 분석(오더개요) 경로에서만 채워진다.
+  // Excel 매핑 커밋 경로는 이 필드들을 보내지 않으므로 계속 null로 남는다(기존 동작 유지).
+  @ApiPropertyOptional({ example: '울혼방 코튼 반소매재킷' })
+  @IsOptional()
+  @IsString()
+  styleName?: string;
+
+  @ApiPropertyOptional({ example: '미센스' })
+  @IsOptional()
+  @IsString()
+  brand?: string;
+
+  @ApiPropertyOptional({ example: 'JK' })
+  @IsOptional()
+  @IsString()
+  itemType?: string;
+
+  @ApiPropertyOptional({ enum: ProductionType })
+  @IsOptional()
+  @IsEnum(ProductionType)
+  productionType?: ProductionType;
+
+  @ApiPropertyOptional({ description: '납기(목표출고일)', example: '2026-09-12' })
+  @IsOptional()
+  @IsString()
+  targetRdd?: string;
 }
 
 export class CommitBomItemDto {

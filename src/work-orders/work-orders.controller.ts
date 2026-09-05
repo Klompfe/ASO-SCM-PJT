@@ -12,14 +12,16 @@ import {
   UploadedFile,
   ParseFilePipe,
   FileTypeValidator,
+  BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody, ApiQuery } from '@nestjs/swagger';
 import { WorkOrdersService } from './work-orders.service';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
 import { UpdateWorkOrderStatusDto } from './dto/update-work-order-status.dto';
 import { WorkOrder } from './entities/work-order.entity';
 import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
 
 @ApiTags('Work Orders (작업 지시 관리)')
 @ApiBearerAuth()
@@ -48,6 +50,22 @@ export class WorkOrdersController {
     file: Express.Multer.File,
   ) {
     return await this.woService.analyzeWorkOrderImage(file);
+  }
+
+  @Post('commit-analysis')
+  @ApiOperation({ summary: '작업지시서 AI 분석 결과 최종 저장 (오더개요+자재명세+작업명세)' })
+  async commitAnalysis(@Body() dto: AiWorkOrderResultDto) {
+    return this.woService.commitAnalysis(dto);
+  }
+
+  @Get('spec')
+  @ApiOperation({ summary: '스타일별 작업명세(사이즈 스펙+지시사항) 조회' })
+  @ApiQuery({ name: 'styleNo', required: true, example: 'MB62SLM103Z' })
+  async findSpec(@Query('styleNo') styleNo: string) {
+    if (!styleNo) {
+      throw new BadRequestException('styleNo는 필수입니다.');
+    }
+    return this.woService.findSpecByStyleNo(styleNo);
   }
 
   @Post()
