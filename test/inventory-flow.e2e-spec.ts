@@ -5,6 +5,7 @@ import * as fs from 'fs';
 // 않도록 이 파일 전용의 격리된 sqlite DB를 사용한다(app.module.ts가 ConfigService로
 // DB_DATABASE를 읽으므로, 모듈이 컴파일되기 전에 지정하면 된다).
 const TEST_DB_PATH = path.resolve(__dirname, '../test-db-inventory-flow.sqlite');
+process.env.DB_TYPE = 'sqlite';
 process.env.DB_DATABASE = TEST_DB_PATH;
 
 import { Test, TestingModule } from '@nestjs/testing';

@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const TEST_DB_PATH = path.resolve(__dirname, '../test-db-mapping-flow.sqlite');
+process.env.DB_TYPE = 'sqlite';
 process.env.DB_DATABASE = TEST_DB_PATH;
 
 import * as xlsx from 'xlsx';

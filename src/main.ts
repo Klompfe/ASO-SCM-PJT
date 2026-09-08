@@ -20,16 +20,19 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new LoggingInterceptor());
 
-  // CORS 설정 (3000, 5173, 8080)
+  // CORS 설정 — CORS_ORIGIN(콤마 구분)이 있으면 그 값을, 없으면 로컬 개발 기본값을 사용한다.
+  const corsOrigin = process.env.CORS_ORIGIN;
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:8080',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:8080',
-    ],
+    origin: corsOrigin
+      ? corsOrigin.split(',').map((origin) => origin.trim())
+      : [
+          'http://localhost:3000',
+          'http://localhost:5173',
+          'http://localhost:8080',
+          'http://127.0.0.1:3000',
+          'http://127.0.0.1:5173',
+          'http://127.0.0.1:8080',
+        ],
     credentials: true,
   });
 
