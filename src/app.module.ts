@@ -23,6 +23,7 @@ import { MappingModule } from './mapping/mapping.module';
 import { MasterModule } from './master/master.module';
 import { TransactionModule } from './transaction/transaction.module';
 import { StylesModule } from './styles/styles.module';
+import { HealthController } from './health/health.controller';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { StylesModule } from './styles/styles.module';
     TransactionModule,
     StylesModule,
   ],
+  controllers: [HealthController],
   providers: [
     {
       provide: APP_GUARD,
