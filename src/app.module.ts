@@ -37,16 +37,24 @@ import { StylesModule } from './styles/styles.module';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
         const dbType = configService.get<string>('DB_TYPE') || 'postgres';
+        // 프로덕션(NODE_ENV=production)에서는 synchronize를 끄고 마이그레이션으로만
+        // 스키마를 관리한다(PR-058) — synchronize:true를 배포 DB에 그대로 켜두면
+        // 엔티티 변경이 검토 없이 즉시 스키마에 반영되는 사고 위험이 있다.
+        const synchronize = configService.get<string>('NODE_ENV') !== 'production';
 
         if (dbType === 'sqlite') {
           return {
             type: 'sqlite',
             database: configService.get<string>('DB_DATABASE', 'scm_db.sqlite'),
             entities: [Material, Color, Size],
-            synchronize: true, // 개발용 자동 스키마 동기화
+            synchronize,
             autoLoadEntities: true,
           };
         }
+
+        // Neon 등 관리형 Postgres는 SSL 연결을 요구한다 — DB_SSL=true일 때만 켠다
+        // (docker-compose의 로컬 Postgres 서비스는 SSL을 지원하지 않으므로 기본은 off).
+        const useSsl = configService.get<string>('DB_SSL') === 'true';
 
         return {
           type: 'postgres',
@@ -56,8 +64,9 @@ import { StylesModule } from './styles/styles.module';
           password: configService.get<string>('DB_PASSWORD', 'postgres'),
           database: configService.get<string>('DB_DATABASE', 'scm_db'),
           entities: [Material, Color, Size],
-          synchronize: true,
+          synchronize,
           autoLoadEntities: true,
+          ssl: useSsl ? { rejectUnauthorized: false } : false,
         };
       },
     }),

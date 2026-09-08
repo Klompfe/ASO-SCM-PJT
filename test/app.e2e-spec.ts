@@ -1,3 +1,12 @@
+import * as path from 'path';
+import * as fs from 'fs';
+
+// 다른 e2e 스펙들과 동일하게 격리된 로컬 sqlite를 쓴다 — DB_TYPE/DB_DATABASE를
+// .env(운영 Postgres를 가리킬 수 있음)에 맡기면 실제 DB에 테스트 데이터가 쌓인다(PR-058).
+const TEST_DB_PATH = path.resolve(__dirname, '../test-db-app.sqlite');
+process.env.DB_TYPE = 'sqlite';
+process.env.DB_DATABASE = TEST_DB_PATH;
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
@@ -34,6 +43,7 @@ describe('SCM API (E2E Integration Test)', () => {
 
   afterAll(async () => {
     await app.close();
+    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
   });
 
   // 1. 인증 및 마스터 데이터 준비
