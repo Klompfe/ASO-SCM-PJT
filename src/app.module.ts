@@ -24,6 +24,7 @@ import { MasterModule } from './master/master.module';
 import { TransactionModule } from './transaction/transaction.module';
 import { StylesModule } from './styles/styles.module';
 import { HealthController } from './health/health.controller';
+import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
 @Module({
   imports: [
@@ -53,21 +54,12 @@ import { HealthController } from './health/health.controller';
           };
         }
 
-        // Neon 등 관리형 Postgres는 SSL 연결을 요구한다 — DB_SSL=true일 때만 켠다
-        // (docker-compose의 로컬 Postgres 서비스는 SSL을 지원하지 않으므로 기본은 off).
-        const useSsl = configService.get<string>('DB_SSL') === 'true';
-
         return {
           type: 'postgres',
-          host: configService.get<string>('DB_HOST', 'localhost'),
-          port: configService.get<number>('DB_PORT', 5432),
-          username: configService.get<string>('DB_USERNAME', 'postgres'),
-          password: configService.get<string>('DB_PASSWORD', 'postgres'),
-          database: configService.get<string>('DB_DATABASE', 'scm_db'),
+          ...getPostgresConnectionOptions(),
           entities: [Material, Color, Size],
           synchronize,
           autoLoadEntities: true,
-          ssl: useSsl ? { rejectUnauthorized: false } : false,
         };
       },
     }),
