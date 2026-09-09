@@ -21,20 +21,27 @@ async function bootstrap() {
   app.useGlobalInterceptors(new LoggingInterceptor());
 
   // CORS 설정 — CORS_ORIGIN(콤마 구분)이 있으면 그 값을, 없으면 로컬 개발 기본값을 사용한다.
-  const corsOrigin = process.env.CORS_ORIGIN;
-  app.enableCors({
-    origin: corsOrigin
-      ? corsOrigin.split(',').map((origin) => origin.trim())
-      : [
-          'http://localhost:3000',
-          'http://localhost:5173',
-          'http://localhost:8080',
-          'http://127.0.0.1:3000',
-          'http://127.0.0.1:5173',
-          'http://127.0.0.1:8080',
-        ],
-    credentials: true,
-  });
+  // CORS_ORIGIN=*는 반드시 배열이 아닌 문자열 '*' 그대로 넘겨야 한다(PR-061에서 발견된 버그) —
+  // ['*']처럼 배열로 넘기면 cors 패키지가 이를 와일드카드가 아니라 "Origin 헤더가 정확히
+  // 문자열 '*'인 요청만 허용"으로 해석해, 실제 브라우저 요청(Origin: https://...)이 전부
+  // 막혀 Access-Control-Allow-Origin 헤더 자체가 응답에서 빠진다.
+  const corsOrigin = process.env.CORS_ORIGIN?.trim();
+  let origin: string | string[];
+  if (!corsOrigin) {
+    origin = [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:8080',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:8080',
+    ];
+  } else if (corsOrigin === '*') {
+    origin = '*';
+  } else {
+    origin = corsOrigin.split(',').map((o) => o.trim());
+  }
+  app.enableCors({ origin, credentials: true });
 
   // 가장 표준적인 BearerAuth 설정
   const config = new DocumentBuilder()

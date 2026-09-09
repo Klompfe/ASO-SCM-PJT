@@ -47,7 +47,15 @@ Render Postgres, Railway Postgres, Neon 등 관리형 Postgres 인스턴스를 �
 | `JWT_SECRET` | JWT 서명 키 (강력한 랜덤 값, 반드시 시크릿으로 관리) | — |
 | `JWT_EXPIRES_IN` | JWT 만료 시간 | `1h` |
 | `GEMINI_API_KEY` | 작업지시서 AI 분석용 Gemini API 키 (미설정 시 목업 데이터로 동작) | — |
-| `CORS_ORIGIN` | 허용할 프론트엔드 origin (콤마로 여러 개 구분 가능). 미설정 시 로컬 개발용 localhost 주소만 허용됨 | `https://scm-frontend.onrender.com` |
+| `CORS_ORIGIN` | 허용할 프론트엔드 origin (콤마로 여러 개 구분 가능). `*`이면 모든 origin 허용(와일드카드로 올바르게 처리됨, PR-061에서 배열로 잘못 처리되던 버그 수정). 미설정 시 로컬 개발용 localhost 주소만 허용됨 | `https://scm-frontend.onrender.com` |
+
+> ⚠️ **TODO (배포 확정 전 반드시 처리)**: 지금은 Cloudflare Pages 프론트엔드 도메인이 아직
+> 확정되지 않아 `CORS_ORIGIN=*`(모든 origin 허용)로 열어두고 있다. **Cloudflare Pages 배포
+> 도메인이 확정되는 즉시 Render 백엔드의 `CORS_ORIGIN`을 그 도메인(예:
+> `https://aso-scm-pjt.pages.dev`)으로 좁혀야 한다** — 와일드카드를 프로덕션에 계속 열어두면
+> 임의의 웹사이트가 사용자의 브라우저를 통해 이 API를 호출할 수 있다(이 앱은 쿠키가 아닌
+> `Authorization` 헤더 기반 인증이라 `credentials`로 인한 직접적 탈취 경로는 아니지만,
+> 불필요하게 API 표면을 넓혀두는 것은 피해야 한다).
 
 ## 3. 프론트엔드 배포
 
