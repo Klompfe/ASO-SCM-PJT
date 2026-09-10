@@ -2,6 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getMasterStyles, createMasterStyle, type MasterStyle, type CreateMasterStyle } from '../api/styles.service';
 import { issueContract, getContractsByStyleNo, type Contract } from '../api/contracts.service';
+import {
+  upsertProcessStage, getProcessStagesByStyle, getMaterialReadiness,
+  createOrderShipment, updateOrderShipment, getOrderShipmentsByStyle,
+  type ProcessStageName, type OrderProcessStage, type MaterialReadiness, type OrderShipment,
+} from '../api/orderProgress.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
 const initialFormData: CreateMasterStyle = {
@@ -9,12 +14,38 @@ const initialFormData: CreateMasterStyle = {
   productionType: 'FOB', targetRdd: '', cmtPrice: 0, fobPrice: 0,
 };
 
+// 재단/봉제/포장 3단계 — PR-063 설계: 자재입고는 PO/재고에서 자동 파생, 검사(QC)는 추후.
+const PROCESS_STAGES: ProcessStageName[] = ['CUTTING', 'SEWING', 'PACKING'];
+const STAGE_LABELS: Record<ProcessStageName, string> = { CUTTING: '재단', SEWING: '봉제', PACKING: '포장' };
+
+interface StageFormValue {
+  startDate: string;
+  finishDate: string;
+  targetQty: string;
+  completedQty: string;
+  lineOrTeam: string;
+}
+const emptyStageForm: StageFormValue = { startDate: '', finishDate: '', targetQty: '', completedQty: '', lineOrTeam: '' };
+
+const toDateInputValue = (v: string | null | undefined): string => (v ? v.slice(0, 10) : '');
+
 export const StylesManager: React.FC = () => {
   const [formData, setFormData] = useState<CreateMasterStyle>(initialFormData);
   const [styles, setStyles] = useState<MasterStyle[]>([]);
   const [selectedStyle, setSelectedStyle] = useState<MasterStyle | null>(null);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [contractNotes, setContractNotes] = useState('');
+
+  const [processStages, setProcessStages] = useState<OrderProcessStage[]>([]);
+  const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness | null>(null);
+  const [stageForms, setStageForms] = useState<Record<ProcessStageName, StageFormValue>>({
+    CUTTING: emptyStageForm, SEWING: emptyStageForm, PACKING: emptyStageForm,
+  });
+  const [savingStage, setSavingStage] = useState<ProcessStageName | null>(null);
+
+  const [shipments, setShipments] = useState<OrderShipment[]>([]);
+  const [shipmentForm, setShipmentForm] = useState({ plannedShipDate: '', quantity: '', remark: '' });
+  const [creatingShipment, setCreatingShipment] = useState(false);
 
   const loadStyles = useCallback(async () => {
     try {
@@ -59,10 +90,55 @@ export const StylesManager: React.FC = () => {
     }
   };
 
+  const loadProcessStages = async (styleNo: string) => {
+    try {
+      const res = await getProcessStagesByStyle(styleNo);
+      const stages: OrderProcessStage[] = Array.isArray(res) ? res : [];
+      setProcessStages(stages);
+      const forms: Record<ProcessStageName, StageFormValue> = { CUTTING: emptyStageForm, SEWING: emptyStageForm, PACKING: emptyStageForm };
+      for (const s of stages) {
+        forms[s.stage] = {
+          startDate: toDateInputValue(s.startDate),
+          finishDate: toDateInputValue(s.finishDate),
+          targetQty: s.targetQty != null ? String(s.targetQty) : '',
+          completedQty: String(s.completedQty ?? 0),
+          lineOrTeam: s.lineOrTeam ?? '',
+        };
+      }
+      setStageForms(forms);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '공정 진행현황을 불러오는 데 실패했습니다.'));
+      setProcessStages([]);
+    }
+  };
+
+  const loadMaterialReadiness = async (styleNo: string) => {
+    try {
+      const res = await getMaterialReadiness(styleNo);
+      setMaterialReadiness(res ?? null);
+    } catch {
+      setMaterialReadiness(null);
+    }
+  };
+
+  const loadShipments = async (styleNo: string) => {
+    try {
+      const res = await getOrderShipmentsByStyle(styleNo);
+      setShipments(Array.isArray(res) ? res : []);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '출고 이력을 불러오는 데 실패했습니다.'));
+      setShipments([]);
+    }
+  };
+
   const handleSelectStyle = (s: MasterStyle) => {
     setSelectedStyle(s);
     setContractNotes('');
+    setShipmentForm({ plannedShipDate: '', quantity: '', remark: '' });
     loadContracts(s.styleNo);
+    loadProcessStages(s.styleNo);
+    loadMaterialReadiness(s.styleNo);
+    loadShipments(s.styleNo);
   };
 
   const handleIssueContract = async () => {
@@ -76,6 +152,75 @@ export const StylesManager: React.FC = () => {
       toast.error(getErrorMessage(err, '계약서 발행에 실패했습니다.'));
     }
   };
+
+  const handleSaveStage = async (stage: ProcessStageName) => {
+    if (!selectedStyle) return;
+    const form = stageForms[stage];
+    setSavingStage(stage);
+    try {
+      await upsertProcessStage({
+        styleNo: selectedStyle.styleNo,
+        stage,
+        startDate: form.startDate || undefined,
+        finishDate: form.finishDate || undefined,
+        targetQty: form.targetQty !== '' ? Number(form.targetQty) : undefined,
+        completedQty: form.completedQty !== '' ? Number(form.completedQty) : undefined,
+        lineOrTeam: form.lineOrTeam || undefined,
+      });
+      toast.success(`${STAGE_LABELS[stage]} 단계가 저장되었습니다.`);
+      loadProcessStages(selectedStyle.styleNo);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '공정 단계 저장에 실패했습니다.'));
+    } finally {
+      setSavingStage(null);
+    }
+  };
+
+  const handleCreateShipment = async () => {
+    if (!selectedStyle) return;
+    if (!shipmentForm.plannedShipDate || !shipmentForm.quantity) {
+      toast.error('계획출고일과 수량은 필수입니다.');
+      return;
+    }
+    setCreatingShipment(true);
+    try {
+      await createOrderShipment({
+        styleNo: selectedStyle.styleNo,
+        plannedShipDate: shipmentForm.plannedShipDate,
+        quantity: Number(shipmentForm.quantity),
+        remark: shipmentForm.remark || undefined,
+      });
+      toast.success('출고가 등록되었습니다.');
+      setShipmentForm({ plannedShipDate: '', quantity: '', remark: '' });
+      loadShipments(selectedStyle.styleNo);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '출고 등록에 실패했습니다.'));
+    } finally {
+      setCreatingShipment(false);
+    }
+  };
+
+  const handleConfirmShipment = async (shipment: OrderShipment) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const actualDate = window.prompt('실제 출고일 (YYYY-MM-DD)', today);
+    if (!actualDate || !selectedStyle) return;
+    try {
+      await updateOrderShipment(shipment.id, { actualShipDate: actualDate });
+      toast.success('출고가 확정되었습니다.');
+      loadShipments(selectedStyle.styleNo);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '출고 확정에 실패했습니다.'));
+    }
+  };
+
+  // 발주량(totalQty) - 누적출고량(실제출고일이 있는 건만) = 잔량. 음수(초과출고)도 그대로 허용.
+  const shippedQty = shipments.filter((s) => s.actualShipDate).reduce((sum, s) => sum + Number(s.quantity), 0);
+  const orderQty = Number(selectedStyle?.overview?.totalQty ?? 0);
+  const remainingQty = orderQty - shippedQty;
+  const targetRdd = selectedStyle?.overview?.targetRdd;
+  const isPastDue = targetRdd ? new Date(targetRdd).getTime() < Date.now() : false;
+  const deliveryStatus = remainingQty <= 0 ? '정상납품' : isPastDue ? '납기지연' : '진행중';
+  const deliveryStatusColor = deliveryStatus === '납기지연' ? 'text-red-600' : deliveryStatus === '정상납품' ? 'text-green-600' : 'text-gray-600';
 
   return (
     <div className="p-6">
@@ -156,7 +301,7 @@ export const StylesManager: React.FC = () => {
               </ul>
             )}
 
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-6">
               <input
                 className="border p-2 flex-1"
                 placeholder="비고 (선택)"
@@ -164,6 +309,105 @@ export const StylesManager: React.FC = () => {
                 onChange={(e) => setContractNotes(e.target.value)}
               />
               <button onClick={handleIssueContract} className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700">계약서 발행</button>
+            </div>
+
+            <h4 className="font-semibold mb-2">공정 진행현황</h4>
+            <div className="text-sm mb-2">
+              자재입고:{' '}
+              {materialReadiness === null ? (
+                <span className="text-gray-400">확인 불가</span>
+              ) : materialReadiness.totalMaterials === 0 ? (
+                <span className="text-gray-400">BOM 없음</span>
+              ) : (
+                <span className={materialReadiness.readyMaterials === materialReadiness.totalMaterials ? 'text-green-600 font-medium' : 'text-orange-600 font-medium'}>
+                  {materialReadiness.readyMaterials}/{materialReadiness.totalMaterials} 입고완료
+                </span>
+              )}
+            </div>
+            <div className="space-y-2 mb-6">
+              {PROCESS_STAGES.map((stage) => {
+                const form = stageForms[stage];
+                const targetQty = Number(form.targetQty) || 0;
+                const completedQty = Number(form.completedQty) || 0;
+                const pct = targetQty > 0 ? Math.min(100, Math.round((completedQty / targetQty) * 100)) : null;
+                const stageRecord = processStages.find((s) => s.stage === stage);
+                return (
+                  <div key={stage} className="border rounded p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">{STAGE_LABELS[stage]}</span>
+                      <span className="text-xs text-gray-500">
+                        {pct !== null && `${pct}% (${completedQty}/${targetQty})`}
+                        {stageRecord && ` · 마지막 갱신: ${new Date(stageRecord.updatedAt).toLocaleString()}`}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-2 text-sm">
+                      <input type="date" className="border p-1" aria-label={`${STAGE_LABELS[stage]} 시작일`} value={form.startDate}
+                        onChange={(e) => setStageForms({ ...stageForms, [stage]: { ...form, startDate: e.target.value } })} />
+                      <input type="date" className="border p-1" aria-label={`${STAGE_LABELS[stage]} 종료일`} value={form.finishDate}
+                        onChange={(e) => setStageForms({ ...stageForms, [stage]: { ...form, finishDate: e.target.value } })} />
+                      <input type="number" className="border p-1" placeholder="목표수량" value={form.targetQty}
+                        onChange={(e) => setStageForms({ ...stageForms, [stage]: { ...form, targetQty: e.target.value } })} />
+                      <input type="number" className="border p-1" placeholder="완료수량" value={form.completedQty}
+                        onChange={(e) => setStageForms({ ...stageForms, [stage]: { ...form, completedQty: e.target.value } })} />
+                      <input type="text" className="border p-1" placeholder="라인/담당" value={form.lineOrTeam}
+                        onChange={(e) => setStageForms({ ...stageForms, [stage]: { ...form, lineOrTeam: e.target.value } })} />
+                    </div>
+                    <button
+                      onClick={() => handleSaveStage(stage)}
+                      disabled={savingStage === stage}
+                      className="mt-2 bg-blue-600 text-white px-3 py-1 rounded text-sm disabled:opacity-50"
+                    >
+                      {savingStage === stage ? '저장 중...' : '저장'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <h4 className="font-semibold mb-2">출고/납품 현황</h4>
+            <div className="grid grid-cols-4 gap-2 text-sm mb-3 bg-gray-50 p-2 rounded">
+              <div><span className="text-gray-500">발주량:</span> {orderQty}</div>
+              <div><span className="text-gray-500">누적출고량:</span> {shippedQty}</div>
+              <div><span className="text-gray-500">잔량:</span> {remainingQty}</div>
+              <div><span className="text-gray-500">납기상태:</span> <span className={deliveryStatusColor}>{deliveryStatus}</span></div>
+            </div>
+            {shipments.length === 0 ? (
+              <p className="text-sm text-gray-500 mb-3">등록된 출고가 없습니다.</p>
+            ) : (
+              <table className="w-full text-sm mb-3 border-collapse">
+                <thead>
+                  <tr className="bg-gray-100 text-left">
+                    <th className="p-1">차수</th><th className="p-1">계획일</th><th className="p-1">실제일</th><th className="p-1">수량</th><th className="p-1">메모</th><th className="p-1"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shipments.map((s) => (
+                    <tr key={s.id} className="border-t">
+                      <td className="p-1">{s.installmentNo}차</td>
+                      <td className="p-1">{s.plannedShipDate}</td>
+                      <td className="p-1">{s.actualShipDate ?? <span className="text-gray-400">계획</span>}</td>
+                      <td className="p-1">{s.quantity}</td>
+                      <td className="p-1">{s.remark ?? '-'}</td>
+                      <td className="p-1">
+                        {!s.actualShipDate && (
+                          <button onClick={() => handleConfirmShipment(s)} className="text-blue-600 hover:underline text-xs">출고확정</button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="grid grid-cols-4 gap-2 mb-6">
+              <input type="date" className="border p-2" aria-label="계획출고일" value={shipmentForm.plannedShipDate}
+                onChange={(e) => setShipmentForm({ ...shipmentForm, plannedShipDate: e.target.value })} />
+              <input type="number" className="border p-2" placeholder="수량" value={shipmentForm.quantity}
+                onChange={(e) => setShipmentForm({ ...shipmentForm, quantity: e.target.value })} />
+              <input type="text" className="border p-2" placeholder="메모 (선택)" value={shipmentForm.remark}
+                onChange={(e) => setShipmentForm({ ...shipmentForm, remark: e.target.value })} />
+              <button onClick={handleCreateShipment} disabled={creatingShipment} className="bg-purple-600 text-white px-3 py-2 rounded text-sm disabled:opacity-50">
+                {creatingShipment ? '등록 중...' : '출고 등록'}
+              </button>
             </div>
 
             <button onClick={() => setSelectedStyle(null)} className="bg-gray-500 text-white px-4 py-2 rounded">닫기</button>
