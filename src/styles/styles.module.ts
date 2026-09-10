@@ -3,14 +3,37 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MasterStyle } from './entities/master-style.entity';
 import { StyleOverview } from './entities/style-overview.entity';
 import { Contract } from './entities/contract.entity';
+import { OrderProcessStage } from './entities/order-process-stage.entity';
+import { OrderShipment } from './entities/order-shipment.entity';
+import { Bom } from '../boms/entities/bom.entity';
+import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { StylesService } from './styles.service';
 import { StylesController } from './styles.controller';
 import { ContractsService } from './contracts.service';
 import { ContractsController } from './contracts.controller';
+import { OrderProcessStagesService } from './order-process-stages.service';
+import { OrderProcessStagesController } from './order-process-stages.controller';
+import { OrderShipmentsService } from './order-shipments.service';
+import { OrderShipmentsController } from './order-shipments.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([MasterStyle, StyleOverview, Contract])],
-  controllers: [StylesController, ContractsController],
-  providers: [StylesService, ContractsService],
+  imports: [
+    TypeOrmModule.forFeature([
+      MasterStyle,
+      StyleOverview,
+      Contract,
+      OrderProcessStage,
+      OrderShipment,
+      Bom,
+      PurchaseOrder,
+    ]),
+  ],
+  controllers: [
+    StylesController,
+    ContractsController,
+    OrderProcessStagesController,
+    OrderShipmentsController,
+  ],
+  providers: [StylesService, ContractsService, OrderProcessStagesService, OrderShipmentsService],
 })
 export class StylesModule {}
