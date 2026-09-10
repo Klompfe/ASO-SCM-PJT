@@ -160,7 +160,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
     setBulkApproving(true);
     setBulkProgress(0);
     let successCount = 0;
-    const failedStyleNos: string[] = [];
+    const failures: { styleNo: string; reason: string }[] = [];
 
     // 병렬로 돌리면 mapping-commit.service.ts의 "동일 이름 자재 없으면 새로 생성" 로직이
     // 서로 다른 시트에서 같은 자재명을 참조할 때 경합해 중복 생성될 수 있어 순차 실행한다.
@@ -172,17 +172,37 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
           bomItems: style.bomItems || [],
         });
         successCount++;
-      } catch {
-        failedStyleNos.push(style.styleNo);
+      } catch (err) {
+        const reason = getErrorMessage(err, '알 수 없는 오류');
+        // 원본 에러(응답 본문 전체)는 콘솔에 남겨 서버 로그와 대조 진단할 수 있게 한다 —
+        // 토스트는 길이 제한상 요약만 보여준다.
+        console.error(`[일괄 승인 실패] ${style.styleNo}:`, err);
+        failures.push({ styleNo: style.styleNo, reason });
       }
       setBulkProgress((p) => p + 1);
     }
 
     setBulkApproving(false);
-    if (failedStyleNos.length === 0) {
+    if (failures.length === 0) {
       toast.success(`일괄 승인 완료: ${successCount}개 성공${skippedCount > 0 ? `, ${skippedCount}개 제외` : ''}`);
     } else {
-      toast.error(`일괄 승인 완료: ${successCount}개 성공, ${failedStyleNos.length}개 실패(${failedStyleNos.join(', ')})`);
+      // 실패 사유별로 묶어서 "사유: 해당 styleNo 개수"로 간추린다 — 실패가 많을 때
+      // (예: 동일 원인으로 수십 건) 토스트가 읽을 수 없는 텍스트 벽이 되는 것을 막는다.
+      // 스타일별 전체 사유는 console.error로 남겨 정확한 대상을 추적할 수 있게 한다.
+      const reasonGroups = new Map<string, string[]>();
+      for (const f of failures) {
+        const list = reasonGroups.get(f.reason) ?? [];
+        list.push(f.styleNo);
+        reasonGroups.set(f.reason, list);
+      }
+      const summary = Array.from(reasonGroups.entries())
+        .map(([reason, styleNos]) => `- ${reason} (${styleNos.length}건: ${styleNos.slice(0, 3).join(', ')}${styleNos.length > 3 ? ' 외' : ''})`)
+        .join('\n');
+      toast.error(
+        `일괄 승인 완료: ${successCount}개 성공, ${failures.length}개 실패\n${summary}\n(전체 목록은 브라우저 콘솔 참고)`,
+        { duration: 20000 },
+      );
+      console.error('[일괄 승인 실패 목록]', failures);
     }
 
     const results = await Promise.all(

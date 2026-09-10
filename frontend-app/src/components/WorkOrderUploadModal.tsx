@@ -103,24 +103,40 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     setBulkSaving(true);
     setBulkProgress(0);
     let successCount = 0;
-    const failed: string[] = [];
+    const failures: { label: string; reason: string }[] = [];
 
     for (const { result, index } of targets) {
+      const label = result.overview.styleNo ?? `#${index + 1}`;
       try {
         await commitWorkOrderAnalysis(result);
         setSavedIndexes((prev) => new Set(prev).add(index));
         successCount++;
-      } catch {
-        failed.push(result.overview.styleNo ?? `#${index + 1}`);
+      } catch (err) {
+        const reason = getErrorMessage(err, '알 수 없는 오류');
+        console.error(`[일괄 저장 실패] ${label}:`, err);
+        failures.push({ label, reason });
       }
       setBulkProgress((p) => p + 1);
     }
 
     setBulkSaving(false);
-    if (failed.length === 0) {
+    if (failures.length === 0) {
       toast.success(`일괄 저장 완료: ${successCount}건 성공`);
     } else {
-      toast.error(`일괄 저장 완료: ${successCount}건 성공, ${failed.length}건 실패(${failed.join(', ')})`);
+      const reasonGroups = new Map<string, string[]>();
+      for (const f of failures) {
+        const list = reasonGroups.get(f.reason) ?? [];
+        list.push(f.label);
+        reasonGroups.set(f.reason, list);
+      }
+      const summary = Array.from(reasonGroups.entries())
+        .map(([reason, labels]) => `- ${reason} (${labels.length}건: ${labels.slice(0, 3).join(', ')}${labels.length > 3 ? ' 외' : ''})`)
+        .join('\n');
+      toast.error(
+        `일괄 저장 완료: ${successCount}건 성공, ${failures.length}건 실패\n${summary}\n(전체 목록은 브라우저 콘솔 참고)`,
+        { duration: 20000 },
+      );
+      console.error('[일괄 저장 실패 목록]', failures);
     }
     onSuccess();
   };
