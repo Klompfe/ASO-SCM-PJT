@@ -1,7 +1,8 @@
-import { Controller, Post, Body } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { Controller, Post, Get, Body } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { Public } from './public.decorator';
+import { GetUser } from './decorators/get-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
@@ -28,5 +29,15 @@ export class AuthController {
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
     return await this.authService.login(loginDto);
+  }
+
+  // PR-066: 프론트엔드가 role을 알아야 MANAGER/ADMIN 전용 버튼(계약 승인 등)을
+  // 조건부로 보여줄 수 있다 — 로그인 직후뿐 아니라 새로고침 시에도 동작해야 하므로
+  // localStorage에 role을 따로 캐싱하지 않고 매번 이 엔드포인트로 현재 값을 가져온다.
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '현재 로그인한 사용자 정보 조회' })
+  @Get('me')
+  async me(@GetUser() user: any) {
+    return { userId: user.userId, username: user.username, email: user.email, role: user.role };
   }
 }
