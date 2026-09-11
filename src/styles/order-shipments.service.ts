@@ -53,4 +53,17 @@ export class OrderShipmentsService {
   async findByStyleNo(styleNo: string): Promise<OrderShipment[]> {
     return this.shipmentRepository.find({ where: { styleNo }, order: { installmentNo: 'ASC' } });
   }
+
+  // 오더관리 목록 화면에서 각 행마다 출고 이력을 개별 조회(N+1)하지 않도록, 실제
+  // 출고된(actualShipDate가 있는) 건만 스타일별로 합산해 한 번에 반환한다(PR-064).
+  async getShippedQtySummary(): Promise<{ styleNo: string; shippedQty: number }[]> {
+    const rows = await this.shipmentRepository
+      .createQueryBuilder('s')
+      .select('s.styleNo', 'styleNo')
+      .addSelect('SUM(s.quantity)', 'shippedQty')
+      .where('s.actualShipDate IS NOT NULL')
+      .groupBy('s.styleNo')
+      .getRawMany();
+    return rows.map((r) => ({ styleNo: r.styleNo, shippedQty: Number(r.shippedQty) }));
+  }
 }

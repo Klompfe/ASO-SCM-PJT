@@ -67,3 +67,9 @@ export const updateOrderShipment = (id: number, data: UpdateOrderShipment): Prom
   apiClient.patch(`/order-shipments/${id}`, data);
 export const getOrderShipmentsByStyle = (styleNo: string): Promise<any> =>
   apiClient.get('/order-shipments', { params: { styleNo } });
+
+export interface ShippedQtySummary {
+  styleNo: string;
+  shippedQty: number;
+}
+export const getShipmentSummary = (): Promise<any> => apiClient.get('/order-shipments/summary');
