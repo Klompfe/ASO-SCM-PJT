@@ -4,8 +4,8 @@ import { getMasterStyles, createMasterStyle, type MasterStyle, type CreateMaster
 import { issueContract, getContractsByStyleNo, type Contract } from '../api/contracts.service';
 import {
   upsertProcessStage, getProcessStagesByStyle, getMaterialReadiness,
-  createOrderShipment, updateOrderShipment, getOrderShipmentsByStyle,
-  type ProcessStageName, type OrderProcessStage, type MaterialReadiness, type OrderShipment,
+  createOrderShipment, updateOrderShipment, getOrderShipmentsByStyle, getShipmentSummary,
+  type ProcessStageName, type OrderProcessStage, type MaterialReadiness, type OrderShipment, type ShippedQtySummary,
 } from '../api/orderProgress.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
@@ -29,6 +29,21 @@ const emptyStageForm: StageFormValue = { startDate: '', finishDate: '', targetQt
 
 const toDateInputValue = (v: string | null | undefined): string => (v ? v.slice(0, 10) : '');
 
+// 발주량 대비 누적출고량으로 납기상태를 판정한다 — 잔량<=0이면 정상납품, 남았는데
+// 납기가 지났으면 납기지연, 그 외엔 진행중. 목록 화면과 상세 모달이 동일 로직을 쓴다.
+// 발주량이 0/미입력이면(데이터 이상) "잔량 0 이하 = 정상납품"이 성립해버려 오해를 부르므로
+// 별도로 "-"(판단 불가)를 반환한다.
+const computeDeliveryStatus = (orderQty: number, shippedQty: number, targetRdd: string | null | undefined) => {
+  const remainingQty = orderQty - shippedQty;
+  if (orderQty <= 0) {
+    return { label: '-', colorClass: 'text-gray-400', remainingQty };
+  }
+  const isPastDue = targetRdd ? new Date(targetRdd).getTime() < Date.now() : false;
+  const label = remainingQty <= 0 ? '정상납품' : isPastDue ? '납기지연' : '진행중';
+  const colorClass = label === '납기지연' ? 'text-red-600' : label === '정상납품' ? 'text-green-600' : 'text-gray-600';
+  return { label, colorClass, remainingQty };
+};
+
 export const StylesManager: React.FC = () => {
   const [formData, setFormData] = useState<CreateMasterStyle>(initialFormData);
   const [styles, setStyles] = useState<MasterStyle[]>([]);
@@ -47,6 +62,8 @@ export const StylesManager: React.FC = () => {
   const [shipmentForm, setShipmentForm] = useState({ plannedShipDate: '', quantity: '', remark: '' });
   const [creatingShipment, setCreatingShipment] = useState(false);
 
+  const [shippedQtyByStyle, setShippedQtyByStyle] = useState<Record<string, number>>({});
+
   const loadStyles = useCallback(async () => {
     try {
       const res = await getMasterStyles();
@@ -58,9 +75,20 @@ export const StylesManager: React.FC = () => {
     }
   }, []);
 
+  const loadShipmentSummary = useCallback(async () => {
+    try {
+      const res = await getShipmentSummary();
+      const rows: ShippedQtySummary[] = Array.isArray(res) ? res : [];
+      setShippedQtyByStyle(Object.fromEntries(rows.map((r) => [r.styleNo, r.shippedQty])));
+    } catch {
+      setShippedQtyByStyle({});
+    }
+  }, []);
+
   useEffect(() => {
     loadStyles();
-  }, [loadStyles]);
+    loadShipmentSummary();
+  }, [loadStyles, loadShipmentSummary]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -193,6 +221,7 @@ export const StylesManager: React.FC = () => {
       toast.success('출고가 등록되었습니다.');
       setShipmentForm({ plannedShipDate: '', quantity: '', remark: '' });
       loadShipments(selectedStyle.styleNo);
+      loadShipmentSummary();
     } catch (err: any) {
       toast.error(getErrorMessage(err, '출고 등록에 실패했습니다.'));
     } finally {
@@ -208,6 +237,7 @@ export const StylesManager: React.FC = () => {
       await updateOrderShipment(shipment.id, { actualShipDate: actualDate });
       toast.success('출고가 확정되었습니다.');
       loadShipments(selectedStyle.styleNo);
+      loadShipmentSummary();
     } catch (err: any) {
       toast.error(getErrorMessage(err, '출고 확정에 실패했습니다.'));
     }
@@ -216,11 +246,8 @@ export const StylesManager: React.FC = () => {
   // 발주량(totalQty) - 누적출고량(실제출고일이 있는 건만) = 잔량. 음수(초과출고)도 그대로 허용.
   const shippedQty = shipments.filter((s) => s.actualShipDate).reduce((sum, s) => sum + Number(s.quantity), 0);
   const orderQty = Number(selectedStyle?.overview?.totalQty ?? 0);
-  const remainingQty = orderQty - shippedQty;
-  const targetRdd = selectedStyle?.overview?.targetRdd;
-  const isPastDue = targetRdd ? new Date(targetRdd).getTime() < Date.now() : false;
-  const deliveryStatus = remainingQty <= 0 ? '정상납품' : isPastDue ? '납기지연' : '진행중';
-  const deliveryStatusColor = deliveryStatus === '납기지연' ? 'text-red-600' : deliveryStatus === '정상납품' ? 'text-green-600' : 'text-gray-600';
+  const { label: deliveryStatus, colorClass: deliveryStatusColor, remainingQty } =
+    computeDeliveryStatus(orderQty, shippedQty, selectedStyle?.overview?.targetRdd);
 
   return (
     <div className="p-6">
@@ -249,12 +276,16 @@ export const StylesManager: React.FC = () => {
       <table className="w-full border-collapse border">
         <thead>
           <tr className="bg-gray-100">
-            <th>Style</th><th>Brand</th><th>Type</th><th>Factory</th><th>Buyer</th><th>RDD</th><th>D-Day</th><th>상태</th>
+            <th>Style</th><th>Brand</th><th>Type</th><th>Factory</th><th>Buyer</th><th>RDD</th><th>D-Day</th><th>상태</th><th>출고율</th><th>납기상태</th>
           </tr>
         </thead>
         <tbody>
           {styles.map(s => {
             const dday = calculateDDay(s.overview?.targetRdd);
+            const orderQty = Number(s.overview?.totalQty ?? 0);
+            const shippedQty = shippedQtyByStyle[s.styleNo] ?? 0;
+            const shipRate = orderQty > 0 ? Math.min(100, Math.round((shippedQty / orderQty) * 100)) : null;
+            const { label: deliveryStatus, colorClass } = computeDeliveryStatus(orderQty, shippedQty, s.overview?.targetRdd);
             return (
               <tr key={s.styleNo} onClick={() => handleSelectStyle(s)} className="cursor-pointer hover:bg-gray-50">
                 <td>{s.styleNo}</td>
@@ -265,6 +296,8 @@ export const StylesManager: React.FC = () => {
                 <td>{s.overview?.targetRdd ?? '-'}</td>
                 <td className={dday !== null && dday <= 7 ? 'text-red-500' : ''}>{dday ?? '-'}</td>
                 <td>{s.overview?.status ?? '-'}</td>
+                <td>{shipRate !== null ? `${shipRate}% (${shippedQty}/${orderQty})` : '-'}</td>
+                <td className={colorClass}>{deliveryStatus}</td>
               </tr>
             );
           })}

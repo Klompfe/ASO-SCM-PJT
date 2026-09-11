@@ -20,6 +20,11 @@ export class OrderShipmentsController {
     return this.shipmentsService.update(id, dto);
   }
 
+  @Get('summary')
+  getShippedQtySummary() {
+    return this.shipmentsService.getShippedQtySummary();
+  }
+
   @Get()
   @ApiQuery({ name: 'styleNo', required: true, example: 'MB62SLM103Z' })
   findByStyle(@Query('styleNo') styleNo: string) {
