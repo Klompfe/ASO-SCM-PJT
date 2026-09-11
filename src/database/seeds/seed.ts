@@ -28,6 +28,21 @@ async function bootstrap() {
     console.log('✅ 관리자 계정 생성 완료 (admin@scm.com / admin1234!)');
   }
 
+  // 1-1. MANAGER 권한 테스트 계정 생성(PR-065) — RolesGuard로 보호된 라우트를
+  // 수동으로 검증할 때 쓸 계정이 지금까지 하나도 없었다.
+  const existingManager = await userRepo.findOne({ where: { email: 'manager@scm.com' } });
+  if (!existingManager) {
+    const hashedPassword = await bcrypt.hash('manager1234!', 10);
+    await userRepo.save({
+      username: 'manager',
+      email: 'manager@scm.com',
+      password: hashedPassword,
+      name: '매니저 테스트 계정',
+      role: UserRole.MANAGER,
+    });
+    console.log('✅ 매니저 계정 생성 완료 (manager@scm.com / manager1234!)');
+  }
+
   // 2. 초기 공급업체 생성
   const supplierRepo = dataSource.getRepository(Supplier);
   const existingSupplier = await supplierRepo.findOne({ where: { code: 'SUP001' } });
