@@ -103,6 +103,50 @@ describe('SCM API (E2E Integration Test)', () => {
     finishedItemId = finRes.body.data.id;
   });
 
+  // PR-073: 자재마스터(Item)에 영문명(englishName)을 추가했다 — 등록 시 저장되고,
+  // 조회/수정에서도 그대로 반영되는지 검증한다.
+  describe('/items - englishName (PR-073)', () => {
+    it('englishName을 포함해 등록하면 저장되고 조회 시에도 그대로 반환되어야 한다', async () => {
+      const createRes = await request(app.getHttpServer())
+        .post('/items')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({
+          code: `ENG_E2E_${Date.now()}`,
+          name: '울원단',
+          englishName: 'WOOL FABRIC',
+          type: 'RAW_MATERIAL',
+        })
+        .expect(201);
+      expect(createRes.body.data.englishName).toBe('WOOL FABRIC');
+
+      const getRes = await request(app.getHttpServer())
+        .get(`/items/${createRes.body.data.id}`)
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .expect(200);
+      expect(getRes.body.data.englishName).toBe('WOOL FABRIC');
+    });
+
+    it('PATCH로 englishName을 수정할 수 있어야 한다', async () => {
+      const createRes = await request(app.getHttpServer())
+        .post('/items')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({
+          code: `ENG_PATCH_E2E_${Date.now()}`,
+          name: '폴리에스터원단',
+          type: 'RAW_MATERIAL',
+        })
+        .expect(201);
+      expect(createRes.body.data.englishName).toBeFalsy();
+
+      const patchRes = await request(app.getHttpServer())
+        .patch(`/items/${createRes.body.data.id}`)
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({ englishName: 'POLYESTER FABRIC' })
+        .expect(200);
+      expect(patchRes.body.data.englishName).toBe('POLYESTER FABRIC');
+    });
+  });
+
   // 2. 구매 주문 (Purchase Orders) 테스트
   describe('/purchase-orders', () => {
     it('POST /purchase-orders - 원자재 발주서 생성', async () => {

@@ -4,6 +4,7 @@ export interface Item {
   id: number;
   code: string;
   name: string;
+  englishName?: string;
   type: string;
   unit?: string;
   spec?: string;
@@ -20,14 +21,18 @@ export interface GetItemsFilter {
 export interface CreateItem {
   code: string;
   name: string;
+  englishName?: string;
   type: string;
   unit?: string;
   spec?: string;
   description?: string;
 }
 
+export type UpdateItem = Partial<CreateItem>;
+
 export const getItems = (filter: GetItemsFilter): Promise<any> => apiClient.get('/items', { params: filter });
 export const createItem = (data: CreateItem): Promise<any> => apiClient.post('/items', data);
+export const updateItem = (id: number, data: UpdateItem): Promise<any> => apiClient.patch(`/items/${id}`, data);
 export const uploadPreview = (file: File): Promise<any> => {
   const formData = new FormData();
   formData.append('file', file);

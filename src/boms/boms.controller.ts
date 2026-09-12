@@ -1,6 +1,7 @@
-import { BadRequestException, Controller, Get, NotFoundException, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseIntPipe, Patch, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { BomsService } from './boms.service';
+import { UpdateBomItemDto } from './dto/update-bom-item.dto';
 
 @ApiTags('자재명세(BOM)')
 @ApiBearerAuth()
@@ -19,5 +20,14 @@ export class BomsController {
       throw new NotFoundException(`등록된 자재명세가 없습니다: ${styleNo}`);
     }
     return bom;
+  }
+
+  // PR-073: 자재명세 상세 테이블에서 혼용율/HS코드 인라인 수정.
+  @Patch('items/:id')
+  async updateItem(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateBomItemDto,
+  ) {
+    return await this.bomsService.updateItem(id, dto);
   }
 }

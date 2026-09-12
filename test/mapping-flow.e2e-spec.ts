@@ -109,7 +109,16 @@ describe('자재명세 업로드/커밋 회귀 테스트 (PR-025/026/028/029/031
       styleNo,
       overviewData: { styleNo, totalQty: 500, factory: '베트남', buyer: 'E2E바이어', shipDate: '' },
       bomItems: [
-        { id: 1, category: 'GENERAL', itemName: `E2E_MAPPING_MATERIAL_${Date.now()}`, consumption: 2, requiredQty: 1000 },
+        {
+          id: 1,
+          category: 'GENERAL',
+          itemName: `E2E_MAPPING_MATERIAL_${Date.now()}`,
+          consumption: 2,
+          requiredQty: 1000,
+          // PR-073: 매핑 커밋 페이로드가 혼용율/HS코드를 함께 보내면 그대로 저장되어야 한다.
+          composition: 'WOOL 98%, POLYURETHANE 2%',
+          hsCode: '6110.30',
+        },
       ],
     };
 
@@ -150,6 +159,9 @@ describe('자재명세 업로드/커밋 회귀 테스트 (PR-025/026/028/029/031
       );
       expect(bomItems).toHaveLength(1);
       expect(Number(bomItems[0].consumption)).toBe(2);
+      // PR-073: composition/hsCode가 커밋 페이로드 그대로 저장되어야 한다.
+      expect(bomItems[0].composition).toBe('WOOL 98%, POLYURETHANE 2%');
+      expect(bomItems[0].hsCode).toBe('6110.30');
     });
 
     it('커밋 후에는 같은 styleNo에 대해 check-exists가 true를 반환해야 한다', async () => {
@@ -166,6 +178,36 @@ describe('자재명세 업로드/커밋 회귀 테스트 (PR-025/026/028/029/031
         .get('/mapping/check-exists')
         .set('Authorization', `Bearer ${jwtToken}`)
         .expect(400);
+    });
+
+    // PR-073: 자재명세(BOM) 상세 화면에서 혼용율/HS코드를 인라인으로 수정하는 흐름.
+    it('GET /boms로 조회한 BomItem에 혼용율/HS코드가 포함되고, PATCH /boms/items/:id로 수정할 수 있어야 한다', async () => {
+      const bomRes = await request(app.getHttpServer())
+        .get('/boms')
+        .query({ styleNo })
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .expect(200);
+
+      const bomItem = bomRes.body.data.items[0];
+      expect(bomItem.composition).toBe('WOOL 98%, POLYURETHANE 2%');
+      expect(bomItem.hsCode).toBe('6110.30');
+
+      const patchRes = await request(app.getHttpServer())
+        .patch(`/boms/items/${bomItem.id}`)
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({ composition: 'COTTON 100%', hsCode: '5208.11' })
+        .expect(200);
+      expect(patchRes.body.data.composition).toBe('COTTON 100%');
+      expect(patchRes.body.data.hsCode).toBe('5208.11');
+
+      const reRes = await request(app.getHttpServer())
+        .get('/boms')
+        .query({ styleNo })
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .expect(200);
+      const updatedItem = reRes.body.data.items[0];
+      expect(updatedItem.composition).toBe('COTTON 100%');
+      expect(updatedItem.hsCode).toBe('5208.11');
     });
   });
 });

@@ -88,7 +88,9 @@ export class MappingCommitService {
           requiredQty: item.requiredQty ?? 0,
           supplier: item.supplier || 'N/A',
           unitPrice: item.unitPrice ?? 0,
-          remarks: item.remarks || 'N/A'
+          remarks: item.remarks || 'N/A',
+          composition: item.composition ?? null,
+          hsCode: item.hsCode ?? null,
         });
       }
 
