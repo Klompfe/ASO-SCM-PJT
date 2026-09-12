@@ -40,7 +40,7 @@ function App() {
   });
   
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'users' | 'purchaseOrders' | 'exportShipments'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'users' | 'purchaseOrders'>('dashboard');
 
   // PR-070: "사용자 관리" 탭은 MANAGER/ADMIN에게만 보여야 한다 — GET /auth/me(PR-066)로
   // 현재 사용자의 role을 조회해 탭 자체를 목록에서 숨긴다(USER는 존재를 알 필요도 없음).
@@ -63,6 +63,13 @@ function App() {
     setStyleNoToOpen(styleNo);
     setOrderManagementSubTab('list');
   };
+
+  // PR-076: 상단 "Shipments" 탭을 "선적관리"로 개명하고 하위에 "수출"/"수입" 두 서브탭을
+  // 둔다. "수출"은 PR-073~075에서 구축한 수출 선적서류(Invoice/Packing List) 자동생성
+  // 기능(ExportShipmentManager, 옛 최상단 "수출선적서류" 탭)이고, "수입"은 기존
+  // Shipments 기능(ShipmentsManager, 원자재 입고 물류)을 별도 설계 전까지 임시 배치한
+  // 것이다(설계문서 6-1절 확정사항). 기본값은 현재 개발 중인 "수출".
+  const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import'>('export');
 
   const handleOrderItem = (itemId: number) => {
     setPoPrefillItemId(itemId);
@@ -143,13 +150,26 @@ function App() {
             )}
           </div>
         );
-        case 'shipments': return <ShipmentsManager />;
+        case 'shipments': return (
+          <div>
+            <div className="flex space-x-2 mb-4 border-b border-gray-200">
+              <button
+                className={`px-3 py-2 text-sm font-medium ${shipmentsSubTab === 'export' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setShipmentsSubTab('export')}
+              >수출</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${shipmentsSubTab === 'import' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setShipmentsSubTab('import')}
+              >수입</button>
+            </div>
+            {shipmentsSubTab === 'export' ? <ExportShipmentManager /> : <ShipmentsManager />}
+          </div>
+        );
         case 'suppliers': return <SuppliersManager />;
         case 'buyers': return <BuyersManager />;
         case 'users': return <UsersManager />;
         case 'purchaseOrders': return <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />;
-        case 'exportShipments': return <ExportShipmentManager />;
-        default: 
+        default:
           // Routing Fallback: If unknown, default to Dashboard
           return <Dashboard />;
       }
@@ -180,14 +200,13 @@ function App() {
         <button className={`${tabButtonStyle} ${activeTab === 'items' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('items')}>Items</button>
         <button className={`${tabButtonStyle} ${activeTab === 'workOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('workOrders')}>Work Orders</button>
         <button className={`${tabButtonStyle} ${activeTab === 'styles' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('styles')}>오더관리</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'shipments' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('shipments')}>Shipments</button>
+        <button className={`${tabButtonStyle} ${activeTab === 'shipments' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('shipments')}>선적관리</button>
         <button className={`${tabButtonStyle} ${activeTab === 'suppliers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('suppliers')}>Suppliers</button>
         <button className={`${tabButtonStyle} ${activeTab === 'buyers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('buyers')}>고객사</button>
         {canManageUsers && (
           <button className={`${tabButtonStyle} ${activeTab === 'users' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('users')}>사용자 관리</button>
         )}
         <button className={`${tabButtonStyle} ${activeTab === 'purchaseOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('purchaseOrders')}>Purchase Orders</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'exportShipments' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('exportShipments')}>수출선적서류</button>
       </nav>
 
       <main className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 min-h-[400px]">
