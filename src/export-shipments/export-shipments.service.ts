@@ -9,6 +9,7 @@ import { ExportShipmentLine } from './entities/export-shipment-line.entity';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
 import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.dto';
 import { UserRole } from '../users/entities/user.entity';
+import { ExportShipmentDefaultsService } from '../export-shipment-defaults/export-shipment-defaults.service';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
   arr.reduce((total, item) => total + (Number(item[key]) || 0), 0);
@@ -33,6 +34,7 @@ export class ExportShipmentsService {
     private readonly exportShipmentRepository: Repository<ExportShipment>,
     @InjectRepository(ExportShipmentLine)
     private readonly exportShipmentLineRepository: Repository<ExportShipmentLine>,
+    private readonly exportShipmentDefaultsService: ExportShipmentDefaultsService,
   ) {}
 
   // PR-075: purchaseOrderIds(들)의 PackingReceipt를 styleNo+자재 기준으로 집계해
@@ -57,6 +59,12 @@ export class ExportShipmentsService {
   // 그대로 쓴다. 실제 운영에 맞추려면 PackingReceiptRoll에 길이 필드를 추가하는
   // 후속 작업이 필요하다 — 이번 PR은 description 자동생성과 상태관리 흐름이
   // 핵심이라 이 부분은 명시적으로 근사치로 남겨둔다.
+  //
+  // PR-079: shipperInfo/consigneeInfo/portOfLoading/finalDestination/carrier는
+  // 건마다 거의 바뀌지 않는 회사 고정정보라 ExportShipmentDefaults(싱글턴)에서
+  // 기본값을 가져와 채운다. dto로 값이 넘어오면(개별 건에서 예외적으로 다르게
+  // 나가는 경우) 그 값이 우선한다. sheetNo/invoiceDate/sailingDate는 건마다
+  // 달라지는 값이라 기본값 대상이 아니다 — dto 값만 그대로 쓴다.
   async generate(purchaseOrderIds: number[], dto: GenerateExportShipmentDto): Promise<ExportShipment> {
     if (!purchaseOrderIds || purchaseOrderIds.length === 0) {
       throw new BadRequestException('purchaseOrderIds는 최소 1개 이상이어야 합니다.');
@@ -136,17 +144,21 @@ export class ExportShipmentsService {
       }
     }
 
+    // PR-079: 기본값이 아직 한 번도 설정된 적 없으면 find()가 null을 반환한다 —
+    // 이 경우 에러 없이 그냥 dto 값(없으면 null)만으로 진행한다(헤더 공란 유지).
+    const defaults = await this.exportShipmentDefaultsService.find();
+
     const shipment = await this.exportShipmentRepository.save(
       this.exportShipmentRepository.create({
         styleNos: Array.from(styleNoSet),
         status: ExportShipmentStatus.DRAFT,
         sheetNo: dto.sheetNo ?? null,
         invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
-        shipperInfo: dto.shipperInfo ?? null,
-        consigneeInfo: dto.consigneeInfo ?? null,
-        portOfLoading: dto.portOfLoading ?? null,
-        finalDestination: dto.finalDestination ?? null,
-        carrier: dto.carrier ?? null,
+        shipperInfo: dto.shipperInfo ?? defaults?.shipperInfo ?? null,
+        consigneeInfo: dto.consigneeInfo ?? defaults?.consigneeInfo ?? null,
+        portOfLoading: dto.portOfLoading ?? defaults?.portOfLoading ?? null,
+        finalDestination: dto.finalDestination ?? defaults?.finalDestination ?? null,
+        carrier: dto.carrier ?? defaults?.carrier ?? null,
         sailingDate: dto.sailingDate ? new Date(dto.sailingDate) : null,
       }),
     );

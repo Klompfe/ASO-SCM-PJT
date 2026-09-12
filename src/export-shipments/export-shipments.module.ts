@@ -7,10 +7,12 @@ import { ExportShipment } from './entities/export-shipment.entity';
 import { ExportShipmentLine } from './entities/export-shipment-line.entity';
 import { ExportShipmentsService } from './export-shipments.service';
 import { ExportShipmentsController } from './export-shipments.controller';
+import { ExportShipmentDefaultsModule } from '../export-shipment-defaults/export-shipment-defaults.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([PurchaseOrder, PackingReceipt, BomItem, ExportShipment, ExportShipmentLine]),
+    ExportShipmentDefaultsModule,
   ],
   controllers: [ExportShipmentsController],
   providers: [ExportShipmentsService],
