@@ -10,7 +10,6 @@ import {
   Query,
   ParseIntPipe,
   UseInterceptors,
-  UseGuards,
   UploadedFile,
 } from '@nestjs/common';
 import {
@@ -26,9 +25,6 @@ import { ItemsService } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { GetItemsFilterDto } from './dto/get-items-filter.dto';
 import { BulkInsertDto } from './dto/bulk-insert-items.dto';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
 
 @ApiTags('품목 관리 API (Items)')
 @ApiBearerAuth()
@@ -102,16 +98,4 @@ export class ItemsController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.itemsService.remove(id);
   }
-
-  // RolesGuard 실제 활성화의 첫 적용 대상(PR-065) — 전체 품목을 한 번에 지우는
-  // 파괴적 작업이라 MANAGER 이상만 호출할 수 있게 제한한다.
-  @ApiOperation({ summary: '모든 품목 데이터 초기화 (MANAGER 권한 필요)' })
-  @ApiResponse({ status: 200, description: '초기화 성공' })
-  @ApiResponse({ status: 403, description: 'MANAGER 권한 없음' })
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER)
-  @Delete('clear/all')
-  async clearAll() {
-    return await this.itemsService.clearAll();
-  }
-  }
+}
