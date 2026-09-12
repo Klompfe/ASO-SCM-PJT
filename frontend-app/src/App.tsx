@@ -7,8 +7,10 @@ import { StylesManager } from './components/StylesManager';
 import { OrderProgressSummary } from './components/OrderProgressSummary';
 import { SuppliersManager } from './components/SuppliersManager';
 import { BuyersManager } from './components/BuyersManager';
+import { UsersManager } from './components/UsersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { LoginPage } from './components/LoginPage';
+import { getCurrentUser, type CurrentUser } from './api/auth.service';
 import './App.css';
 
 function App() {
@@ -37,7 +39,16 @@ function App() {
   });
   
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'purchaseOrders'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'users' | 'purchaseOrders'>('dashboard');
+
+  // PR-070: "사용자 관리" 탭은 MANAGER/ADMIN에게만 보여야 한다 — GET /auth/me(PR-066)로
+  // 현재 사용자의 role을 조회해 탭 자체를 목록에서 숨긴다(USER는 존재를 알 필요도 없음).
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null));
+  }, [isAuthenticated]);
+  const canManageUsers = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
   // Items(자재명세) 화면에서 "발주하기"를 누르면 이 값을 채우고 Purchase Orders 탭으로 이동한다.
   const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(null);
 
@@ -134,6 +145,7 @@ function App() {
         case 'shipments': return <ShipmentsManager />;
         case 'suppliers': return <SuppliersManager />;
         case 'buyers': return <BuyersManager />;
+        case 'users': return <UsersManager />;
         case 'purchaseOrders': return <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />;
         default: 
           // Routing Fallback: If unknown, default to Dashboard
@@ -169,6 +181,9 @@ function App() {
         <button className={`${tabButtonStyle} ${activeTab === 'shipments' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('shipments')}>Shipments</button>
         <button className={`${tabButtonStyle} ${activeTab === 'suppliers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('suppliers')}>Suppliers</button>
         <button className={`${tabButtonStyle} ${activeTab === 'buyers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('buyers')}>고객사</button>
+        {canManageUsers && (
+          <button className={`${tabButtonStyle} ${activeTab === 'users' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('users')}>사용자 관리</button>
+        )}
         <button className={`${tabButtonStyle} ${activeTab === 'purchaseOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('purchaseOrders')}>Purchase Orders</button>
       </nav>
 
