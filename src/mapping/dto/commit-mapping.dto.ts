@@ -120,6 +120,19 @@ export class CommitBomItemDto {
   @IsOptional()
   @IsString()
   remarks?: string;
+
+  // PR-073: 수출 선적서류 자동생성용 혼용율/HS코드 — 둘 다 짝값이다(혼용율이 바뀌면
+  // HS코드도 바뀐다). 지금 당장은 매핑 파이프라인(엑셀/AI분석)이 이 값을 채우지
+  // 않으므로 optional로 두고, 실제 입력은 프론트 인라인 수정으로 이뤄진다.
+  @ApiPropertyOptional({ example: 'WOOL 98%, POLYURETHANE 2%' })
+  @IsOptional()
+  @IsString()
+  composition?: string;
+
+  @ApiPropertyOptional({ example: '6110.30' })
+  @IsOptional()
+  @IsString()
+  hsCode?: string;
 }
 
 export class CommitMappingDto {

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getItems, createItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
+import { getItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
-import { getBomByStyleNo, type BomDetail } from '../api/boms.service';
+import { getBomByStyleNo, updateBomItem, type BomDetail, type BomItemRow } from '../api/boms.service';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
@@ -26,8 +26,15 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   // 품목 마스터 (보조 기능)
   const [items, setItems] = useState<Item[]>([]);
   const [filter] = useState<GetItemsFilter>({ page: 1, limit: 10 });
-  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', type: 'RAW_MATERIAL' });
+  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', type: 'RAW_MATERIAL' });
   const [loading, setLoading] = useState<boolean>(false);
+  // PR-073: 품목 마스터 테이블의 영문명 인라인 수정 (Suppliers/Buyers와 동일한 패턴).
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editItemForm, setEditItemForm] = useState<{ name: string; englishName: string }>({ name: '', englishName: '' });
+
+  // PR-073: 자재명세(BOM) 상세 테이블의 혼용율/HS코드 인라인 수정.
+  const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
+  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string }>({ composition: '', hsCode: '' });
 
   // 엑셀 업로드 → 매핑 프리뷰
   const [error, setError] = useState<string | null>(null);
@@ -95,11 +102,56 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
       await createItem(newItem);
       toast.success('품목이 생성되었습니다.');
       loadItems();
-      setNewItem({ code: '', name: '', type: 'RAW_MATERIAL' });
+      setNewItem({ code: '', name: '', englishName: '', type: 'RAW_MATERIAL' });
     } catch (error) {
       // toast.error는 Axios 인터셉터에서 처리됨
     } finally {
       setLoading(false);
+    }
+  };
+
+  const startEditItem = (item: Item) => {
+    setEditingItemId(item.id);
+    setEditItemForm({ name: item.name, englishName: item.englishName || '' });
+  };
+
+  const cancelEditItem = () => {
+    setEditingItemId(null);
+    setEditItemForm({ name: '', englishName: '' });
+  };
+
+  const handleUpdateItem = async (id: number) => {
+    try {
+      await updateItem(id, { name: editItemForm.name, englishName: editItemForm.englishName });
+      toast.success('품목 정보가 수정되었습니다.');
+      cancelEditItem();
+      loadItems();
+    } catch (error) {
+      // toast.error는 Axios 인터셉터에서 처리됨
+    }
+  };
+
+  const startEditBomItem = (row: BomItemRow) => {
+    setEditingBomItemId(row.id);
+    setEditBomItemForm({ composition: row.composition || '', hsCode: row.hsCode || '' });
+  };
+
+  const cancelEditBomItem = () => {
+    setEditingBomItemId(null);
+    setEditBomItemForm({ composition: '', hsCode: '' });
+  };
+
+  const handleUpdateBomItem = async (id: number) => {
+    try {
+      await updateBomItem(id, { composition: editBomItemForm.composition, hsCode: editBomItemForm.hsCode });
+      toast.success('혼용율/HS코드가 수정되었습니다.');
+      cancelEditBomItem();
+      if (selectedStyleNo) {
+        const res = await getBomByStyleNo(selectedStyleNo);
+        setBom(res);
+      }
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '혼용율/HS코드 수정에 실패했습니다.'));
     }
   };
 
@@ -335,34 +387,74 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                     <th className="px-4 py-2 text-left">공급업체</th>
                     <th className="px-4 py-2 text-right">단가</th>
                     <th className="px-4 py-2 text-left">비고</th>
+                    <th className="px-4 py-2 text-left">혼용율</th>
+                    <th className="px-4 py-2 text-left">HS코드</th>
                     <th className="px-4 py-2 text-left">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {bom.items.map((it) => (
-                    <tr key={it.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 font-mono">{it.material?.code}</td>
-                      <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
-                      <td className="px-4 py-2 whitespace-pre-line">{it.category}</td>
-                      <td className="px-4 py-2">{it.colorCode}</td>
-                      <td className="px-4 py-2">{it.spec}</td>
-                      <td className="px-4 py-2 text-right">{it.consumption}</td>
-                      <td className="px-4 py-2 text-right">{it.requiredQty}</td>
-                      <td className="px-4 py-2">{it.supplier}</td>
-                      <td className="px-4 py-2 text-right">{it.unitPrice}</td>
-                      <td className="px-4 py-2">{it.remarks}</td>
-                      <td className="px-4 py-2">
-                        {onOrderItem && it.material?.id && (
-                          <button
-                            onClick={() => onOrderItem(it.material.id)}
-                            className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-blue-700 whitespace-nowrap"
-                          >
-                            발주하기
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {bom.items.map((it) =>
+                    editingBomItemId === it.id ? (
+                      <tr key={it.id} className="bg-yellow-50">
+                        <td className="px-4 py-2 font-mono">{it.material?.code}</td>
+                        <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
+                        <td className="px-4 py-2 whitespace-pre-line">{it.category}</td>
+                        <td className="px-4 py-2">{it.colorCode}</td>
+                        <td className="px-4 py-2">{it.spec}</td>
+                        <td className="px-4 py-2 text-right">{it.consumption}</td>
+                        <td className="px-4 py-2 text-right">{it.requiredQty}</td>
+                        <td className="px-4 py-2">{it.supplier}</td>
+                        <td className="px-4 py-2 text-right">{it.unitPrice}</td>
+                        <td className="px-4 py-2">{it.remarks}</td>
+                        <td className="px-4 py-2">
+                          <input
+                            className="border rounded px-2 py-1 w-40"
+                            placeholder="예: WOOL 98%, PU 2%"
+                            value={editBomItemForm.composition}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, composition: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            className="border rounded px-2 py-1 w-24"
+                            placeholder="예: 6110.30"
+                            value={editBomItemForm.hsCode}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, hsCode: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-4 py-2 space-x-2 whitespace-nowrap">
+                          <button className="text-blue-600" onClick={() => handleUpdateBomItem(it.id)}>저장</button>
+                          <button className="text-gray-500" onClick={cancelEditBomItem}>취소</button>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={it.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 font-mono">{it.material?.code}</td>
+                        <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
+                        <td className="px-4 py-2 whitespace-pre-line">{it.category}</td>
+                        <td className="px-4 py-2">{it.colorCode}</td>
+                        <td className="px-4 py-2">{it.spec}</td>
+                        <td className="px-4 py-2 text-right">{it.consumption}</td>
+                        <td className="px-4 py-2 text-right">{it.requiredQty}</td>
+                        <td className="px-4 py-2">{it.supplier}</td>
+                        <td className="px-4 py-2 text-right">{it.unitPrice}</td>
+                        <td className="px-4 py-2">{it.remarks}</td>
+                        <td className="px-4 py-2">{it.composition ?? '-'}</td>
+                        <td className="px-4 py-2">{it.hsCode ?? '-'}</td>
+                        <td className="px-4 py-2 space-x-2 whitespace-nowrap">
+                          <button className="text-blue-600" onClick={() => startEditBomItem(it)}>수정</button>
+                          {onOrderItem && it.material?.id && (
+                            <button
+                              onClick={() => onOrderItem(it.material.id)}
+                              className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-blue-700 whitespace-nowrap"
+                            >
+                              발주하기
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ),
+                  )}
                 </tbody>
               </table>
             </div>
@@ -382,6 +474,10 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
               <label className="text-sm text-gray-600 mb-1">Name</label>
               <input className="border border-gray-300 rounded px-3 py-2" placeholder="Name" value={newItem.name} onChange={(e) => setNewItem({...newItem, name: e.target.value})} />
             </div>
+            <div className="flex flex-col">
+              <label className="text-sm text-gray-600 mb-1">영문명</label>
+              <input className="border border-gray-300 rounded px-3 py-2" placeholder="English Name" value={newItem.englishName} onChange={(e) => setNewItem({...newItem, englishName: e.target.value})} />
+            </div>
             <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50" disabled={loading}>Create</button>
           </form>
 
@@ -390,17 +486,48 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
               <tr>
                 <th className="px-4 py-2 text-left">Code</th>
                 <th className="px-4 py-2 text-left">Name</th>
+                <th className="px-4 py-2 text-left">영문명</th>
                 <th className="px-4 py-2 text-left">Type</th>
+                <th className="px-4 py-2 text-left">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {items.map((item) => (
-                <tr key={item.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-mono">{item.code}</td>
-                  <td className="px-4 py-2">{item.name}</td>
-                  <td className="px-4 py-2 text-sm text-gray-500">{item.type}</td>
-                </tr>
-              ))}
+              {items.map((item) =>
+                editingItemId === item.id ? (
+                  <tr key={item.id} className="bg-yellow-50">
+                    <td className="px-4 py-2 font-mono">{item.code}</td>
+                    <td className="px-4 py-2">
+                      <input
+                        className="border rounded px-2 py-1 w-full"
+                        value={editItemForm.name}
+                        onChange={(e) => setEditItemForm({ ...editItemForm, name: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        className="border rounded px-2 py-1 w-full"
+                        value={editItemForm.englishName}
+                        onChange={(e) => setEditItemForm({ ...editItemForm, englishName: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{item.type}</td>
+                    <td className="px-4 py-2 space-x-2 whitespace-nowrap">
+                      <button className="text-blue-600" onClick={() => handleUpdateItem(item.id)}>저장</button>
+                      <button className="text-gray-500" onClick={cancelEditItem}>취소</button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={item.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-mono">{item.code}</td>
+                    <td className="px-4 py-2">{item.name}</td>
+                    <td className="px-4 py-2">{item.englishName ?? '-'}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{item.type}</td>
+                    <td className="px-4 py-2">
+                      <button className="text-blue-600" onClick={() => startEditItem(item)}>수정</button>
+                    </td>
+                  </tr>
+                ),
+              )}
             </tbody>
           </table>
         </div>

@@ -13,6 +13,11 @@ export class CreateItemDto {
   @IsNotEmpty()
   name: string;
 
+  @ApiProperty({ description: '영문명 (수출 선적서류용)', required: false })
+  @IsString()
+  @IsOptional()
+  englishName?: string;
+
   @ApiProperty({ description: '품목 유형', enum: ItemType })
   @IsEnum(ItemType)
   type: ItemType;

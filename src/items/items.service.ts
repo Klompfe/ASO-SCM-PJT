@@ -16,6 +16,7 @@ import * as XLSX from 'xlsx';
 export interface CreateItemInput {
   code: string;
   name: string;
+  englishName?: string;
   type: ItemType | string;
   unit?: string;
   spec?: string;
@@ -26,6 +27,7 @@ export interface CreateItemInput {
 export interface UpdateItemInput {
   code?: string;
   name?: string;
+  englishName?: string;
   type?: ItemType | string;
   unit?: string;
   spec?: string;
@@ -75,6 +77,7 @@ export class ItemsService {
       newItem.name = dto.name;
       newItem.type = dto.type as ItemType;
       newItem.unit = dto.unit || 'EA';
+      if (dto.englishName) newItem.englishName = dto.englishName;
       if (dto.spec) newItem.spec = dto.spec;
       if (dto.description) newItem.description = dto.description;
       if (dto.styleNo) newItem.styleNo = dto.styleNo;
@@ -170,6 +173,7 @@ export class ItemsService {
 
     if (dto.code) item.code = dto.code;
     if (dto.name) item.name = dto.name;
+    if (dto.englishName !== undefined) item.englishName = dto.englishName;
     if (dto.type) item.type = dto.type as ItemType;
     if (dto.unit) item.unit = dto.unit;
     if (dto.spec !== undefined) item.spec = dto.spec;

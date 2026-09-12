@@ -23,6 +23,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ItemsService } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
+import { UpdateItemDto } from './dto/update-item.dto';
 import { GetItemsFilterDto } from './dto/get-items-filter.dto';
 import { BulkInsertDto } from './dto/bulk-insert-items.dto';
 
@@ -86,7 +87,7 @@ export class ItemsController {
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateItemDto: any,
+    @Body() updateItemDto: UpdateItemDto,
   ) {
     return await this.itemsService.update(id, updateItemDto);
   }

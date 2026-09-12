@@ -18,6 +18,8 @@ export interface BomItemRow {
   supplier: string;
   unitPrice: number;
   remarks: string;
+  composition?: string;
+  hsCode?: string;
   material: BomItemMaterial;
 }
 
@@ -28,5 +30,13 @@ export interface BomDetail {
   items: BomItemRow[];
 }
 
+export interface UpdateBomItem {
+  composition?: string;
+  hsCode?: string;
+}
+
 export const getBomByStyleNo = (styleNo: string): Promise<any> =>
   apiClient.get('/boms', { params: { styleNo } });
+
+export const updateBomItem = (id: number, data: UpdateBomItem): Promise<any> =>
+  apiClient.patch(`/boms/items/${id}`, data);
