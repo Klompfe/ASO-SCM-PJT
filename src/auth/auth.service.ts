@@ -64,9 +64,13 @@ export class AuthService {
       return null;
     }
 
-    const user: any = await this.userRepository.findOne({
-      where: [{ username } as any, { email: username } as any],
-    });
+    // PR-071: User.password는 select:false라 기본 findOne으로는 조회되지 않는다 —
+    // 비밀번호 비교를 위해 QueryBuilder로 명시적으로 addSelect한다.
+    const user: any = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password')
+      .where('user.username = :identifier OR user.email = :identifier', { identifier: username })
+      .getOne();
 
     if (!user || !user.password) {
       return null;
@@ -90,9 +94,13 @@ export class AuthService {
     console.log(`[LOGIN ATTEMPT] Identifier: ${loginIdentifier}`);
 
     // Check if user exists
-    let user: any = await this.userRepository.findOne({
-      where: [{ username: loginIdentifier } as any, { email: loginIdentifier } as any],
-    });
+    // PR-071: User.password는 select:false라 기본 findOne으로는 조회되지 않는다 —
+    // 비밀번호 비교를 위해 QueryBuilder로 명시적으로 addSelect한다.
+    let user: any = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password')
+      .where('user.username = :identifier OR user.email = :identifier', { identifier: loginIdentifier })
+      .getOne();
 
     // Auto-seeding/handling logic for development
     if (!user) {

@@ -170,4 +170,79 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
     const updated = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
     expect(updated.role).toBe(UserRole.MANAGER);
   });
+
+  // PR-071: User.password에 select:false를 적용한 회귀 테스트. GET /users(목록/단건),
+  // PATCH /users/:id 응답 어디에도 password 키 자체가 없어야 하고, addSelect로
+  // 명시적으로 가져오는 로그인 로직은 여전히 정상 동작해야 한다.
+  describe('User 응답에서 password 필드 제외 (PR-071)', () => {
+    it('GET /users 목록 응답의 각 항목에 password 키가 없어야 한다', async () => {
+      const managerEmail = `pw-hide-list-manager-${Date.now()}@test.com`;
+      const managerToken = await registerAndLogin(managerEmail, UserRole.MANAGER);
+
+      const res = await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(200);
+
+      expect(res.body.data.length).toBeGreaterThan(0);
+      for (const user of res.body.data) {
+        expect(user).not.toHaveProperty('password');
+      }
+    });
+
+    it('GET /users/:id 단건 응답에 password 키가 없어야 한다', async () => {
+      const managerEmail = `pw-hide-one-manager-${Date.now()}@test.com`;
+      const managerToken = await registerAndLogin(managerEmail, UserRole.MANAGER);
+      const manager = await dataSource.getRepository(User).findOne({ where: { email: managerEmail } });
+
+      const res = await request(app.getHttpServer())
+        .get(`/users/${manager.id}`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(200);
+
+      expect(res.body.data).not.toHaveProperty('password');
+    });
+
+    it('PATCH /users/:id 응답에도 password 키가 없어야 한다', async () => {
+      const managerEmail = `pw-hide-patch-manager-${Date.now()}@test.com`;
+      const managerToken = await registerAndLogin(managerEmail, UserRole.MANAGER);
+
+      const targetEmail = `pw-hide-patch-target-${Date.now()}@test.com`;
+      await registerAndLogin(targetEmail);
+      const target = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/users/${target.id}`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ isActive: false })
+        .expect(200);
+
+      expect(res.body.data).not.toHaveProperty('password');
+    });
+
+    it('password가 select:false로 바뀐 후에도 로그인은 여전히 정상 동작해야 한다(회귀)', async () => {
+      const email = `pw-hide-login-regression-${Date.now()}@test.com`;
+      const password = 'password123!';
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ email, password, name: 'Login Regression Tester' })
+        .expect(201);
+
+      const loginRes = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email, password })
+        .expect(201);
+
+      expect(loginRes.body.data.accessToken).toBeDefined();
+      expect(loginRes.body.data.user).not.toHaveProperty('password');
+
+      // 동일 계정으로 다시 로그인해도 정상 통과해야 한다 — addSelect로 가져온 password가
+      // 매번 실제 해시값이라는 것(undefined 비교로 우연히 통과하는 게 아니라는 것)을 검증한다.
+      const secondLoginRes = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email, password })
+        .expect(201);
+      expect(secondLoginRes.body.data.accessToken).toBeDefined();
+    });
+  });
 });
