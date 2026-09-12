@@ -6,6 +6,7 @@ import { ShipmentsManager } from './components/ShipmentsManager';
 import { StylesManager } from './components/StylesManager';
 import { OrderProgressSummary } from './components/OrderProgressSummary';
 import { SuppliersManager } from './components/SuppliersManager';
+import { BuyersManager } from './components/BuyersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { LoginPage } from './components/LoginPage';
 import './App.css';
@@ -36,7 +37,7 @@ function App() {
   });
   
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'purchaseOrders'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'purchaseOrders'>('dashboard');
   // Items(자재명세) 화면에서 "발주하기"를 누르면 이 값을 채우고 Purchase Orders 탭으로 이동한다.
   const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(null);
 
@@ -132,6 +133,7 @@ function App() {
         );
         case 'shipments': return <ShipmentsManager />;
         case 'suppliers': return <SuppliersManager />;
+        case 'buyers': return <BuyersManager />;
         case 'purchaseOrders': return <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />;
         default: 
           // Routing Fallback: If unknown, default to Dashboard
@@ -166,6 +168,7 @@ function App() {
         <button className={`${tabButtonStyle} ${activeTab === 'styles' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('styles')}>오더관리</button>
         <button className={`${tabButtonStyle} ${activeTab === 'shipments' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('shipments')}>Shipments</button>
         <button className={`${tabButtonStyle} ${activeTab === 'suppliers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('suppliers')}>Suppliers</button>
+        <button className={`${tabButtonStyle} ${activeTab === 'buyers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('buyers')}>고객사</button>
         <button className={`${tabButtonStyle} ${activeTab === 'purchaseOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('purchaseOrders')}>Purchase Orders</button>
       </nav>
 

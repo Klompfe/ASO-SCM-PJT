@@ -23,6 +23,7 @@ import { MappingModule } from './mapping/mapping.module';
 import { MasterModule } from './master/master.module';
 import { TransactionModule } from './transaction/transaction.module';
 import { StylesModule } from './styles/styles.module';
+import { BuyersModule } from './buyers/buyers.module';
 import { HealthController } from './health/health.controller';
 import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
@@ -77,6 +78,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     MasterModule,
     TransactionModule,
     StylesModule,
+    BuyersModule,
   ],
   controllers: [HealthController],
   providers: [
