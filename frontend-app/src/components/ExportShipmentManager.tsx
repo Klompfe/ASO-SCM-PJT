@@ -6,6 +6,7 @@ import {
   generateExportShipment,
   updateExportShipmentStatus,
   updateExportShipmentLine,
+  importExportShipmentFromFile,
   type ExportShipment,
   type GenerateExportShipment,
 } from '../api/exportShipments.service';
@@ -37,6 +38,12 @@ export const ExportShipmentManager: React.FC = () => {
   const [selected, setSelected] = useState<ExportShipment | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const canFinalize = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
+
+  // PR-080: 기 작성된 INVOICE/Packing List 엑셀을 그대로 가져오는 흐름 — "발주 선택 →
+  // 생성" 흐름과 나란히 별도 섹션으로 둔다.
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
 
   const loadPurchaseOrders = useCallback(async () => {
     try {
@@ -107,7 +114,34 @@ export const ExportShipmentManager: React.FC = () => {
     }
   };
 
+  const handleImport = async () => {
+    if (!importFile) {
+      toast.error('업로드할 엑셀 파일을 선택해 주세요.');
+      return;
+    }
+    setImporting(true);
+    setImportWarnings([]);
+    try {
+      const res = await importExportShipmentFromFile(importFile);
+      const warnings: string[] = res.warnings ?? [];
+      setImportWarnings(warnings);
+      toast.success(
+        warnings.length > 0
+          ? `가져오기 완료 (경고 ${warnings.length}건 — 아래 목록을 확인해 주세요)`
+          : '수출선적서류를 파일 그대로 가져왔습니다.',
+      );
+      setImportFile(null);
+      await loadShipments();
+      setSelected(res);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '엑셀 가져오기에 실패했습니다. 지원하지 않는 양식일 수 있습니다.'));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const openDetail = async (id: number) => {
+    setImportWarnings([]);
     try {
       const res = await getExportShipment(id);
       setSelected(res);
@@ -171,6 +205,29 @@ export const ExportShipmentManager: React.FC = () => {
         </button>
       </div>
 
+      <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+        <h3 className="font-semibold text-gray-700">기존 파일 업로드 (INVOICE/Packing List 엑셀을 그대로 가져오기)</h3>
+        <p className="text-xs text-gray-500">
+          이미 완성되어 있는 INVOICE/Packing List 엑셀(요약 시트 2개 포함)을 업로드하면 발주/BOM 없이 재계산 없이 그대로 DRAFT로 등록합니다.
+        </p>
+        <div className="flex items-center gap-2">
+          <input type="file" accept=".xlsx,.xls" onChange={(e) => setImportFile(e.target.files?.[0] ?? null)} className="border p-2 rounded text-sm" />
+          <button onClick={handleImport} disabled={importing} className="bg-purple-600 text-white px-4 py-2 rounded font-medium hover:bg-purple-700 disabled:opacity-50">
+            {importing ? '가져오는 중...' : '파일 업로드'}
+          </button>
+        </div>
+        {importWarnings.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs rounded p-2 space-y-1">
+            <div className="font-medium">가져오기 경고 {importWarnings.length}건 — 조용히 무시하지 않고 그대로 알려드립니다:</div>
+            <ul className="list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+              {importWarnings.map((w, idx) => (
+                <li key={idx}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
         <table className="w-full">
           <thead className="bg-gray-100 text-gray-700">
@@ -179,6 +236,7 @@ export const ExportShipmentManager: React.FC = () => {
               <th className="px-4 py-2 text-left">Sheet No.</th>
               <th className="px-4 py-2 text-left">스타일</th>
               <th className="px-4 py-2 text-left">상태</th>
+              <th className="px-4 py-2 text-left">출처</th>
               <th className="px-4 py-2 text-left">Action</th>
             </tr>
           </thead>
@@ -189,6 +247,7 @@ export const ExportShipmentManager: React.FC = () => {
                 <td className="px-4 py-2">{s.sheetNo ?? '-'}</td>
                 <td className="px-4 py-2">{(s.styleNos ?? []).join(', ')}</td>
                 <td className="px-4 py-2"><span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_CLASSES[s.status]}`}>{STATUS_LABELS[s.status]}</span></td>
+                <td className="px-4 py-2 text-xs text-gray-500">{s.source === 'IMPORTED' ? '가져옴' : '생성됨'}</td>
                 <td className="px-4 py-2">
                   <button className="text-blue-600" onClick={() => openDetail(s.id)}>상세보기</button>
                 </td>

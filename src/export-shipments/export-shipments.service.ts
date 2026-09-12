@@ -4,12 +4,13 @@ import { Repository } from 'typeorm';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { PackingReceipt, PackingMaterialCategory } from '../purchase-orders/entities/packing-receipt.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
-import { ExportShipment, ExportShipmentStatus } from './entities/export-shipment.entity';
+import { ExportShipment, ExportShipmentStatus, ExportShipmentSource } from './entities/export-shipment.entity';
 import { ExportShipmentLine } from './entities/export-shipment-line.entity';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
 import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.dto';
 import { UserRole } from '../users/entities/user.entity';
 import { ExportShipmentDefaultsService } from '../export-shipment-defaults/export-shipment-defaults.service';
+import { ExportShipmentImportParser } from './utils/export-shipment-import-parser.util';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
   arr.reduce((total, item) => total + (Number(item[key]) || 0), 0);
@@ -170,6 +171,48 @@ export class ExportShipmentsService {
     );
 
     return this.findOneOrFail(shipment.id);
+  }
+
+  // PR-080: 이미 완성되어 있던 INVOICE/Packing List 엑셀을 그대로 가져와 DRAFT로
+  // 즉시 등록한다(발주/BOM/포장내역을 거치지 않는다 — 이미 완성된 문서를 재계산
+  // 없이 그대로 저장하는 것이 목적). qty/unitPrice/amount/netWeight/grossWeight/
+  // packageCount/packageType은 파일에 적힌 값 그대로 저장한다.
+  async importFromFile(buffer: Buffer): Promise<ExportShipment & { warnings: string[] }> {
+    const parsed = ExportShipmentImportParser.parse(buffer);
+
+    // shipper/consignee는 주소 블록이 여러 줄에 걸쳐 있어 파일에서 직접 파싱하지
+    // 않는다(PR-079 기본값이 있으면 그 값을 쓰고, 없으면 DRAFT 상태에서 사람이
+    // 직접 채운다) — generate()와 동일한 폴백 로직을 재사용한다.
+    const defaults = await this.exportShipmentDefaultsService.find();
+
+    const shipment = await this.exportShipmentRepository.save(
+      this.exportShipmentRepository.create({
+        styleNos: Array.from(new Set(parsed.lines.map((l) => l.styleNo).filter((s) => s))),
+        status: ExportShipmentStatus.DRAFT,
+        source: ExportShipmentSource.IMPORTED,
+        sheetNo: parsed.header.sheetNo,
+        invoiceDate: parsed.header.invoiceDate,
+        shipperInfo: defaults?.shipperInfo ?? null,
+        consigneeInfo: defaults?.consigneeInfo ?? null,
+        portOfLoading: parsed.header.portOfLoading,
+        finalDestination: parsed.header.finalDestination,
+        carrier: parsed.header.carrier,
+        sailingDate: parsed.header.sailingDate,
+      }),
+    );
+
+    await this.exportShipmentLineRepository.save(
+      parsed.lines.map((l) =>
+        this.exportShipmentLineRepository.create({
+          ...l,
+          exportShipmentId: shipment.id,
+          packingReceiptId: null,
+        }),
+      ),
+    );
+
+    const saved = await this.findOneOrFail(shipment.id);
+    return Object.assign(saved, { warnings: parsed.warnings });
   }
 
   async findAll(): Promise<ExportShipment[]> {

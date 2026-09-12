@@ -13,6 +13,14 @@ export enum ExportShipmentStatus {
   FINALIZED = 'FINALIZED',
 }
 
+// PR-080: PurchaseOrder/PackingReceipt를 집계해 자동 생성한 문서(GENERATED, PR-075)와
+// 이미 완성되어 있던 INVOICE/Packing List 엑셀을 그대로 가져온 문서(IMPORTED)를
+// 구분한다. IMPORTED 문서의 라인은 대응하는 PackingReceipt가 없다.
+export enum ExportShipmentSource {
+  GENERATED = 'GENERATED',
+  IMPORTED = 'IMPORTED',
+}
+
 // PR-075: INVOICE/Packing List 자동생성 문서 헤더. 한 선적건에 여러 스타일이 섞일 수
 // 있어(실제 원본 파일에서도 BF6X27C51/BF6X21C52/BF6X21C63 등 여러 STYLE NO가 한
 // INVOICE에 함께 나왔다) styleNos를 배열로 둔다. 헤더 필드(shipper/consignee 등)는
@@ -28,6 +36,9 @@ export class ExportShipment {
 
   @Column({ type: 'varchar', enum: ExportShipmentStatus, default: ExportShipmentStatus.DRAFT })
   status: ExportShipmentStatus;
+
+  @Column({ type: 'varchar', enum: ExportShipmentSource, default: ExportShipmentSource.GENERATED })
+  source: ExportShipmentSource;
 
   @Column({ nullable: true })
   sheetNo?: string;
