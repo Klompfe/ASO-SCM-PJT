@@ -73,6 +73,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
     composition: string;
     hsCode: string;
     category: 'FABRIC' | 'TRIM';
+    unit?: string;
   }) => {
     const supplierRes = await request(app.getHttpServer())
       .post('/suppliers')
@@ -88,6 +89,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         name: opts.itemName,
         englishName: opts.englishName,
         type: 'RAW_MATERIAL',
+        ...(opts.unit ? { unit: opts.unit } : {}),
       })
       .expect(201);
 
@@ -185,6 +187,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
       // qty의 직렬화 타입은 DB 드라이버에 따라 다르다(Postgres pg 드라이버는 numeric을
       // 문자열로, SQLite는 숫자로 반환) — 값 자체(2, 롤 2개)만 확인한다.
       expect(Number(line.qty)).toBe(2);
+      // Item.unit을 지정하지 않았으므로(PR-078) 기존 하드코딩 폴백('ROLL')이 적용되어야 한다.
       expect(line.unit).toBe('ROLL');
       expect(Number(line.netWeight)).toBeCloseTo(82 + 84);
       expect(Number(line.grossWeight)).toBeCloseTo(83 + 85);
@@ -214,11 +217,61 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .expect(201);
 
       const line = res.body.data.lines[0];
+      // Item.unit을 지정하지 않았으므로(PR-078) 기존 하드코딩 폴백('EA')이 적용되어야 한다.
       expect(line.unit).toBe('EA');
       expect(Number(line.qty)).toBe(250 + 100);
       // spec을 빈 문자열로 보내면 mapping-commit.service.ts의 기존 로직(PR-073 이전부터
       // 존재)이 'N/A'로 대체해 저장한다 — description 조합도 그 값을 그대로 반영한다.
       expect(line.description).toBe('N/A MAIN LABEL POLYESTER 100%');
+    });
+
+    // PR-078: Item.unit을 명시적으로 지정하면 하드코딩된 ROLL/EA 대신 그 값을 그대로
+    // 써야 한다 — 카테고리와 무관하게 Item.unit이 최우선이라는 것을 보이기 위해
+    // 일부러 카테고리의 "당연한" 단위가 아닌 값(TRIM에 'ROLL')으로도 검증한다.
+    it('Item.unit을 지정한 FABRIC 자재는 하드코딩된 ROLL 대신 Item.unit을 그대로 써야 한다', async () => {
+      const styleNo = `EXPORT-E2E-UNIT-FABRIC-${Date.now()}`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Unit Fabric Material ${Date.now()}`,
+        englishName: 'FOR THE FACE',
+        styleNo,
+        spec: '53"',
+        composition: 'WOOL 98%, POLYURETHANE 2%',
+        hsCode: '6202.20.1000',
+        category: 'FABRIC',
+        unit: 'MTS',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.lines[0].unit).toBe('MTS');
+    });
+
+    it('Item.unit을 지정한 TRIM 자재는 하드코딩된 EA 대신 Item.unit을 그대로 써야 한다', async () => {
+      const styleNo = `EXPORT-E2E-UNIT-TRIM-${Date.now()}`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Unit Trim Material ${Date.now()}`,
+        englishName: 'ELASTIC BAND',
+        styleNo,
+        spec: '38MM',
+        composition: 'NYLON 100%',
+        hsCode: '5604.10',
+        category: 'TRIM',
+        unit: 'ROLL',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.lines[0].unit).toBe('ROLL');
     });
 
     it('여러 발주(서로 다른 스타일)를 한 번에 생성하면 styleNos에 둘 다 포함되어야 한다(한 선적건에 여러 스타일)', async () => {
