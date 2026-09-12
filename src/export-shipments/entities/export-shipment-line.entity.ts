@@ -23,12 +23,16 @@ export class ExportShipmentLine {
   @Column()
   styleNo: string;
 
-  @Column()
-  packingReceiptId: number;
+  // PR-080: 기 작성된 INVOICE/Packing List 엑셀을 그대로 가져온(IMPORTED) 라인은 집계
+  // 대상이 된 PackingReceipt가 없다(발주/BOM과 무관하게 완성된 문서를 그대로 읽어온
+  // 것이라 연결할 대상 자체가 없음) — 그래서 nullable로 바꾼다. generate()로 만든
+  // (GENERATED) 라인은 기존처럼 항상 값이 채워진다.
+  @Column({ nullable: true })
+  packingReceiptId?: number | null;
 
-  @ManyToOne(() => PackingReceipt, { onDelete: 'CASCADE' })
+  @ManyToOne(() => PackingReceipt, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'packingReceiptId' })
-  packingReceipt: PackingReceipt;
+  packingReceipt?: PackingReceipt | null;
 
   @Column()
   description: string;

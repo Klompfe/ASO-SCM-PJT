@@ -2,11 +2,13 @@ import apiClient from './client';
 
 export type ExportShipmentStatus = 'DRAFT' | 'REVIEWED' | 'FINALIZED';
 
+export type ExportShipmentSource = 'GENERATED' | 'IMPORTED';
+
 export interface ExportShipmentLine {
   id: number;
   exportShipmentId: number;
   styleNo: string;
-  packingReceiptId: number;
+  packingReceiptId?: number | null;
   description: string;
   hsCode?: string;
   qty: number;
@@ -23,6 +25,7 @@ export interface ExportShipment {
   id: number;
   styleNos: string[];
   status: ExportShipmentStatus;
+  source?: ExportShipmentSource;
   sheetNo?: string;
   invoiceDate?: string;
   shipperInfo?: string;
@@ -67,3 +70,13 @@ export const updateExportShipmentLine = (
   unitPrice: number | null,
 ): Promise<any> =>
   apiClient.patch(`/export-shipments/${exportShipmentId}/lines/${lineId}`, { unitPrice });
+
+// PR-080: 기 작성된 INVOICE/Packing List 엑셀을 그대로 가져와 DRAFT로 즉시 등록한다.
+// 응답에는 warnings(단위 불일치 등 조용히 무시하지 않은 경고 목록)가 함께 온다.
+export const importExportShipmentFromFile = (file: File): Promise<any> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiClient.post('/export-shipments/import-from-file', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};

@@ -1,3 +1,4 @@
+import 'multer';
 import {
   BadRequestException,
   Body,
@@ -8,8 +9,11 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ExportShipmentsService } from './export-shipments.service';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
 import { UpdateExportShipmentStatusDto } from './dto/update-export-shipment-status.dto';
@@ -41,6 +45,17 @@ export class ExportShipmentsController {
         return n;
       });
     return this.exportShipmentsService.generate(purchaseOrderIds, dto);
+  }
+
+  @Post('import-from-file')
+  @ApiOperation({ summary: '기 작성된 INVOICE/Packing List 엑셀을 그대로 가져와 DRAFT로 즉시 등록' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  importFromFile(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('업로드할 엑셀 파일이 없습니다.');
+    }
+    return this.exportShipmentsService.importFromFile(file.buffer);
   }
 
   @Get()
