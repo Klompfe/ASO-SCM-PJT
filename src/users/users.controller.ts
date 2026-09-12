@@ -9,14 +9,24 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { User } from './entities/user.entity';
+import { User, UserRole } from './entities/user.entity';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
+// PR-070: 공개 가입 경로는 /auth/register(@Public())로 별도 유지되므로, 이 컨트롤러의
+// 사용자 관리 엔드포인트(생성 포함)는 전부 MANAGER/ADMIN 전용으로 제한한다 — 지금까지는
+// RBAC 가드가 전혀 걸려 있지 않아 인증만 되면 누구나 다른 사용자 목록/정보를 조회하거나
+// role을 바꿀 수 있는 상태였다.
 @ApiTags('Users')
+@ApiBearerAuth()
+@UseGuards(RolesGuard)
+@Roles(UserRole.MANAGER, UserRole.ADMIN)
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
@@ -47,7 +57,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: '사용자 정보 수정', description: '특정 사용자의 이메일 또는 이름을 수정합니다.' })
+  @ApiOperation({ summary: '사용자 정보 수정', description: '특정 사용자의 이메일, 이름, 역할(role), 활성화 상태를 수정합니다.' })
   @ApiParam({ name: 'id', description: '사용자 PK ID', example: 1 })
   @ApiResponse({ status: 200, description: '수정 성공', type: User })
   @ApiResponse({ status: 404, description: '사용자를 찾을 수 없음' })

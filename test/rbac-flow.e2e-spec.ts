@@ -130,4 +130,44 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
   });
+
+  // PR-070: users.controller.ts 전체에 RolesGuard(MANAGER, ADMIN)를 적용한 회귀 테스트.
+  it('USER 권한으로 GET /users를 호출하면 403이어야 한다', async () => {
+    const email = `rbac-users-forbidden-${Date.now()}@test.com`;
+    const token = await registerAndLogin(email); // USER
+
+    await request(app.getHttpServer())
+      .get('/users')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(403);
+  });
+
+  it('MANAGER 권한으로 GET /users를 호출하면 정상 통과해야 한다', async () => {
+    const email = `rbac-users-allowed-${Date.now()}@test.com`;
+    const token = await registerAndLogin(email, UserRole.MANAGER);
+
+    await request(app.getHttpServer())
+      .get('/users')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+  });
+
+  it('MANAGER가 다른 사용자의 role을 USER에서 MANAGER로 변경할 수 있어야 한다', async () => {
+    const managerEmail = `rbac-role-changer-${Date.now()}@test.com`;
+    const managerToken = await registerAndLogin(managerEmail, UserRole.MANAGER);
+
+    const targetEmail = `rbac-role-target-${Date.now()}@test.com`;
+    await registerAndLogin(targetEmail); // USER (기본값)
+    const target = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
+
+    const res = await request(app.getHttpServer())
+      .patch(`/users/${target.id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ role: UserRole.MANAGER })
+      .expect(200);
+    expect(res.body.data.role).toBe(UserRole.MANAGER);
+
+    const updated = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
+    expect(updated.role).toBe(UserRole.MANAGER);
+  });
 });
