@@ -7,13 +7,16 @@ process.env.DB_DATABASE = TEST_DB_PATH;
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
+import { User } from '../src/users/entities/user.entity';
 
 describe('인증/인가 회귀 테스트', () => {
   let app: INestApplication;
+  let dataSource: DataSource;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -28,6 +31,8 @@ describe('인증/인가 회귀 테스트', () => {
     app.useGlobalFilters(new AllExceptionsFilter());
     app.useGlobalInterceptors(new TransformInterceptor());
     await app.init();
+
+    dataSource = app.get(DataSource);
   });
 
   afterAll(async () => {
@@ -73,6 +78,61 @@ describe('인증/인가 회귀 테스트', () => {
           name: 'Good Register',
         })
         .expect(201);
+    });
+  });
+
+  // PR-072: "검증 실패(4xx) 응답인데 실제로는 사용자가 생성된다"는 의혹을 조사한 결과,
+  // 응답 코드만 보고 끝내지 않고 매번 DB를 직접 조회해 실제 row 개수까지 확인한다 —
+  // 이게 원래 버그 리포트의 핵심이었다(응답 코드만 믿지 말 것).
+  describe('회원가입 실패 시 실제로 레코드가 생기지 않아야 한다 (PR-072)', () => {
+    it('중복 이메일로 재가입을 시도하면 409(Conflict)이고, DB에는 여전히 1건만 있어야 한다', async () => {
+      const email = `pr072-dup-${Date.now()}@test.com`;
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ email, password: 'password123!', name: 'Dup First' })
+        .expect(201);
+
+      // 여기서 400을 기대하기 쉽지만, register()의 사전 중복 검사는
+      // ConflictException을 던지므로 실제로는 409가 정확한 응답이다.
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ email, password: 'password123!', name: 'Dup Second' })
+        .expect(409);
+
+      const rows = await dataSource.getRepository(User).find({ where: { email } });
+      expect(rows.length).toBe(1);
+    });
+
+    // 동시 요청(TOCTOU race)으로 save()가 DB unique 제약 위반을 던질 때 500이 아닌
+    // 409로 정확히 변환되는지는 auth.service.spec.ts의 목(mock) 기반 유닛 테스트로
+    // 결정적으로 검증한다 — 실제 동시 요청으로 여기서 재현을 시도해봤으나, SQLite
+    // 테스트 DB의 파일 락 특성상 두 요청 모두 실패하는 등 sqlite 자체의 동시 쓰기
+    // 한계 때문에 결과가 들쭉날쭉해 신뢰할 수 있는 e2e 테스트가 되지 못했다(실제
+    // Postgres/Neon 대상 curl 검증에서는 동시 요청 시 하나는 201, 하나는 409로
+    // 안정적으로 재현되고 DB에는 정확히 1건만 남는 것을 확인했다).
+
+    it('잘못된 이메일 형식으로 가입을 시도하면 400이고, DB에는 레코드가 생기지 않아야 한다', async () => {
+      const email = 'not-an-email';
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ email, password: 'password123!', name: 'Bad Email' })
+        .expect(400);
+
+      const rows = await dataSource
+        .getRepository(User)
+        .find({ where: [{ email } as any, { username: email } as any] });
+      expect(rows.length).toBe(0);
+    });
+
+    it('너무 짧은 비밀번호로 가입을 시도하면 400이고, DB에는 레코드가 생기지 않아야 한다', async () => {
+      const email = `pr072-shortpw-${Date.now()}@test.com`;
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ email, password: '123', name: 'Short Password' })
+        .expect(400);
+
+      const rows = await dataSource.getRepository(User).find({ where: { email } });
+      expect(rows.length).toBe(0);
     });
   });
 

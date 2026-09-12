@@ -50,6 +50,19 @@ export class AuthService {
       const { password: _, ...result } = Array.isArray(savedUser) ? savedUser[0] : savedUser;
       return result;
     } catch (error) {
+      // PR-072: 위의 existingUser 중복 검사(조회)와 실제 INSERT 사이에는 시간차가 있어,
+      // 동시에 같은 이메일로 두 요청이 들어오면 둘 다 중복 검사를 통과한 뒤 나중에
+      // 실행되는 INSERT가 DB unique 제약(username/email)에 걸려 실패할 수 있다
+      // (TOCTOU race — 실제로 동시 요청 2건을 보내 재현 확인). 이 경우는 서버 오류가
+      // 아니라 "이미 존재하는 사용자"라는 동일한 비즈니스 상황이므로, 일반 500 대신
+      // 위 사전 검사와 같은 409/ConflictException으로 통일한다. Postgres는
+      // code === '23505', 로컬 테스트에서 쓰는 SQLite는 code === 'SQLITE_CONSTRAINT'로
+      // unique 위반을 나타내므로 둘 다 확인한다.
+      const isUniqueViolation =
+        (error as any)?.code === '23505' || (error as any)?.code === 'SQLITE_CONSTRAINT';
+      if (isUniqueViolation) {
+        throw new ConflictException('이미 존재하는 사용자입니다.');
+      }
       throw new InternalServerErrorException(
         '회원가입 처리 중 오류가 발생했습니다.',
       );
