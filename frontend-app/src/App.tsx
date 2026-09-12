@@ -4,6 +4,7 @@ import { ItemsManager } from './components/ItemsManager';
 import { WorkOrdersManager } from './components/WorkOrdersManager';
 import { ShipmentsManager } from './components/ShipmentsManager';
 import { StylesManager } from './components/StylesManager';
+import { OrderProgressSummary } from './components/OrderProgressSummary';
 import { SuppliersManager } from './components/SuppliersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { LoginPage } from './components/LoginPage';
@@ -38,6 +39,17 @@ function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'purchaseOrders'>('dashboard');
   // Items(자재명세) 화면에서 "발주하기"를 누르면 이 값을 채우고 Purchase Orders 탭으로 이동한다.
   const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(null);
+
+  // PR-067: 오더관리 탭 하위에 "오더 목록"/"진행현황 요약" 두 서브탭을 둔다.
+  // 진행현황 요약에서 행을 클릭하면 오더 목록 서브탭으로 전환하며 해당 styleNo의
+  // 상세 모달을 자동으로 연다 — poPrefillItemId와 동일한 패턴.
+  const [orderManagementSubTab, setOrderManagementSubTab] = useState<'list' | 'summary'>('list');
+  const [styleNoToOpen, setStyleNoToOpen] = useState<string | null>(null);
+
+  const handleSelectStyleFromSummary = (styleNo: string) => {
+    setStyleNoToOpen(styleNo);
+    setOrderManagementSubTab('list');
+  };
 
   const handleOrderItem = (itemId: number) => {
     setPoPrefillItemId(itemId);
@@ -99,7 +111,25 @@ function App() {
         case 'dashboard': return <Dashboard />;
         case 'items': return <ItemsManager onOrderItem={handleOrderItem} />;
         case 'workOrders': return <WorkOrdersManager />;
-        case 'styles': return <StylesManager />;
+        case 'styles': return (
+          <div>
+            <div className="flex space-x-2 mb-4 border-b border-gray-200">
+              <button
+                className={`px-3 py-2 text-sm font-medium ${orderManagementSubTab === 'list' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setOrderManagementSubTab('list')}
+              >오더 목록</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${orderManagementSubTab === 'summary' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setOrderManagementSubTab('summary')}
+              >진행현황 요약</button>
+            </div>
+            {orderManagementSubTab === 'list' ? (
+              <StylesManager initialStyleNo={styleNoToOpen} onInitialStyleNoConsumed={() => setStyleNoToOpen(null)} />
+            ) : (
+              <OrderProgressSummary onSelectStyle={handleSelectStyleFromSummary} />
+            )}
+          </div>
+        );
         case 'shipments': return <ShipmentsManager />;
         case 'suppliers': return <SuppliersManager />;
         case 'purchaseOrders': return <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />;
