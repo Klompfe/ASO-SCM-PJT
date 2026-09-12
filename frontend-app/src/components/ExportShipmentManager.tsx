@@ -11,6 +11,7 @@ import {
 } from '../api/exportShipments.service';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { getCurrentUser, type CurrentUser } from '../api/auth.service';
+import { getExportShipmentDefaults } from '../api/exportShipmentDefaults.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
 const STATUS_LABELS: Record<string, string> = { DRAFT: '초안', REVIEWED: '검토완료', FINALIZED: '확정' };
@@ -55,11 +56,31 @@ export const ExportShipmentManager: React.FC = () => {
     }
   }, []);
 
+  // PR-079: 기본값이 설정되어 있으면 생성 폼을 미리 채워둔다 — 미설정(null)이면 빈
+  // 폼 그대로 둔다(에러 아님). 건별로 필요하면 그대로 덮어써서 수정할 수 있다.
+  const applyDefaultsToHeader = useCallback(async () => {
+    try {
+      const defaults = await getExportShipmentDefaults();
+      if (!defaults) return;
+      setHeader((prev) => ({
+        ...prev,
+        shipperInfo: defaults.shipperInfo ?? prev.shipperInfo,
+        consigneeInfo: defaults.consigneeInfo ?? prev.consigneeInfo,
+        portOfLoading: defaults.portOfLoading ?? prev.portOfLoading,
+        finalDestination: defaults.finalDestination ?? prev.finalDestination,
+        carrier: defaults.carrier ?? prev.carrier,
+      }));
+    } catch {
+      // 기본값을 못 불러와도 생성 폼 자체는 빈 채로 계속 쓸 수 있어야 하므로 무시한다.
+    }
+  }, []);
+
   useEffect(() => {
     loadPurchaseOrders();
     loadShipments();
     getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null));
-  }, [loadPurchaseOrders, loadShipments]);
+    applyDefaultsToHeader();
+  }, [loadPurchaseOrders, loadShipments, applyDefaultsToHeader]);
 
   const togglePo = (id: number) => {
     setSelectedPoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -76,6 +97,7 @@ export const ExportShipmentManager: React.FC = () => {
       toast.success('수출선적서류 초안이 생성되었습니다.');
       setSelectedPoIds([]);
       setHeader(emptyHeader);
+      applyDefaultsToHeader();
       await loadShipments();
       setSelected(res);
     } catch (err: any) {
@@ -132,6 +154,10 @@ export const ExportShipmentManager: React.FC = () => {
               발주 #{po.id} — {po.item?.name ?? `품목#${po.itemId}`} ({po.supplier?.name ?? '-'}, 수량 {po.quantity})
             </label>
           ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <textarea className="border p-2 rounded text-sm" rows={2} placeholder="Shipper / Exporter" value={header.shipperInfo} onChange={(e) => setHeader({ ...header, shipperInfo: e.target.value })} />
+          <textarea className="border p-2 rounded text-sm" rows={2} placeholder="Consignee" value={header.consigneeInfo} onChange={(e) => setHeader({ ...header, consigneeInfo: e.target.value })} />
         </div>
         <div className="grid grid-cols-3 gap-2">
           <input className="border p-2 rounded text-sm" placeholder="Sheet No. (예: TY-260704K)" value={header.sheetNo} onChange={(e) => setHeader({ ...header, sheetNo: e.target.value })} />

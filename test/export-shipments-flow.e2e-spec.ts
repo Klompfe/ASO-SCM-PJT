@@ -471,4 +471,128 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .expect(404);
     });
   });
+
+  // PR-079: 선적서류 헤더 기본값(회사 고정정보) 마스터. 이 describe 블록 이전의 다른
+  // 테스트들은 export-shipment-defaults를 전혀 건드리지 않으므로, 아래 "미설정" 검증이
+  // 파일 내에서 가장 먼저 이 엔드포인트를 호출하는 테스트임이 보장된다(같은 describe
+  // 파일 안에서 it은 선언 순서대로 순차 실행된다) — 기본값을 실제로 설정하기 전
+  // 상태를 정확히 검증할 수 있는 이유다.
+  describe('선적서류 헤더 기본값 (PR-079)', () => {
+    it('아직 한 번도 설정한 적 없으면 GET이 null을 반환해야 한다(에러 아님)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/export-shipment-defaults')
+        .set('Authorization', `Bearer ${userToken}`)
+        .expect(200);
+      expect(res.body.data).toBeNull();
+    });
+
+    it('기본값 미설정 상태에서 generate()를 호출하면 헤더 필드가 공란(null)으로 유지되어야 한다(에러 아님)', async () => {
+      const styleNo = `EXPORT-E2E-DEFAULTS-BLANK-${Date.now()}`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Defaults Blank Material ${Date.now()}`,
+        englishName: 'FOR THE FACE',
+        styleNo,
+        spec: '53"',
+        composition: 'COTTON 100%',
+        hsCode: '5208.11',
+        category: 'FABRIC',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.shipperInfo).toBeNull();
+      expect(res.body.data.consigneeInfo).toBeNull();
+      expect(res.body.data.portOfLoading).toBeNull();
+      expect(res.body.data.finalDestination).toBeNull();
+      expect(res.body.data.carrier).toBeNull();
+    });
+
+    it('일반 사용자가 PUT을 시도하면 403이어야 한다', async () => {
+      await request(app.getHttpServer())
+        .put('/export-shipment-defaults')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ shipperInfo: 'TAE IL TRADING CO.,LTD' })
+        .expect(403);
+    });
+
+    it('MANAGER가 PUT으로 기본값을 설정하면 저장되고 조회 시 그대로 반환되어야 한다', async () => {
+      const putRes = await request(app.getHttpServer())
+        .put('/export-shipment-defaults')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          shipperInfo: 'TAE IL TRADING CO.,LTD',
+          consigneeInfo: 'TAE IL VN COMPANY LIMITED',
+          portOfLoading: 'INCHEON, KOREA',
+          finalDestination: 'HAIPHONG, VIETNAM',
+          carrier: 'DONGJIN CONTINENTAL / 0217W',
+        })
+        .expect(200);
+      expect(putRes.body.data.shipperInfo).toBe('TAE IL TRADING CO.,LTD');
+
+      const getRes = await request(app.getHttpServer())
+        .get('/export-shipment-defaults')
+        .set('Authorization', `Bearer ${userToken}`)
+        .expect(200);
+      expect(getRes.body.data.carrier).toBe('DONGJIN CONTINENTAL / 0217W');
+    });
+
+    it('기본값 설정 후 generate()를 호출하면 헤더 필드가 자동으로 채워져야 한다', async () => {
+      const styleNo = `EXPORT-E2E-DEFAULTS-FILLED-${Date.now()}`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Defaults Filled Material ${Date.now()}`,
+        englishName: 'FOR THE FACE',
+        styleNo,
+        spec: '53"',
+        composition: 'COTTON 100%',
+        hsCode: '5208.11',
+        category: 'FABRIC',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ sheetNo: 'TY-DEFAULTS-TEST' })
+        .expect(201);
+
+      expect(res.body.data.shipperInfo).toBe('TAE IL TRADING CO.,LTD');
+      expect(res.body.data.consigneeInfo).toBe('TAE IL VN COMPANY LIMITED');
+      expect(res.body.data.portOfLoading).toBe('INCHEON, KOREA');
+      expect(res.body.data.finalDestination).toBe('HAIPHONG, VIETNAM');
+      expect(res.body.data.carrier).toBe('DONGJIN CONTINENTAL / 0217W');
+      // sheetNo는 기본값 대상이 아니라 매번 넘긴 값 그대로여야 한다.
+      expect(res.body.data.sheetNo).toBe('TY-DEFAULTS-TEST');
+    });
+
+    it('generate() 호출 시 헤더 값을 함께 넘기면 기본값 대신 그 값으로 덮어써야 한다', async () => {
+      const styleNo = `EXPORT-E2E-DEFAULTS-OVERRIDE-${Date.now()}`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Defaults Override Material ${Date.now()}`,
+        englishName: 'FOR THE FACE',
+        styleNo,
+        spec: '53"',
+        composition: 'COTTON 100%',
+        hsCode: '5208.11',
+        category: 'FABRIC',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ carrier: 'SPECIAL CARRIER / EXCEPTION-0001' })
+        .expect(201);
+
+      // 명시적으로 넘긴 carrier는 기본값을 덮어써야 한다.
+      expect(res.body.data.carrier).toBe('SPECIAL CARRIER / EXCEPTION-0001');
+      // 나머지 필드는 여전히 기본값에서 채워져야 한다.
+      expect(res.body.data.shipperInfo).toBe('TAE IL TRADING CO.,LTD');
+      expect(res.body.data.portOfLoading).toBe('INCHEON, KOREA');
+    });
+  });
 });

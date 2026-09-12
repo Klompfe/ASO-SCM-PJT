@@ -10,6 +10,7 @@ import { BuyersManager } from './components/BuyersManager';
 import { UsersManager } from './components/UsersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { ExportShipmentManager } from './components/ExportShipmentManager';
+import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { LoginPage } from './components/LoginPage';
 import { getCurrentUser, type CurrentUser } from './api/auth.service';
 import './App.css';
@@ -40,7 +41,7 @@ function App() {
   });
   
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'users' | 'purchaseOrders'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'users' | 'purchaseOrders' | 'exportShipmentDefaults'>('dashboard');
 
   // PR-070: "사용자 관리" 탭은 MANAGER/ADMIN에게만 보여야 한다 — GET /auth/me(PR-066)로
   // 현재 사용자의 role을 조회해 탭 자체를 목록에서 숨긴다(USER는 존재를 알 필요도 없음).
@@ -50,6 +51,9 @@ function App() {
     getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null));
   }, [isAuthenticated]);
   const canManageUsers = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
+  // PR-079: "선적서류 기본정보" 탭도 동일하게 MANAGER/ADMIN 전용이다 — canManageUsers와
+  // 조건은 같지만 별도 탭을 가리키는 이름이라 헷갈리지 않게 따로 둔다.
+  const isManagerOrAdmin = canManageUsers;
   // Items(자재명세) 화면에서 "발주하기"를 누르면 이 값을 채우고 Purchase Orders 탭으로 이동한다.
   const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(null);
 
@@ -169,6 +173,7 @@ function App() {
         case 'buyers': return <BuyersManager />;
         case 'users': return <UsersManager />;
         case 'purchaseOrders': return <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />;
+        case 'exportShipmentDefaults': return <ExportShipmentDefaultsManager />;
         default:
           // Routing Fallback: If unknown, default to Dashboard
           return <Dashboard />;
@@ -207,6 +212,9 @@ function App() {
           <button className={`${tabButtonStyle} ${activeTab === 'users' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('users')}>사용자 관리</button>
         )}
         <button className={`${tabButtonStyle} ${activeTab === 'purchaseOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('purchaseOrders')}>Purchase Orders</button>
+        {isManagerOrAdmin && (
+          <button className={`${tabButtonStyle} ${activeTab === 'exportShipmentDefaults' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('exportShipmentDefaults')}>선적서류 기본정보</button>
+        )}
       </nav>
 
       <main className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 min-h-[400px]">
