@@ -1,13 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getMasterStyles, createMasterStyle, type MasterStyle, type CreateMasterStyle } from '../api/styles.service';
-import { issueContract, getContractsByStyleNo, type Contract } from '../api/contracts.service';
+import {
+  issueContract, getContractsByStyleNo, approveContract, rejectContract, deleteContract,
+  type Contract, type ContractStatus,
+} from '../api/contracts.service';
 import {
   upsertProcessStage, getProcessStagesByStyle, getMaterialReadiness,
   createOrderShipment, updateOrderShipment, getOrderShipmentsByStyle, getShipmentSummary,
   type ProcessStageName, type OrderProcessStage, type MaterialReadiness, type OrderShipment, type ShippedQtySummary,
 } from '../api/orderProgress.service';
+import { getCurrentUser, type CurrentUser } from '../api/auth.service';
 import { getErrorMessage } from '../utils/errorMessage';
+
+// PR-066: 상태별 배지 색상 — 승인대기(노랑)/승인(초록)/거절(빨강)/대체됨(회색).
+const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
+  PENDING_APPROVAL: '승인대기', APPROVED: '승인됨', REJECTED: '거절됨', SUPERSEDED: '대체됨',
+};
+const CONTRACT_STATUS_CLASSES: Record<ContractStatus, string> = {
+  PENDING_APPROVAL: 'bg-yellow-100 text-yellow-800',
+  APPROVED: 'bg-green-100 text-green-800',
+  REJECTED: 'bg-red-100 text-red-800',
+  SUPERSEDED: 'bg-gray-100 text-gray-600',
+};
 
 const initialFormData: CreateMasterStyle = {
   styleNo: '', factory: '', buyer: '', totalQty: 0, brand: '', itemType: '',
@@ -64,6 +79,10 @@ export const StylesManager: React.FC = () => {
 
   const [shippedQtyByStyle, setShippedQtyByStyle] = useState<Record<string, number>>({});
 
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const canApprove = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
+  const [contractActionId, setContractActionId] = useState<number | null>(null);
+
   const loadStyles = useCallback(async () => {
     try {
       const res = await getMasterStyles();
@@ -88,6 +107,7 @@ export const StylesManager: React.FC = () => {
   useEffect(() => {
     loadStyles();
     loadShipmentSummary();
+    getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null));
   }, [loadStyles, loadShipmentSummary]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -178,6 +198,50 @@ export const StylesManager: React.FC = () => {
       loadContracts(selectedStyle.styleNo);
     } catch (err: any) {
       toast.error(getErrorMessage(err, '계약서 발행에 실패했습니다.'));
+    }
+  };
+
+  const handleApproveContract = async (contract: Contract) => {
+    if (!selectedStyle) return;
+    setContractActionId(contract.id);
+    try {
+      await approveContract(contract.id);
+      toast.success('계약이 승인되었습니다.');
+      loadContracts(selectedStyle.styleNo);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '계약 승인에 실패했습니다.'));
+    } finally {
+      setContractActionId(null);
+    }
+  };
+
+  const handleRejectContract = async (contract: Contract) => {
+    if (!selectedStyle) return;
+    if (!window.confirm(`${contract.styleNo} 계약(#${contract.id})을 거절하시겠습니까?`)) return;
+    setContractActionId(contract.id);
+    try {
+      await rejectContract(contract.id);
+      toast.success('계약이 거절되었습니다.');
+      loadContracts(selectedStyle.styleNo);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '계약 거절에 실패했습니다.'));
+    } finally {
+      setContractActionId(null);
+    }
+  };
+
+  const handleDeleteContract = async (contract: Contract) => {
+    if (!selectedStyle) return;
+    if (!window.confirm(`${contract.styleNo} 계약(#${contract.id})을 삭제하시겠습니까? 되돌릴 수 없습니다.`)) return;
+    setContractActionId(contract.id);
+    try {
+      await deleteContract(contract.id);
+      toast.success('계약이 삭제되었습니다.');
+      loadContracts(selectedStyle.styleNo);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '계약 삭제에 실패했습니다.'));
+    } finally {
+      setContractActionId(null);
     }
   };
 
@@ -325,10 +389,39 @@ export const StylesManager: React.FC = () => {
             {contracts.length === 0 ? (
               <p className="text-sm text-gray-500 mb-4">발행된 계약서가 없습니다.</p>
             ) : (
-              <ul className="mb-4 space-y-1 text-sm">
+              <ul className="mb-4 space-y-2 text-sm">
                 {contracts.map((c) => (
-                  <li key={c.id} className="border-b border-gray-100 pb-1">
-                    {new Date(c.issuedAt).toLocaleString()} {c.notes ? `— ${c.notes}` : ''}
+                  <li key={c.id} className="border-b border-gray-100 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 ${CONTRACT_STATUS_CLASSES[c.status]}`}>
+                          {CONTRACT_STATUS_LABELS[c.status]}
+                        </span>
+                        {new Date(c.issuedAt).toLocaleString()} {c.notes ? `— ${c.notes}` : ''}
+                        {c.totalQty != null && <span className="text-gray-500"> (수량 {c.totalQty}{c.targetRdd ? `, 납기 ${c.targetRdd}` : ''})</span>}
+                      </div>
+                      {canApprove && c.status === 'PENDING_APPROVAL' && (
+                        <div className="flex gap-1 shrink-0">
+                          <button
+                            onClick={() => handleApproveContract(c)}
+                            disabled={contractActionId === c.id}
+                            className="bg-green-600 text-white px-2 py-1 rounded text-xs disabled:opacity-50"
+                          >승인</button>
+                          <button
+                            onClick={() => handleRejectContract(c)}
+                            disabled={contractActionId === c.id}
+                            className="bg-red-600 text-white px-2 py-1 rounded text-xs disabled:opacity-50"
+                          >거절</button>
+                        </div>
+                      )}
+                      {canApprove && (
+                        <button
+                          onClick={() => handleDeleteContract(c)}
+                          disabled={contractActionId === c.id}
+                          className="text-gray-400 hover:text-red-600 text-xs shrink-0"
+                        >삭제</button>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>

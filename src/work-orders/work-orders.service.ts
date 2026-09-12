@@ -7,6 +7,7 @@ import { Item } from '../items/entities/item.entity';
 import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
 import { VisionService } from './vision.service';
 import { MasterStyle } from '../styles/entities/master-style.entity';
+import { Contract, ContractStatus } from '../styles/entities/contract.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
 import { MappingCommitService } from '../mapping/services/mapping-commit.service';
@@ -81,7 +82,36 @@ export class WorkOrdersService {
       })),
     });
 
-    return this.workOrderSpecsService.save(styleNo, result.workNotes, result.sizeSpecs);
+    // 작업지시서 등록(엑셀 매핑 경로는 해당 없음)은 계약을 자동으로 승인 대기 상태로
+    // 만든다(PR-066). 방금 커밋된 StyleOverview를 다시 읽어 그 시점 값을 스냅샷으로
+    // 고정한다 — result.overview를 그대로 쓰지 않는 이유는 cmtPrice/fobPrice처럼
+    // AI 분석 DTO에 없는 필드도 있고, 실제로 DB에 저장된 값(기본값 처리 등 포함)과
+    // 어긋나지 않게 하기 위해서다.
+    const style = await this.dataSource
+      .getRepository(MasterStyle)
+      .findOne({ where: { styleNo }, relations: ['overview'] });
+    const overview = style?.overview;
+
+    const contractRepository = this.dataSource.getRepository(Contract);
+    const contract = contractRepository.create({
+      styleNo,
+      status: ContractStatus.PENDING_APPROVAL,
+      totalQty: overview?.totalQty ?? null,
+      targetRdd: overview?.targetRdd ?? null,
+      factory: overview?.factory ?? null,
+      buyer: overview?.buyer ?? null,
+      productionType: overview?.productionType ?? null,
+      cmtPrice: overview?.cmtPrice ?? null,
+      fobPrice: overview?.fobPrice ?? null,
+    });
+    await contractRepository.save(contract);
+
+    const spec = await this.workOrderSpecsService.save(styleNo, result.workNotes, result.sizeSpecs);
+
+    contract.triggeredByWorkOrderSpecId = spec.id;
+    await contractRepository.save(contract);
+
+    return spec;
   }
 
   async findSpecByStyleNo(styleNo: string) {
