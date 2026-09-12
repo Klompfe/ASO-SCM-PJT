@@ -26,11 +26,11 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   // 품목 마스터 (보조 기능)
   const [items, setItems] = useState<Item[]>([]);
   const [filter] = useState<GetItemsFilter>({ page: 1, limit: 10 });
-  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', type: 'RAW_MATERIAL' });
+  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL' });
   const [loading, setLoading] = useState<boolean>(false);
   // PR-073: 품목 마스터 테이블의 영문명 인라인 수정 (Suppliers/Buyers와 동일한 패턴).
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
-  const [editItemForm, setEditItemForm] = useState<{ name: string; englishName: string }>({ name: '', englishName: '' });
+  const [editItemForm, setEditItemForm] = useState<{ name: string; englishName: string; unit: string }>({ name: '', englishName: '', unit: '' });
 
   // PR-073: 자재명세(BOM) 상세 테이블의 혼용율/HS코드 인라인 수정.
   const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
@@ -102,7 +102,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
       await createItem(newItem);
       toast.success('품목이 생성되었습니다.');
       loadItems();
-      setNewItem({ code: '', name: '', englishName: '', type: 'RAW_MATERIAL' });
+      setNewItem({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL' });
     } catch (error) {
       // toast.error는 Axios 인터셉터에서 처리됨
     } finally {
@@ -112,17 +112,17 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
   const startEditItem = (item: Item) => {
     setEditingItemId(item.id);
-    setEditItemForm({ name: item.name, englishName: item.englishName || '' });
+    setEditItemForm({ name: item.name, englishName: item.englishName || '', unit: item.unit || '' });
   };
 
   const cancelEditItem = () => {
     setEditingItemId(null);
-    setEditItemForm({ name: '', englishName: '' });
+    setEditItemForm({ name: '', englishName: '', unit: '' });
   };
 
   const handleUpdateItem = async (id: number) => {
     try {
-      await updateItem(id, { name: editItemForm.name, englishName: editItemForm.englishName });
+      await updateItem(id, { name: editItemForm.name, englishName: editItemForm.englishName, unit: editItemForm.unit });
       toast.success('품목 정보가 수정되었습니다.');
       cancelEditItem();
       loadItems();
@@ -478,6 +478,10 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
               <label className="text-sm text-gray-600 mb-1">영문명</label>
               <input className="border border-gray-300 rounded px-3 py-2" placeholder="English Name" value={newItem.englishName} onChange={(e) => setNewItem({...newItem, englishName: e.target.value})} />
             </div>
+            <div className="flex flex-col">
+              <label className="text-sm text-gray-600 mb-1">단위</label>
+              <input className="border border-gray-300 rounded px-3 py-2 w-24" placeholder="예: MTS" value={newItem.unit} onChange={(e) => setNewItem({...newItem, unit: e.target.value})} />
+            </div>
             <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50" disabled={loading}>Create</button>
           </form>
 
@@ -487,6 +491,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                 <th className="px-4 py-2 text-left">Code</th>
                 <th className="px-4 py-2 text-left">Name</th>
                 <th className="px-4 py-2 text-left">영문명</th>
+                <th className="px-4 py-2 text-left">단위</th>
                 <th className="px-4 py-2 text-left">Type</th>
                 <th className="px-4 py-2 text-left">Action</th>
               </tr>
@@ -510,6 +515,13 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                         onChange={(e) => setEditItemForm({ ...editItemForm, englishName: e.target.value })}
                       />
                     </td>
+                    <td className="px-4 py-2">
+                      <input
+                        className="border rounded px-2 py-1 w-20"
+                        value={editItemForm.unit}
+                        onChange={(e) => setEditItemForm({ ...editItemForm, unit: e.target.value })}
+                      />
+                    </td>
                     <td className="px-4 py-2 text-sm text-gray-500">{item.type}</td>
                     <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                       <button className="text-blue-600" onClick={() => handleUpdateItem(item.id)}>저장</button>
@@ -521,6 +533,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                     <td className="px-4 py-2 font-mono">{item.code}</td>
                     <td className="px-4 py-2">{item.name}</td>
                     <td className="px-4 py-2">{item.englishName ?? '-'}</td>
+                    <td className="px-4 py-2">{item.unit ?? '-'}</td>
                     <td className="px-4 py-2 text-sm text-gray-500">{item.type}</td>
                     <td className="px-4 py-2">
                       <button className="text-blue-600" onClick={() => startEditItem(item)}>수정</button>

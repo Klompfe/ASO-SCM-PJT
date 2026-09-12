@@ -46,13 +46,17 @@ export class ExportShipmentsService {
   // 쓰인 적이 없으면 스타일/규격/혼용율을 알 수 없으므로 조용히 넘어가지 않고
   // 명확한 에러로 먼저 BOM 등록을 안내한다.
   //
+  // PR-078: unit은 자재마스터(Item.unit)를 우선 사용한다 — 기존 데이터 중에는
+  // Item.unit이 비어있는 경우도 있어(과거 등록분 등), 비어 있으면 이전처럼
+  // 원단은 'ROLL', 부자재는 'EA'로 폴백한다.
+  //
   // 알려진 한계(원본 PackingReceiptRoll 모델에 실측 길이(야드/미터) 필드가 없어):
-  // 원단(FABRIC) 라인의 qty/unit은 실제 INVOICE의 "YDS/MTS" 단위가 아니라 롤
-  // 개수(unit='ROLL')로 집계한다. 부자재(TRIM)는 카톤 내 qty 합계를 그대로 쓰고
-  // unit='EA'로 고정한다(카톤 항목에 단위 컬럼이 없어 개별 단위를 구분하지 못함).
-  // 실제 운영에 맞추려면 PackingReceiptRoll에 길이/단위 필드를 추가하는 후속 작업이
-  // 필요하다 — 이번 PR은 description 자동생성과 상태관리 흐름이 핵심이라 이 부분은
-  // 명시적으로 근사치로 남겨둔다.
+  // 원단(FABRIC) 라인의 qty는 실제 INVOICE의 "YDS/MTS" 수치가 아니라 롤 개수로
+  // 집계한다 — Item.unit이 'MTS' 등으로 지정돼 있어도 표시 단위만 그렇게 보일 뿐,
+  // qty 값 자체는 여전히 롤 개수라는 점에 주의. 부자재(TRIM)는 카톤 내 qty 합계를
+  // 그대로 쓴다. 실제 운영에 맞추려면 PackingReceiptRoll에 길이 필드를 추가하는
+  // 후속 작업이 필요하다 — 이번 PR은 description 자동생성과 상태관리 흐름이
+  // 핵심이라 이 부분은 명시적으로 근사치로 남겨둔다.
   async generate(purchaseOrderIds: number[], dto: GenerateExportShipmentDto): Promise<ExportShipment> {
     if (!purchaseOrderIds || purchaseOrderIds.length === 0) {
       throw new BadRequestException('purchaseOrderIds는 최소 1개 이상이어야 합니다.');
@@ -87,6 +91,7 @@ export class ExportShipmentsService {
       const description = [bomItem.spec, bomItem.material?.englishName, bomItem.composition]
         .filter((v) => v != null && String(v).trim() !== '')
         .join(' ');
+      const itemUnit = bomItem.material?.unit?.trim();
 
       const receipts = await this.packingReceiptRepository.find({
         where: { purchaseOrderId },
@@ -107,7 +112,7 @@ export class ExportShipmentsService {
             description,
             hsCode: bomItem.hsCode ?? null,
             qty: rolls.length,
-            unit: 'ROLL',
+            unit: itemUnit || 'ROLL',
             netWeight: sum(rolls, 'netWeight') || null,
             grossWeight: sum(rolls, 'grossWeight') || null,
             packageCount: rolls.length,
@@ -121,7 +126,7 @@ export class ExportShipmentsService {
             description,
             hsCode: bomItem.hsCode ?? null,
             qty: sum(cartons, 'qty'),
-            unit: 'EA',
+            unit: itemUnit || 'EA',
             netWeight: null,
             grossWeight: sum(cartons, 'weightKg') || null,
             packageCount: new Set(cartons.map((c) => c.cartonNo)).size,

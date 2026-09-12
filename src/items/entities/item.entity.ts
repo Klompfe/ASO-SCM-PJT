@@ -36,7 +36,14 @@ export class Item {
   })
   type: ItemType;
 
-  @Column({ default: 'EA', nullable: true })
+  // PR-078: 기존에는 컬럼 기본값이 'EA'였는데, items.service.ts의 create()도 항상
+  // dto.unit || 'EA'로 값을 채워 넣고 있어 실질적으로 "값이 비어있는 품목"이 존재할
+  // 수 없었다 — export-shipments.service.ts의 generate()가 Item.unit을 우선
+  // 참조하고 "없으면" 기존 하드코딩(ROLL/EA)으로 폴백하려면, 진짜로 비어있는 상태
+  // (null)가 가능해야 의미가 있다. 그래서 컬럼 기본값을 없앴다 — 기존 행의 저장된
+  // 값은 그대로 유지되고(DROP DEFAULT는 신규 INSERT에만 영향), items.service.ts의
+  // create()도 dto.unit이 없으면 더 이상 'EA'를 강제하지 않도록 함께 바꿨다.
+  @Column({ nullable: true })
   unit?: string;
 
   @Column({ nullable: true })

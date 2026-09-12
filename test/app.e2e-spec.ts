@@ -147,6 +147,65 @@ describe('SCM API (E2E Integration Test)', () => {
     });
   });
 
+  // PR-078: unit 컬럼 자체는 이미 있었지만(초기 마이그레이션부터 존재), 등록/수정
+  // 화면과 export-shipments 생성 로직이 이 값을 실제로 쓰도록 연결한 것이 이번 PR의
+  // 핵심이다 — 그러려면 "지정 안 함 = 비어 있음"이 실제로 가능해야 하므로(PR-078에서
+  // 컬럼 기본값 'EA'를 제거), unit을 생략하면 더 이상 자동으로 'EA'가 채워지지
+  // 않는다는 것도 함께 검증한다.
+  describe('/items - unit (PR-078)', () => {
+    it('unit을 포함해 등록하면 저장되고 조회 시에도 그대로 반환되어야 한다', async () => {
+      const createRes = await request(app.getHttpServer())
+        .post('/items')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({
+          code: `UNIT_E2E_${Date.now()}`,
+          name: '원단(단위테스트)',
+          unit: 'MTS',
+          type: 'RAW_MATERIAL',
+        })
+        .expect(201);
+      expect(createRes.body.data.unit).toBe('MTS');
+
+      const getRes = await request(app.getHttpServer())
+        .get(`/items/${createRes.body.data.id}`)
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .expect(200);
+      expect(getRes.body.data.unit).toBe('MTS');
+    });
+
+    it('unit을 지정하지 않고 등록하면 더 이상 자동으로 EA가 채워지지 않아야 한다(PR-078: 폴백 로직이 실제로 발동하려면 빈 값이 가능해야 함)', async () => {
+      const createRes = await request(app.getHttpServer())
+        .post('/items')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({
+          code: `UNIT_NONE_E2E_${Date.now()}`,
+          name: '단위미지정품목',
+          type: 'RAW_MATERIAL',
+        })
+        .expect(201);
+      expect(createRes.body.data.unit).toBeFalsy();
+    });
+
+    it('PATCH로 unit을 수정할 수 있어야 한다', async () => {
+      const createRes = await request(app.getHttpServer())
+        .post('/items')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({
+          code: `UNIT_PATCH_E2E_${Date.now()}`,
+          name: '단위수정품목',
+          type: 'RAW_MATERIAL',
+        })
+        .expect(201);
+
+      const patchRes = await request(app.getHttpServer())
+        .patch(`/items/${createRes.body.data.id}`)
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({ unit: 'ROLL' })
+        .expect(200);
+      expect(patchRes.body.data.unit).toBe('ROLL');
+    });
+  });
+
   // 2. 구매 주문 (Purchase Orders) 테스트
   describe('/purchase-orders', () => {
     it('POST /purchase-orders - 원자재 발주서 생성', async () => {

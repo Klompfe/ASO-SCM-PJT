@@ -76,7 +76,10 @@ export class ItemsService {
       newItem.code = dto.code;
       newItem.name = dto.name;
       newItem.type = dto.type as ItemType;
-      newItem.unit = dto.unit || 'EA';
+      // PR-078: 이전에는 dto.unit이 없으면 'EA'를 강제했는데, 그러면 export-shipments
+      // 생성 로직이 Item.unit을 우선 참조하는 의미가 없어진다(항상 값이 있으니
+      // "없으면 폴백"이 절대 발동하지 않음) — 지정하지 않았으면 비워 둔다.
+      if (dto.unit) newItem.unit = dto.unit;
       if (dto.englishName) newItem.englishName = dto.englishName;
       if (dto.spec) newItem.spec = dto.spec;
       if (dto.description) newItem.description = dto.description;
