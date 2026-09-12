@@ -15,6 +15,8 @@ import { OrderProcessStagesService } from './order-process-stages.service';
 import { OrderProcessStagesController } from './order-process-stages.controller';
 import { OrderShipmentsService } from './order-shipments.service';
 import { OrderShipmentsController } from './order-shipments.controller';
+import { OrderProgressSummaryService } from './order-progress-summary.service';
+import { OrderProgressSummaryController } from './order-progress-summary.controller';
 
 @Module({
   imports: [
@@ -33,7 +35,14 @@ import { OrderShipmentsController } from './order-shipments.controller';
     ContractsController,
     OrderProcessStagesController,
     OrderShipmentsController,
+    OrderProgressSummaryController,
   ],
-  providers: [StylesService, ContractsService, OrderProcessStagesService, OrderShipmentsService],
+  providers: [
+    StylesService,
+    ContractsService,
+    OrderProcessStagesService,
+    OrderShipmentsService,
+    OrderProgressSummaryService,
+  ],
 })
 export class StylesModule {}

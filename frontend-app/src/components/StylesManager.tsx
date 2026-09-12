@@ -59,7 +59,14 @@ const computeDeliveryStatus = (orderQty: number, shippedQty: number, targetRdd: 
   return { label, colorClass, remainingQty };
 };
 
-export const StylesManager: React.FC = () => {
+interface StylesManagerProps {
+  // PR-067: 진행현황 요약 탭에서 행을 클릭하면 그 styleNo의 상세 모달을 자동으로
+  // 연다 — App.tsx의 poPrefillItemId(Items→PurchaseOrders)와 동일한 패턴.
+  initialStyleNo?: string | null;
+  onInitialStyleNoConsumed?: () => void;
+}
+
+export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, onInitialStyleNoConsumed }) => {
   const [formData, setFormData] = useState<CreateMasterStyle>(initialFormData);
   const [styles, setStyles] = useState<MasterStyle[]>([]);
   const [selectedStyle, setSelectedStyle] = useState<MasterStyle | null>(null);
@@ -188,6 +195,20 @@ export const StylesManager: React.FC = () => {
     loadMaterialReadiness(s.styleNo);
     loadShipments(s.styleNo);
   };
+
+  // 진행현황 요약 탭에서 넘어온 styleNo가 있으면, 목록이 로드된 뒤 그 스타일의
+  // 상세 모달을 자동으로 연다. 한 번 처리하면 부모에게 소비했다고 알려 반복
+  // 오픈을 막는다(같은 styleNo를 다시 클릭해도 재오픈되도록 onInitialStyleNoConsumed
+  // 호출 후 부모가 initialStyleNo를 null로 되돌리는 걸 전제).
+  useEffect(() => {
+    if (!initialStyleNo || styles.length === 0) return;
+    const target = styles.find((s) => s.styleNo === initialStyleNo);
+    if (target) {
+      handleSelectStyle(target);
+    }
+    onInitialStyleNoConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialStyleNo, styles]);
 
   const handleIssueContract = async () => {
     if (!selectedStyle) return;
