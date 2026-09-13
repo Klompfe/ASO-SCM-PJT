@@ -26,6 +26,7 @@ import { StylesModule } from './styles/styles.module';
 import { BuyersModule } from './buyers/buyers.module';
 import { ExportShipmentsModule } from './export-shipments/export-shipments.module';
 import { ExportShipmentDefaultsModule } from './export-shipment-defaults/export-shipment-defaults.module';
+import { HsCodeClassificationsModule } from './hs-code-classifications/hs-code-classifications.module';
 import { HealthController } from './health/health.controller';
 import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
@@ -83,6 +84,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     BuyersModule,
     ExportShipmentsModule,
     ExportShipmentDefaultsModule,
+    HsCodeClassificationsModule,
   ],
   controllers: [HealthController],
   providers: [
