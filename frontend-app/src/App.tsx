@@ -11,6 +11,7 @@ import { UsersManager } from './components/UsersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
+import { HsCodeManager } from './components/HsCodeManager';
 import { LoginPage } from './components/LoginPage';
 import { getCurrentUser, type CurrentUser } from './api/auth.service';
 import './App.css';
@@ -41,7 +42,7 @@ function App() {
   });
   
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'users' | 'purchaseOrders' | 'exportShipmentDefaults'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'users' | 'purchaseOrders' | 'exportShipmentDefaults' | 'hsCodeClassifications'>('dashboard');
 
   // PR-070: "사용자 관리" 탭은 MANAGER/ADMIN에게만 보여야 한다 — GET /auth/me(PR-066)로
   // 현재 사용자의 role을 조회해 탭 자체를 목록에서 숨긴다(USER는 존재를 알 필요도 없음).
@@ -174,6 +175,7 @@ function App() {
         case 'users': return <UsersManager />;
         case 'purchaseOrders': return <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />;
         case 'exportShipmentDefaults': return <ExportShipmentDefaultsManager />;
+        case 'hsCodeClassifications': return <HsCodeManager />;
         default:
           // Routing Fallback: If unknown, default to Dashboard
           return <Dashboard />;
@@ -215,6 +217,7 @@ function App() {
         {isManagerOrAdmin && (
           <button className={`${tabButtonStyle} ${activeTab === 'exportShipmentDefaults' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('exportShipmentDefaults')}>선적서류 기본정보</button>
         )}
+        <button className={`${tabButtonStyle} ${activeTab === 'hsCodeClassifications' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('hsCodeClassifications')}>HS코드 관리</button>
       </nav>
 
       <main className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 min-h-[400px]">
