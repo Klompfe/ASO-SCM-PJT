@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { ItemsManager } from './components/ItemsManager';
 import { WorkOrdersManager } from './components/WorkOrdersManager';
-import { ShipmentsManager } from './components/ShipmentsManager';
 import { StylesManager } from './components/StylesManager';
 import { OrderProgressSummary } from './components/OrderProgressSummary';
 import { SuppliersManager } from './components/SuppliersManager';
@@ -12,6 +11,7 @@ import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { HsCodeManager } from './components/HsCodeManager';
+import { ImportShipmentManager } from './components/ImportShipmentManager';
 import { LoginPage } from './components/LoginPage';
 import { getCurrentUser, type CurrentUser } from './api/auth.service';
 import './App.css';
@@ -71,9 +71,10 @@ function App() {
 
   // PR-076: 상단 "Shipments" 탭을 "선적관리"로 개명하고 하위에 "수출"/"수입" 두 서브탭을
   // 둔다. "수출"은 PR-073~075에서 구축한 수출 선적서류(Invoice/Packing List) 자동생성
-  // 기능(ExportShipmentManager, 옛 최상단 "수출선적서류" 탭)이고, "수입"은 기존
-  // Shipments 기능(ShipmentsManager, 원자재 입고 물류)을 별도 설계 전까지 임시 배치한
-  // 것이다(설계문서 6-1절 확정사항). 기본값은 현재 개발 중인 "수출".
+  // 기능(ExportShipmentManager, 옛 최상단 "수출선적서류" 탭)이고, "수입"은 완제품
+  // 수입통관 추적 화면(ImportShipmentManager, PR-082)이다 — 원자재 입고(옛
+  // ShipmentsManager, PurchaseOrder와 연결된 별개 개념)는 PR-082에서 "Purchase
+  // Orders > 입고관리" 서브탭으로 옮겼다. 기본값은 현재 개발 중인 "수출".
   const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import'>('export');
 
   const handleOrderItem = (itemId: number) => {
@@ -167,7 +168,7 @@ function App() {
                 onClick={() => setShipmentsSubTab('import')}
               >수입</button>
             </div>
-            {shipmentsSubTab === 'export' ? <ExportShipmentManager /> : <ShipmentsManager />}
+            {shipmentsSubTab === 'export' ? <ExportShipmentManager /> : <ImportShipmentManager />}
           </div>
         );
         case 'suppliers': return <SuppliersManager />;

@@ -11,6 +11,7 @@ import { getSuppliers, type Supplier } from '../api/suppliers.service';
 import { getItems, type Item } from '../api/items.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
+import { ShipmentsManager } from './ShipmentsManager';
 
 const emptyForm: CreatePurchaseOrder = { supplierId: 0, itemId: 0, quantity: 1, unitPrice: 0 };
 
@@ -30,6 +31,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [filterItemId, setFilterItemId] = useState(0);
   // PR-074: 포장내역은 발주 하위 흐름이라 별도 탭이 아니라 발주 행에서 모달로 연다.
   const [packingReceiptsFor, setPackingReceiptsFor] = useState<PurchaseOrder | null>(null);
+  // PR-082: 기존 "선적관리 > 수입"에 임시로 얹혀 있던 ShipmentsManager(원자재 입고)를
+  // 원래 자리인 Purchase Orders 쪽 서브탭으로 옮긴다 — shipments 모듈은 PurchaseOrder와
+  // 연결된 개념이라 여기가 맞는 위치다(export-shipments의 shipmentsSubTab과 동일 패턴).
+  const [poSubTab, setPoSubTab] = useState<'order' | 'receiving'>('order');
 
   const loadPurchaseOrders = useCallback(async () => {
     setLoading(true);
@@ -136,6 +141,21 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     <div className="space-y-6">
       <h2 className="text-2xl font-semibold text-gray-800">Purchase Orders</h2>
 
+      <div className="flex space-x-2 border-b border-gray-200">
+        <button
+          className={`px-3 py-2 text-sm font-medium ${poSubTab === 'order' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setPoSubTab('order')}
+        >발주</button>
+        <button
+          className={`px-3 py-2 text-sm font-medium ${poSubTab === 'receiving' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setPoSubTab('receiving')}
+        >입고관리</button>
+      </div>
+
+      {poSubTab === 'receiving' ? (
+        <ShipmentsManager />
+      ) : (
+        <>
       {error && <div className="p-4 bg-red-100 text-red-700 rounded-lg">{error}</div>}
 
       <form onSubmit={handleCreate} className="flex flex-wrap gap-4 items-end bg-gray-50 p-4 rounded-lg">
@@ -232,6 +252,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           purchaseOrderLabel={`발주 #${packingReceiptsFor.id} (${packingReceiptsFor.item?.name ?? `#${packingReceiptsFor.itemId}`})`}
           onClose={() => setPackingReceiptsFor(null)}
         />
+      )}
+        </>
       )}
     </div>
   );

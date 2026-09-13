@@ -97,25 +97,36 @@ export class HsCodeClassificationsService {
           composition: row.composition,
         },
       });
-
-      const existingMapping = await this.styleMappingRepository.findOne({
-        where: { styleNo: row.styleNo },
-      });
-
-      if (existingMapping) {
-        existingMapping.classificationId = classification.id;
-        await this.styleMappingRepository.save(existingMapping);
-      } else {
-        await this.styleMappingRepository.save(
-          this.styleMappingRepository.create({
-            styleNo: row.styleNo,
-            classificationId: classification.id,
-          }),
-        );
-      }
+      await this.upsertStyleMapping(row.styleNo, classification.id);
     }
 
     return { totalRows: rows.length, created, updated, conflicts };
+  }
+
+  // PR-082: import-shipments가 라인 저장 시 (itemType,fabricType,composition)으로
+  // 조회하는 용도 — lookup()과 달리 없으면 예외 대신 null을 반환한다(호출 측에서
+  // "HS코드 미확인" 상태를 표현해야 하므로 예외로 흐름을 끊으면 안 된다).
+  async findMatch(
+    itemType: string,
+    fabricType: string,
+    composition: string,
+  ): Promise<HsCodeClassification | null> {
+    return this.classificationRepository.findOne({ where: { itemType, fabricType, composition } });
+  }
+
+  // styleNo -> classification 매핑을 upsert한다(같은 styleNo가 다시 들어오면
+  // 최신 classification으로 갱신) — 엑셀 임포트(위 importFromExcel)와 PR-082
+  // import-shipments 양쪽에서 재사용한다.
+  async upsertStyleMapping(styleNo: string, classificationId: number): Promise<StyleHsCodeMapping> {
+    const existingMapping = await this.styleMappingRepository.findOne({ where: { styleNo } });
+
+    if (existingMapping) {
+      existingMapping.classificationId = classificationId;
+      return this.styleMappingRepository.save(existingMapping);
+    }
+    return this.styleMappingRepository.save(
+      this.styleMappingRepository.create({ styleNo, classificationId }),
+    );
   }
 
   async findAll(filter: GetHsCodeClassificationsFilterDto) {
