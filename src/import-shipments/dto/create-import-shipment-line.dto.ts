@@ -10,10 +10,14 @@ export class CreateImportShipmentLineDto {
   @IsString()
   itemType: string;
 
-  @ApiProperty({ example: 'WOOL 98%, POLYURETHANE 2%' })
-  @IsNotEmpty()
+  // PR-083.1: Vietnam INVOICE 업로드로 만들어지는 라인 중 HS코드 마스터에 아직
+  // 없는 신규 스타일은 혼용률을 구할 방법이 없어 null일 수 있다(수동 입력 폼은
+  // 프론트에서 여전히 필수로 받으므로 여기 optional 완화가 그 화면의 UX에는
+  // 영향을 주지 않는다).
+  @ApiPropertyOptional({ example: 'WOOL 98%, POLYURETHANE 2%' })
+  @IsOptional()
   @IsString()
-  composition: string;
+  composition?: string;
 
   @ApiPropertyOptional({ example: '직물', default: '직물' })
   @IsOptional()

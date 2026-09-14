@@ -21,8 +21,11 @@ export class ImportShipmentLine {
   @Column()
   itemType: string;
 
-  @Column()
-  composition: string;
+  // PR-083.1: Vietnam INVOICE 업로드로 생성된 라인 중, HS코드 마스터(PR-081)에
+  // 아직 없는 신규 스타일은 혼용률을 구할 방법이 없다(인보이스 자체에 혼용률
+  // 컬럼이 없음) — 그런 경우 null로 남긴다.
+  @Column({ nullable: true })
+  composition?: string | null;
 
   @Column({ default: DEFAULT_FABRIC_TYPE })
   fabricType: string;
