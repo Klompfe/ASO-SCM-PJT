@@ -74,6 +74,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
     hsCode: string;
     category: 'FABRIC' | 'TRIM';
     unit?: string;
+    quantity?: number;
   }) => {
     const supplierRes = await request(app.getHttpServer())
       .post('/suppliers')
@@ -96,7 +97,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
     const poRes = await request(app.getHttpServer())
       .post('/purchase-orders')
       .set('Authorization', `Bearer ${userToken}`)
-      .send({ supplierId: supplierRes.body.data.id, itemId: itemRes.body.data.id, quantity: 1000, unitPrice: 1.5 })
+      .send({ supplierId: supplierRes.body.data.id, itemId: itemRes.body.data.id, quantity: opts.quantity ?? 1000, unitPrice: 1.5 })
       .expect(201);
     const purchaseOrderId = poRes.body.data.id;
 
@@ -339,6 +340,97 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .set('Authorization', `Bearer ${userToken}`)
         .send({})
         .expect(400);
+    });
+  });
+
+  // PR-086: qty는 여전히 실제 포장수량 기준으로 계산된다(설계 변경 없음) — 발주수량과
+  // 다르면 조용히 넘어가지 않고 warnings로 알려준다(DB 저장 없음, 응답에만 포함).
+  describe('발주수량 vs 실제 포장수량 비교 (PR-086)', () => {
+    it('발주수량과 실제 포장수량이 같으면 warnings가 비어 있어야 한다', async () => {
+      const styleNo = `EXPORT-E2E-QTYMATCH-${Date.now()}`;
+      // FABRIC 롤 2개 등록 → 포장수량 2, 발주수량도 2로 맞춰 일치시킨다.
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Qty Match Material ${Date.now()}`,
+        englishName: 'FOR THE FACE',
+        styleNo,
+        spec: '53"',
+        composition: 'WOOL 98%',
+        hsCode: '6202.20.1000',
+        category: 'FABRIC',
+        quantity: 2,
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.warnings).toEqual([]);
+    });
+
+    it('발주수량과 실제 포장수량이 다르면 warnings에 정확한 문구로 기록되어야 한다', async () => {
+      const styleNo = `EXPORT-E2E-QTYDIFF-${Date.now()}`;
+      // TRIM 카톤 250+100=350 등록, 발주수량은 500으로 등록 → 차이 -150.
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Qty Diff Material ${Date.now()}`,
+        englishName: 'MAIN LABEL',
+        styleNo,
+        spec: '',
+        composition: 'POLYESTER 100%',
+        hsCode: '5807.10',
+        category: 'TRIM',
+        quantity: 500,
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.warnings).toEqual([
+        `발주 ID ${purchaseOrderId}(스타일 ${styleNo}): 발주수량 500 vs 실제 포장수량 350 (차이 -150)`,
+      ]);
+    });
+
+    it('여러 발주를 한 번에 생성할 때 일부만 차이나면 그 발주만 warnings에 기록되어야 한다', async () => {
+      const styleNoMatch = `EXPORT-E2E-MULTI-MATCH-${Date.now()}`;
+      const styleNoDiff = `EXPORT-E2E-MULTI-DIFF-${Date.now()}`;
+
+      const matchedPoId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Multi Match Material ${Date.now()}`,
+        englishName: 'FOR THE FACE',
+        styleNo: styleNoMatch,
+        spec: '53"',
+        composition: 'WOOL 98%',
+        hsCode: '6202.20.1000',
+        category: 'FABRIC',
+        quantity: 2, // 롤 2개와 정확히 일치
+      });
+      const diffPoId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `E2E Multi Diff Material ${Date.now()}`,
+        englishName: 'MAIN LABEL',
+        styleNo: styleNoDiff,
+        spec: '',
+        composition: 'POLYESTER 100%',
+        hsCode: '5807.10',
+        category: 'TRIM',
+        quantity: 999, // 카톤 합계 350과 다름
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: `${matchedPoId},${diffPoId}` })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.warnings).toHaveLength(1);
+      expect(res.body.data.warnings[0]).toContain(`발주 ID ${diffPoId}`);
+      expect(res.body.data.warnings[0]).not.toContain(`발주 ID ${matchedPoId}`);
     });
   });
 

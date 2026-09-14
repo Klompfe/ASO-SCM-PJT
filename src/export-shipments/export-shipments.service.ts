@@ -66,13 +66,22 @@ export class ExportShipmentsService {
   // 기본값을 가져와 채운다. dto로 값이 넘어오면(개별 건에서 예외적으로 다르게
   // 나가는 경우) 그 값이 우선한다. sheetNo/invoiceDate/sailingDate는 건마다
   // 달라지는 값이라 기본값 대상이 아니다 — dto 값만 그대로 쓴다.
-  async generate(purchaseOrderIds: number[], dto: GenerateExportShipmentDto): Promise<ExportShipment> {
+  async generate(
+    purchaseOrderIds: number[],
+    dto: GenerateExportShipmentDto,
+  ): Promise<ExportShipment & { warnings: string[] }> {
     if (!purchaseOrderIds || purchaseOrderIds.length === 0) {
       throw new BadRequestException('purchaseOrderIds는 최소 1개 이상이어야 합니다.');
     }
 
     const linesToCreate: Partial<ExportShipmentLine>[] = [];
     const styleNoSet = new Set<string>();
+    // PR-086: qty는 PurchaseOrder.quantity(발주수량)가 아니라 실제 등록된
+    // PackingReceipt의 롤 개수/카톤 수량 합계로 계산된다(설계상 의도 — INVOICE는
+    // 실제 포장된 수량을 반영해야 함). 이 설계는 그대로 두고, 발주수량과 차이가
+    // 있으면 조용히 넘어가지 않고 warnings로 알려준다(DB에는 저장하지 않음 —
+    // 생성 시점에 한 번 계산해서 응답으로만 내려주는 값).
+    const warnings: string[] = [];
 
     for (const purchaseOrderId of purchaseOrderIds) {
       const po = await this.purchaseOrderRepository.findOne({
@@ -112,6 +121,7 @@ export class ExportShipmentsService {
         );
       }
 
+      let packedQty = 0;
       for (const receipt of receipts) {
         if (receipt.materialCategory === PackingMaterialCategory.FABRIC) {
           const rolls = receipt.rolls ?? [];
@@ -127,21 +137,32 @@ export class ExportShipmentsService {
             packageCount: rolls.length,
             packageType: null,
           });
+          packedQty += rolls.length;
         } else {
           const cartons = receipt.cartons ?? [];
+          const cartonQty = sum(cartons, 'qty');
           linesToCreate.push({
             styleNo,
             packingReceiptId: receipt.id,
             description,
             hsCode: bomItem.hsCode ?? null,
-            qty: sum(cartons, 'qty'),
+            qty: cartonQty,
             unit: itemUnit || 'EA',
             netWeight: null,
             grossWeight: sum(cartons, 'weightKg') || null,
             packageCount: new Set(cartons.map((c) => c.cartonNo)).size,
             packageType: 'CARTON',
           });
+          packedQty += cartonQty;
         }
+      }
+
+      const orderedQty = Number(po.quantity);
+      const diff = packedQty - orderedQty;
+      if (diff !== 0) {
+        warnings.push(
+          `발주 ID ${po.id}(스타일 ${styleNo}): 발주수량 ${orderedQty} vs 실제 포장수량 ${packedQty} (차이 ${diff})`,
+        );
       }
     }
 
@@ -170,7 +191,8 @@ export class ExportShipmentsService {
       ),
     );
 
-    return this.findOneOrFail(shipment.id);
+    const saved = await this.findOneOrFail(shipment.id);
+    return Object.assign(saved, { warnings });
   }
 
   // PR-080: 이미 완성되어 있던 INVOICE/Packing List 엑셀을 그대로 가져와 DRAFT로
