@@ -4,6 +4,7 @@ import {
   getHsCodeClassifications,
   createHsCodeClassification,
   uploadHsCodeClassifications,
+  getHsCodeClassificationByStyle,
   type HsCodeClassification,
   type HsCodeImportConflict,
   type CreateHsCodeClassification,
@@ -16,6 +17,7 @@ const emptyForm: CreateHsCodeClassification = {
   composition: '',
   hsCode: '',
   note: '',
+  styleNo: '',
 };
 
 // PR-081: 완제품 수입통관 HS코드 분류(품종+재직+혼용률 -> HS코드) 관리 화면.
@@ -36,9 +38,15 @@ export const HsCodeManager: React.FC = () => {
   const [searchFabricType, setSearchFabricType] = useState('');
   const [searchComposition, setSearchComposition] = useState('');
   const [searchHsCode, setSearchHsCode] = useState('');
+  const [searchStyleNo, setSearchStyleNo] = useState('');
 
   const [form, setForm] = useState<CreateHsCodeClassification>(emptyForm);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // PR-084: 스타일번호로 기존 등록값을 불러와 폼을 채운다 — 관세사 확인 후 정확한
+  // 품종/재직/혼용률 문구를 몰라도 스타일번호만으로 수정할 수 있게 하는 용도.
+  const [lookupStyleNo, setLookupStyleNo] = useState('');
+  const [lookingUp, setLookingUp] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -47,6 +55,7 @@ export const HsCodeManager: React.FC = () => {
         itemType: searchItemType || undefined,
         fabricType: searchFabricType || undefined,
         composition: searchComposition || undefined,
+        styleNo: searchStyleNo || undefined,
         limit: 100,
       });
       let filtered: HsCodeClassification[] = res?.items ?? [];
@@ -63,7 +72,7 @@ export const HsCodeManager: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchItemType, searchFabricType, searchComposition, searchHsCode]);
+  }, [searchItemType, searchFabricType, searchComposition, searchHsCode, searchStyleNo]);
 
   useEffect(() => {
     load();
@@ -101,14 +110,44 @@ export const HsCodeManager: React.FC = () => {
     e.preventDefault();
     setSaving(true);
     try {
-      await createHsCodeClassification(form);
+      await createHsCodeClassification({ ...form, styleNo: form.styleNo || undefined });
       toast.success('HS코드 분류가 저장되었습니다.');
       setForm(emptyForm);
+      setLookupStyleNo('');
       await load();
     } catch (err: any) {
       toast.error(getErrorMessage(err, '저장에 실패했습니다.'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleLookupByStyle = async () => {
+    if (!lookupStyleNo.trim()) {
+      toast.error('스타일번호를 입력해 주세요.');
+      return;
+    }
+    setLookingUp(true);
+    try {
+      const found = await getHsCodeClassificationByStyle(lookupStyleNo.trim());
+      setForm({
+        itemType: found.itemType ?? '',
+        fabricType: found.fabricType ?? '',
+        composition: found.composition ?? '',
+        hsCode: found.hsCode ?? '',
+        note: found.note ?? '',
+        styleNo: lookupStyleNo.trim(),
+      });
+      toast.success('기존 등록값을 불러왔습니다.');
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        setForm({ ...emptyForm, styleNo: lookupStyleNo.trim() });
+        toast('신규 스타일입니다 — 나머지 항목을 입력해 등록하세요.');
+      } else {
+        toast.error(getErrorMessage(err, '조회에 실패했습니다.'));
+      }
+    } finally {
+      setLookingUp(false);
     }
   };
 
@@ -176,9 +215,33 @@ export const HsCodeManager: React.FC = () => {
         </div>
       )}
 
+      <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+        <p className="text-sm font-medium text-gray-700">스타일번호로 불러오기</p>
+        <p className="text-xs text-gray-500">
+          이미 등록된 스타일이면 품종/재직/혼용률/HS코드를 몰라도 스타일번호만으로
+          기존 값을 불러와 바로 수정할 수 있습니다.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            className="border border-gray-300 rounded px-3 py-2 flex-1 max-w-xs"
+            placeholder="스타일번호 (예: BF6X21C52)"
+            value={lookupStyleNo}
+            onChange={(e) => setLookupStyleNo(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={handleLookupByStyle}
+            disabled={lookingUp}
+            className="bg-indigo-600 text-white px-4 py-2 rounded font-medium hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {lookingUp ? '조회 중...' : '불러오기'}
+          </button>
+        </div>
+      </div>
+
       <form onSubmit={handleSubmit} className="bg-gray-50 p-4 rounded-lg space-y-3">
         <p className="text-sm font-medium text-gray-700">직접 등록/수정</p>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <input
             className="border border-gray-300 rounded px-3 py-2"
             placeholder="품종 (예: WOMEN'S JACKET)"
@@ -213,6 +276,12 @@ export const HsCodeManager: React.FC = () => {
             value={form.note}
             onChange={(e) => setForm({ ...form, note: e.target.value })}
           />
+          <input
+            className="border border-gray-300 rounded px-3 py-2"
+            placeholder="스타일번호(선택)"
+            value={form.styleNo}
+            onChange={(e) => setForm({ ...form, styleNo: e.target.value })}
+          />
         </div>
         <button
           type="submit"
@@ -223,7 +292,7 @@ export const HsCodeManager: React.FC = () => {
         </button>
       </form>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <input
           className="border border-gray-300 rounded px-3 py-2"
           placeholder="품종 검색"
@@ -248,6 +317,12 @@ export const HsCodeManager: React.FC = () => {
           value={searchHsCode}
           onChange={(e) => setSearchHsCode(e.target.value)}
         />
+        <input
+          className="border border-gray-300 rounded px-3 py-2"
+          placeholder="스타일번호 검색"
+          value={searchStyleNo}
+          onChange={(e) => setSearchStyleNo(e.target.value)}
+        />
       </div>
 
       {loading ? (
@@ -262,6 +337,7 @@ export const HsCodeManager: React.FC = () => {
                 <th className="py-2 pr-3">혼용률</th>
                 <th className="py-2 pr-3">HS코드</th>
                 <th className="py-2 pr-3">관,부가세 유무</th>
+                <th className="py-2 pr-3">연결 스타일번호</th>
               </tr>
             </thead>
             <tbody>
@@ -272,11 +348,14 @@ export const HsCodeManager: React.FC = () => {
                   <td className="py-2 pr-3">{item.composition}</td>
                   <td className="py-2 pr-3 font-mono">{item.hsCode}</td>
                   <td className="py-2 pr-3 text-gray-500">{item.note ?? '-'}</td>
+                  <td className="py-2 pr-3 text-gray-500">
+                    {item.styleNos && item.styleNos.length > 0 ? item.styleNos.join(', ') : '-'}
+                  </td>
                 </tr>
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-gray-400">
+                  <td colSpan={6} className="py-6 text-center text-gray-400">
                     등록된 HS코드 분류가 없습니다.
                   </td>
                 </tr>

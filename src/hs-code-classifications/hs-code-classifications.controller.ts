@@ -58,9 +58,23 @@ export class HsCodeClassificationsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
   @Post()
-  @ApiOperation({ summary: 'HS코드 분류 수동 등록/수정 (MANAGER/ADMIN)' })
-  create(@Body() dto: CreateHsCodeClassificationDto) {
-    return this.service.upsertOne(dto);
+  @ApiOperation({ summary: 'HS코드 분류 수동 등록/수정 (MANAGER/ADMIN, styleNo 지정 시 매핑도 함께 갱신)' })
+  async create(@Body() dto: CreateHsCodeClassificationDto) {
+    const classification = await this.service.upsertOne(dto);
+    if (dto.styleNo) {
+      await this.service.upsertStyleMapping(dto.styleNo, classification.id);
+    }
+    return { ...classification, styleNo: dto.styleNo ?? null };
+  }
+
+  // PR-084: MB6YSLP112Z처럼 관세사 확인 후 사용자가 정확한 품종/재직/혼용률 문구를
+  // 몰라도 스타일번호만으로 기존 등록값을 불러와 바로 수정할 수 있어야 한다 —
+  // 외부용 /by-style/:styleNo(API키 인증)와는 별도 경로로 둬 겹치지 않게 한다.
+  @ApiBearerAuth()
+  @Get('style/:styleNo')
+  @ApiOperation({ summary: '(로그인 사용자용) Style No로 기존 HS코드 분류 조회 — 없으면 404' })
+  findByStyleAuthenticated(@Param('styleNo') styleNo: string) {
+    return this.service.findByStyle(styleNo);
   }
 
   @Public()

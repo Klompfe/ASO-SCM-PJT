@@ -267,4 +267,114 @@ describe('HS코드 분류(HsCodeClassification) 회귀 테스트 (PR-081)', () =
       expect(res.body.data.hsCode).toBe('6214.20.0000');
     });
   });
+
+  describe('PR-084: 등록 시 styleNo 매핑 및 GET /style/:styleNo 조회', () => {
+    it('POST 등록 시 styleNo를 지정하면 매핑도 함께 저장되고 응답에 styleNo가 포함된다', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/hs-code-classifications')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          itemType: "WOMEN'S VEST",
+          fabricType: '직물',
+          composition: 'WOOL 100%',
+          hsCode: '6211.42.0000',
+          styleNo: 'STY-VEST-01',
+        })
+        .expect(201);
+
+      expect(res.body.data.styleNo).toBe('STY-VEST-01');
+
+      const findRes = await request(app.getHttpServer())
+        .get('/hs-code-classifications/style/STY-VEST-01')
+        .set('Authorization', `Bearer ${userToken}`)
+        .expect(200);
+      expect(findRes.body.data.hsCode).toBe('6211.42.0000');
+    });
+
+    it('styleNo 없이 등록해도 정상 동작한다(기존 흐름 유지)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/hs-code-classifications')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          itemType: "WOMEN'S DRESS",
+          fabricType: '직물',
+          composition: 'SILK 100%',
+          hsCode: '6204.43.0000',
+        })
+        .expect(201);
+
+      expect(res.body.data.styleNo).toBeNull();
+    });
+
+    it('기존 styleNo를 다른 조합으로 재지정하면 조회 결과가 바뀐다', async () => {
+      await request(app.getHttpServer())
+        .post('/hs-code-classifications')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          itemType: "WOMEN'S COAT",
+          fabricType: '직물',
+          composition: 'WOOL 90%, NYLON 10%',
+          hsCode: '6202.10.0000',
+          styleNo: 'STY-REASSIGN-01',
+        })
+        .expect(201);
+
+      // 관세사 확인 후 다른 조합으로 정정(itemType/fabricType/composition이 바뀜)
+      await request(app.getHttpServer())
+        .post('/hs-code-classifications')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          itemType: "WOMEN'S JACKET",
+          fabricType: '직물',
+          composition: 'WOOL 80%, NYLON 20%',
+          hsCode: '6204.33.0000',
+          styleNo: 'STY-REASSIGN-01',
+        })
+        .expect(201);
+
+      const findRes = await request(app.getHttpServer())
+        .get('/hs-code-classifications/style/STY-REASSIGN-01')
+        .set('Authorization', `Bearer ${userToken}`)
+        .expect(200);
+      expect(findRes.body.data.itemType).toBe("WOMEN'S JACKET");
+      expect(findRes.body.data.hsCode).toBe('6204.33.0000');
+    });
+
+    it('GET /style/:styleNo는 로그인 없이 호출하면 401이어야 한다', async () => {
+      await request(app.getHttpServer())
+        .get('/hs-code-classifications/style/STY-VEST-01')
+        .expect(401);
+    });
+
+    it('GET /style/:styleNo는 존재하지 않는 styleNo면 404여야 한다', async () => {
+      await request(app.getHttpServer())
+        .get('/hs-code-classifications/style/NO-SUCH-STYLE-XYZ')
+        .set('Authorization', `Bearer ${userToken}`)
+        .expect(404);
+    });
+  });
+
+  describe('PR-084: 목록 조회에 연결된 styleNos 포함 + styleNo 검색', () => {
+    it('목록 조회 결과 각 항목에 연결된 styleNos 배열이 포함된다', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/hs-code-classifications')
+        .set('Authorization', `Bearer ${userToken}`)
+        .query({ itemType: "WOMEN'S VEST" })
+        .expect(200);
+
+      const item = res.body.data.items.find((i: any) => i.composition === 'WOOL 100%');
+      expect(item.styleNos).toContain('STY-VEST-01');
+    });
+
+    it('styleNo로 부분일치 검색이 된다', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/hs-code-classifications')
+        .set('Authorization', `Bearer ${userToken}`)
+        .query({ styleNo: 'STY-VEST' })
+        .expect(200);
+
+      expect(res.body.data.items.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.data.items.every((i: any) => i.styleNos.includes('STY-VEST-01'))).toBe(true);
+    });
+  });
 });

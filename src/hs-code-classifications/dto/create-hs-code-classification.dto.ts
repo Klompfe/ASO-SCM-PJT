@@ -29,4 +29,11 @@ export class CreateHsCodeClassificationDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  // PR-084: 등록/수정과 동시에 이 스타일번호를 이 조합에 연결(upsertStyleMapping)한다
+  // — 관세사 확인 후 화면에서 바로 스타일↔분류를 고칠 수 있게 하는 목적.
+  @ApiPropertyOptional({ example: 'BF6X21C52' })
+  @IsOptional()
+  @IsString()
+  styleNo?: string;
 }

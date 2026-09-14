@@ -17,4 +17,9 @@ export class GetHsCodeClassificationsFilterDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   composition?: string;
+
+  @ApiPropertyOptional({ description: '연결된 스타일번호 검색(부분일치)' })
+  @IsOptional()
+  @IsString()
+  styleNo?: string;
 }
