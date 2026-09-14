@@ -10,7 +10,7 @@ import {
 } from '../api/buyers.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
-const emptyForm: CreateBuyer = { code: '', name: '', contactPerson: '', contactPhone: '', email: '', country: '', address: '' };
+const emptyForm: CreateBuyer = { name: '', contactPerson: '', contactPhone: '', email: '', country: '', address: '', brandCode: '' };
 
 export const BuyersManager: React.FC = () => {
   const [buyers, setBuyers] = useState<Buyer[]>([]);
@@ -43,8 +43,8 @@ export const BuyersManager: React.FC = () => {
     e.preventDefault();
     setError(null);
     try {
-      await createBuyer(newBuyer);
-      toast.success('고객사가 등록되었습니다.');
+      const res = await createBuyer(newBuyer);
+      toast.success(`고객사가 등록되었습니다. (코드: ${res?.code ?? '-'})`);
       setNewBuyer(emptyForm);
       loadBuyers();
     } catch (err: any) {
@@ -55,13 +55,13 @@ export const BuyersManager: React.FC = () => {
   const startEdit = (b: Buyer) => {
     setEditingId(b.id);
     setEditForm({
-      code: b.code,
       name: b.name,
-      contactPerson: b.contactPerson,
-      contactPhone: b.contactPhone,
+      contactPerson: b.contactPerson || '',
+      contactPhone: b.contactPhone || '',
       email: b.email || '',
-      country: b.country,
+      country: b.country || '',
       address: b.address || '',
+      brandCode: b.brandCode || '',
     });
   };
 
@@ -102,20 +102,20 @@ export const BuyersManager: React.FC = () => {
 
       <form onSubmit={handleCreate} className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg">
         <div className="flex flex-col">
-          <label className="text-sm text-gray-600 mb-1">코드</label>
-          <input className="border border-gray-300 rounded px-3 py-2" required value={newBuyer.code} onChange={(e) => setNewBuyer({ ...newBuyer, code: e.target.value })} />
-        </div>
-        <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">고객사명</label>
           <input className="border border-gray-300 rounded px-3 py-2" required value={newBuyer.name} onChange={(e) => setNewBuyer({ ...newBuyer, name: e.target.value })} />
         </div>
         <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">브랜드/고객약칭 (선택, 비우면 고객사명에서 자동생성)</label>
+          <input className="border border-gray-300 rounded px-3 py-2" value={newBuyer.brandCode} onChange={(e) => setNewBuyer({ ...newBuyer, brandCode: e.target.value })} />
+        </div>
+        <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">담당자</label>
-          <input className="border border-gray-300 rounded px-3 py-2" required value={newBuyer.contactPerson} onChange={(e) => setNewBuyer({ ...newBuyer, contactPerson: e.target.value })} />
+          <input className="border border-gray-300 rounded px-3 py-2" value={newBuyer.contactPerson} onChange={(e) => setNewBuyer({ ...newBuyer, contactPerson: e.target.value })} />
         </div>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">연락처</label>
-          <input className="border border-gray-300 rounded px-3 py-2" required value={newBuyer.contactPhone} onChange={(e) => setNewBuyer({ ...newBuyer, contactPhone: e.target.value })} />
+          <input className="border border-gray-300 rounded px-3 py-2" value={newBuyer.contactPhone} onChange={(e) => setNewBuyer({ ...newBuyer, contactPhone: e.target.value })} />
         </div>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">이메일</label>
@@ -123,7 +123,7 @@ export const BuyersManager: React.FC = () => {
         </div>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">국가</label>
-          <input className="border border-gray-300 rounded px-3 py-2" required value={newBuyer.country} onChange={(e) => setNewBuyer({ ...newBuyer, country: e.target.value })} />
+          <input className="border border-gray-300 rounded px-3 py-2" value={newBuyer.country} onChange={(e) => setNewBuyer({ ...newBuyer, country: e.target.value })} />
         </div>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">주소</label>

@@ -15,26 +15,35 @@ export class Buyer {
   @PrimaryGeneratedColumn()
   id: number;
 
+  // PR-085: 사람이 직접 입력하던 값에서 서버 자동채번("TY-{브랜드약칭}-{YY}{일련번호4자리}",
+  // 예: TY-MB-260001)으로 바뀌었다 — unique 제약은 그대로 유지(포맷만 바뀜, 기존 로우는
+  // 구 포맷 그대로 둔다). BuyersService.create() 참고.
   @Column({ unique: true })
   code: string;
 
   @Column()
   name: string;
 
-  @Column()
-  contactPerson: string;
+  // PR-085: 고객사명만으로도 등록 가능하도록 필수에서 완화.
+  @Column({ nullable: true })
+  contactPerson?: string;
 
-  @Column()
-  contactPhone: string;
+  @Column({ nullable: true })
+  contactPhone?: string;
 
   @Column({ nullable: true })
   email?: string;
 
-  @Column()
-  country: string;
+  @Column({ nullable: true })
+  country?: string;
 
   @Column({ nullable: true })
   address?: string;
+
+  // PR-085: 채번에 실제로 쓰인 브랜드 약칭(입력값이든 고객사명에서 자동추출한 값이든)을
+  // 저장해둔다 — 같은 브랜드로 추가 등록할 때 참고할 수 있게.
+  @Column({ nullable: true })
+  brandCode?: string;
 
   @CreateDateColumn()
   createdAt: Date;
