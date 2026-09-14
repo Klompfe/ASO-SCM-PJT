@@ -67,3 +67,14 @@ export const updateImportShipmentLineHsCode = (
   lineId: number,
   hsCode: string,
 ): Promise<any> => apiClient.put(`/import-shipments/${importShipmentId}/lines/${lineId}`, { hsCode });
+
+// PR-083: 태일 VN 공장이 실제로 작성하는 Vietnam INVOICE/Packing List 엑셀을 그대로
+// 업로드해 스타일별로 수입통관 문서를 자동 생성한다. 응답에는 warnings(설명/수량
+// 불일치, MasterStyle 미등록 스타일 스킵 등 조용히 무시하지 않은 경고 목록)가 함께 온다.
+export const importImportShipmentsFromFile = (file: File): Promise<any> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiClient.post('/import-shipments/import-from-file', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
