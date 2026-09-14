@@ -45,6 +45,10 @@ export const ExportShipmentManager: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
 
+  // PR-086: qty는 여전히 실제 포장수량 기준으로 계산되지만(설계 변경 없음), 발주수량과
+  // 다르면 조용히 넘어가지 않고 경고로 보여준다 — importWarnings와 동일한 표시 방식 재사용.
+  const [generateWarnings, setGenerateWarnings] = useState<string[]>([]);
+
   const loadPurchaseOrders = useCallback(async () => {
     try {
       const res = await getPurchaseOrders();
@@ -99,9 +103,16 @@ export const ExportShipmentManager: React.FC = () => {
       return;
     }
     setGenerating(true);
+    setGenerateWarnings([]);
     try {
       const res = await generateExportShipment(selectedPoIds, header);
-      toast.success('수출선적서류 초안이 생성되었습니다.');
+      const warnings: string[] = res.warnings ?? [];
+      setGenerateWarnings(warnings);
+      toast.success(
+        warnings.length > 0
+          ? `수출선적서류 초안이 생성되었습니다 (경고 ${warnings.length}건 — 아래 목록을 확인해 주세요)`
+          : '수출선적서류 초안이 생성되었습니다.',
+      );
       setSelectedPoIds([]);
       setHeader(emptyHeader);
       applyDefaultsToHeader();
@@ -203,6 +214,16 @@ export const ExportShipmentManager: React.FC = () => {
         <button onClick={handleGenerate} disabled={generating} className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50">
           {generating ? '생성 중...' : '수출선적서류 생성'}
         </button>
+        {generateWarnings.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs rounded p-2 space-y-1">
+            <div className="font-medium">생성 경고 {generateWarnings.length}건 — 조용히 무시하지 않고 그대로 알려드립니다:</div>
+            <ul className="list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+              {generateWarnings.map((w, idx) => (
+                <li key={idx}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="bg-gray-50 p-4 rounded-lg space-y-3">
