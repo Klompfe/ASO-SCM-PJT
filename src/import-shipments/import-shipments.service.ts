@@ -66,11 +66,12 @@ export class ImportShipmentsService {
 
     for (const lineDto of dto.lines) {
       const fabricType = (lineDto.fabricType ?? DEFAULT_FABRIC_TYPE).trim() || DEFAULT_FABRIC_TYPE;
-      const match = await this.hsCodeClassificationsService.findMatch(
-        lineDto.itemType,
-        fabricType,
-        lineDto.composition,
-      );
+      // PR-083.1: composition이 optional로 완화되었다(엑셀 업로드로 만들어지는
+      // 라인 중 마스터에 없는 신규 스타일은 혼용률을 모를 수 있음) — composition이
+      // 없으면 조회 자체가 무의미하므로 미매칭으로 취급한다.
+      const match = lineDto.composition
+        ? await this.hsCodeClassificationsService.findMatch(lineDto.itemType, fabricType, lineDto.composition)
+        : null;
 
       if (match) {
         await this.hsCodeClassificationsService.upsertStyleMapping(dto.styleNo, match.id);
@@ -80,7 +81,7 @@ export class ImportShipmentsService {
         this.importShipmentLineRepository.create({
           importShipmentId: shipment.id,
           itemType: lineDto.itemType,
-          composition: lineDto.composition,
+          composition: lineDto.composition ?? null,
           fabricType,
           hsCode: match?.hsCode ?? null,
           qty: lineDto.qty,
@@ -151,23 +152,33 @@ export class ImportShipmentsService {
     line.hsCode = dto.hsCode;
     await this.importShipmentLineRepository.save(line);
 
-    const classification = await this.hsCodeClassificationsService.upsertOne({
-      itemType: line.itemType,
-      fabricType: line.fabricType,
-      composition: line.composition,
-      hsCode: dto.hsCode,
-    });
-    await this.hsCodeClassificationsService.upsertStyleMapping(shipment.styleNo, classification.id);
+    // PR-083.1: composition이 null인 라인(엑셀 업로드로 만들어진, 마스터에 없던
+    // 신규 스타일)은 온전한 조합 키를 만들 수 없어 마스터에 등록하지 않는다 —
+    // resolveInvoiceLine()의 "마스터 미등록" 원칙과 동일하게 유지한다. hsCode
+    // 자체는 라인에 정상 저장된다.
+    if (line.composition != null) {
+      const classification = await this.hsCodeClassificationsService.upsertOne({
+        itemType: line.itemType,
+        fabricType: line.fabricType,
+        composition: line.composition,
+        hsCode: dto.hsCode,
+      });
+      await this.hsCodeClassificationsService.upsertStyleMapping(shipment.styleNo, classification.id);
+    }
 
     return withUnmatchedFlag(line);
   }
 
-  // PR-083: 태일 VN 공장이 실제로 작성하는 Vietnam INVOICE/Packing List 엑셀을
-  // 그대로 업로드해 ImportShipment(+lines)를 자동 생성한다. 한 파일에 여러 스타일이
-  // 섞여 있을 수 있는데 ImportShipment은 PR-082 설계상 "1건=1 styleNo"이므로
-  // styleNo별로 그룹핑해 그룹마다 별도 ImportShipment을 만든다. 각 그룹은 파일의
-  // 헤더 정보(invoiceNo/invoiceDate)를 공유한다. HS코드 자동조회는 기존 create()를
-  // 그대로 재사용해 중복 로직을 만들지 않는다.
+  // PR-083.1: 태일 VN 공장이 실제로 작성하는 Vietnam INVOICE(IV FOB)/Packing
+  // List(PK) 엑셀을 그대로 업로드해 ImportShipment(+lines)를 자동 생성한다.
+  // 한 파일에 여러 스타일이 섞여 있을 수 있는데 ImportShipment은 PR-082 설계상
+  // "1건=1 styleNo"이므로 styleNo별로 그룹핑해 그룹마다 별도 ImportShipment을
+  // 만든다. 각 그룹은 파일의 헤더 정보(invoiceNo/invoiceDate)를 공유한다.
+  //
+  // 이 파일은 혼용률 컬럼이 없고 HS코드가 이미 인보이스에 적혀 있다 — create()가
+  // 하는 "(itemType,fabricType,composition)으로 자동조회"와는 반대 방향(인보이스의
+  // HS코드가 이미 확정값)이라 create()를 재사용하지 않고 직접 헤더/라인을 만든다.
+  // HS코드/혼용률 해석은 resolveInvoiceLine()에 위임한다.
   //
   // ImportShipment.styleNo는 MasterStyle을 참조하는 FK라(nullable 아님) 파일에
   // 오타 styleNo가 섞여 있으면 DB 제약 위반으로 전체 업로드가 실패해 버린다 — 그런
@@ -194,25 +205,102 @@ export class ImportShipmentsService {
         continue;
       }
 
-      const shipment = await this.create({
-        styleNo,
-        invoiceNo: parsed.header.invoiceNo ?? undefined,
-        invoiceDate: parsed.header.invoiceDate ? parsed.header.invoiceDate.toISOString().slice(0, 10) : undefined,
-        lines: lines.map((l) => ({
-          itemType: l.itemType,
-          composition: l.composition,
-          qty: l.qty,
-          unit: l.unit,
-          unitPrice: l.unitPrice ?? undefined,
-          amount: l.amount ?? undefined,
-          netWeight: l.netWeight ?? undefined,
-          grossWeight: l.grossWeight ?? undefined,
-          packageCount: l.packageCount ?? undefined,
-        })),
-      });
-      shipments.push(shipment);
+      const shipment = await this.importShipmentRepository.save(
+        this.importShipmentRepository.create({
+          styleNo,
+          invoiceNo: parsed.header.invoiceNo ?? null,
+          invoiceDate: parsed.header.invoiceDate ?? null,
+          status: ImportShipmentStatus.PENDING_CLEARANCE,
+        }),
+      );
+
+      for (const line of lines) {
+        const resolved = await this.resolveInvoiceLine(styleNo, line, warnings);
+        await this.importShipmentLineRepository.save(
+          this.importShipmentLineRepository.create({
+            importShipmentId: shipment.id,
+            itemType: resolved.itemType,
+            composition: resolved.composition,
+            fabricType: resolved.fabricType,
+            hsCode: resolved.hsCode,
+            qty: line.qty,
+            unit: line.unit,
+            unitPrice: line.unitPrice,
+            amount: line.amount,
+            netWeight: line.netWeight,
+            grossWeight: line.grossWeight,
+            packageCount: line.packageCount,
+          }),
+        );
+      }
+
+      shipments.push(await this.findOneOrFail(shipment.id));
     }
 
     return { shipments, warnings };
+  }
+
+  // 사용자 확인 사항(PR-083.1): "인보이스의 HS코드는 확인과정을 거쳐 작성된
+  // 확정값"이지만 HsCodeClassification 마스터(PR-081)와 반드시 연동되어야 한다.
+  //
+  // - 마스터에 이 styleNo 매핑이 있으면: itemType/fabricType/composition은
+  //   마스터 값을 그대로 쓴다(인보이스 Description 텍스트가 아님 — 마스터 쪽이
+  //   구조화된 정식 값). 인보이스 HS코드가 마스터와 다르면 인보이스 값을 확정값으로
+  //   신뢰해 그 값으로 마스터도 갱신한다(updateLineHsCode()와 동일한 upsert 패턴).
+  //   이때 upsertOne에 넘기는 itemType/fabricType/composition은 반드시 마스터에서
+  //   찾은 기존 값을 그대로 재사용한다 — 인보이스 Description으로 다시 만들면
+  //   문구가 미묘하게 달라 unique key가 어긋나 별도 행이 생길 수 있다.
+  // - 마스터에 없으면(NotFoundException): itemType은 인보이스 Description,
+  //   composition은 null(구할 방법 없음), hsCode는 인보이스 값을 그대로 저장하되
+  //   마스터에는 아무것도 등록하지 않는다(composition이 없어 온전한 조합 키를
+  //   만들 수 없음).
+  private async resolveInvoiceLine(
+    styleNo: string,
+    line: { description: string; invoiceHsCode: string | null },
+    warnings: string[],
+  ): Promise<{ itemType: string; composition: string | null; fabricType: string; hsCode: string | null }> {
+    let master;
+    try {
+      master = await this.hsCodeClassificationsService.findByStyle(styleNo);
+    } catch (err) {
+      if (err instanceof NotFoundException) {
+        warnings.push(`${styleNo}: HS코드 마스터에 없는 신규 스타일 — 인보이스 HS코드만 저장, 혼용률 미확보`);
+        return {
+          itemType: line.description,
+          composition: null,
+          fabricType: DEFAULT_FABRIC_TYPE,
+          hsCode: line.invoiceHsCode,
+        };
+      }
+      throw err;
+    }
+
+    // 인보이스에 HS코드가 비어 있으면 비교/갱신할 확정값이 없으므로 마스터 값을
+    // 그대로 유지한다(빈 값을 "다름"으로 취급해 마스터를 지우지 않도록).
+    if (line.invoiceHsCode != null && master.hsCode !== line.invoiceHsCode) {
+      const updated = await this.hsCodeClassificationsService.upsertOne({
+        itemType: master.itemType,
+        fabricType: master.fabricType,
+        composition: master.composition,
+        hsCode: line.invoiceHsCode,
+      });
+      await this.hsCodeClassificationsService.upsertStyleMapping(styleNo, updated.id);
+      warnings.push(
+        `${styleNo}: 마스터 HS코드(${master.hsCode}) ≠ 인보이스 HS코드(${line.invoiceHsCode}) — 인보이스 값으로 갱신`,
+      );
+      return {
+        itemType: master.itemType,
+        composition: master.composition,
+        fabricType: master.fabricType,
+        hsCode: line.invoiceHsCode,
+      };
+    }
+
+    return {
+      itemType: master.itemType,
+      composition: master.composition,
+      fabricType: master.fabricType,
+      hsCode: master.hsCode,
+    };
   }
 }

@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ImportShipmentsService } from './import-shipments.service';
@@ -49,6 +49,7 @@ describe('ImportShipmentsService', () => {
           provide: HsCodeClassificationsService,
           useValue: {
             findMatch: jest.fn(),
+            findByStyle: jest.fn(),
             upsertStyleMapping: jest.fn(),
             upsertOne: jest.fn(),
           },
@@ -193,45 +194,114 @@ describe('ImportShipmentsService', () => {
     });
   });
 
-  describe('importFromFile — 엑셀 업로드로 스타일별 ImportShipment 자동 생성', () => {
-    it('여러 스타일이 섞인 파일을 styleNo별로 그룹핑해 각각 별도 ImportShipment을 생성한다', async () => {
+  describe('importFromFile — Vietnam INV/PKL 엑셀 업로드로 스타일별 ImportShipment 자동 생성', () => {
+    const mockParsedLine = (overrides: Partial<Record<string, any>> = {}) => ({
+      styleNo: 'STY-A',
+      description: "WOMEN'S PANTS",
+      qty: 10,
+      unit: 'PCS',
+      unitPrice: 1,
+      amount: 10,
+      invoiceHsCode: '62046300',
+      netWeight: null,
+      grossWeight: 2,
+      packageCount: null,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      (masterStyleRepo.findOne as jest.Mock).mockResolvedValue({ styleNo: 'exists' });
+      (shipmentRepo.findOne as jest.Mock).mockImplementation(() =>
+        Promise.resolve({ id: 1, styleNo: 'STY-A', lines: [] }),
+      );
+    });
+
+    it('마스터 매핑이 있고 인보이스 HS코드가 같으면 마스터 값을 그대로 쓰고 upsert는 호출되지 않는다', async () => {
       (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
-        header: { invoiceNo: 'TYVN-SF-08-2026', invoiceDate: new Date('2026-09-15'), portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null },
-        lines: [
-          { styleNo: 'STY-A', itemType: "WOMEN'S PANTS", composition: 'COTTON 100%', qty: 10, unit: 'PCS', unitPrice: 1, amount: 10, netWeight: 1, grossWeight: 2, packageCount: 1 },
-          { styleNo: 'STY-B', itemType: "WOMEN'S JACKET", composition: 'WOOL 100%', qty: 5, unit: 'PCS', unitPrice: 2, amount: 10, netWeight: 1, grossWeight: 2, packageCount: 1 },
-        ],
+        header: { invoiceNo: 'TYVN2026-34', invoiceDate: new Date('2026-09-11'), portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null },
+        lines: [mockParsedLine({ invoiceHsCode: '6204.63.0000' })],
         warnings: [],
       });
-      (masterStyleRepo.findOne as jest.Mock).mockResolvedValue({ styleNo: 'exists' });
-      (hsCodeService.findMatch as jest.Mock).mockResolvedValue(null);
-      (shipmentRepo.findOne as jest.Mock).mockImplementation((opts: any) =>
-        Promise.resolve({ id: opts.where.id, styleNo: 'X', lines: [] }),
+      (hsCodeService.findByStyle as jest.Mock).mockResolvedValue({
+        id: 5,
+        itemType: "WOMEN'S PANTS",
+        fabricType: '직물',
+        composition: 'POLYESTER 97%, POLYURETHANE 3%',
+        hsCode: '6204.63.0000',
+      });
+
+      await service.importFromFile(Buffer.from(''));
+
+      expect(hsCodeService.upsertOne).not.toHaveBeenCalled();
+      expect(lineRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          itemType: "WOMEN'S PANTS",
+          composition: 'POLYESTER 97%, POLYURETHANE 3%',
+          fabricType: '직물',
+          hsCode: '6204.63.0000',
+        }),
       );
+    });
+
+    it('마스터 매핑이 있고 인보이스 HS코드가 다르면 인보이스 값으로 갱신하고 upsertOne/upsertStyleMapping을 호출하며 warnings를 남긴다', async () => {
+      (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
+        header: { invoiceNo: null, invoiceDate: null, portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null },
+        lines: [mockParsedLine({ invoiceHsCode: '62046300' })],
+        warnings: [],
+      });
+      (hsCodeService.findByStyle as jest.Mock).mockResolvedValue({
+        id: 5,
+        itemType: "WOMEN'S PANTS",
+        fabricType: '직물',
+        composition: 'POLYESTER 97%, POLYURETHANE 3%',
+        hsCode: '6204.53.0000', // 마스터 값이 인보이스와 다름
+      });
+      (hsCodeService.upsertOne as jest.Mock).mockResolvedValue({ id: 9 });
 
       const result = await service.importFromFile(Buffer.from(''));
 
-      expect(masterStyleRepo.findOne).toHaveBeenCalledWith({ where: { styleNo: 'STY-A' } });
-      expect(masterStyleRepo.findOne).toHaveBeenCalledWith({ where: { styleNo: 'STY-B' } });
-      expect(shipmentRepo.save).toHaveBeenCalledTimes(2);
-      expect(result.shipments).toHaveLength(2);
-      expect(result.warnings).toEqual([]);
+      expect(hsCodeService.upsertOne).toHaveBeenCalledWith({
+        itemType: "WOMEN'S PANTS",
+        fabricType: '직물',
+        composition: 'POLYESTER 97%, POLYURETHANE 3%',
+        hsCode: '62046300',
+      });
+      expect(hsCodeService.upsertStyleMapping).toHaveBeenCalledWith('STY-A', 9);
+      expect(lineRepo.create).toHaveBeenCalledWith(expect.objectContaining({ hsCode: '62046300' }));
+      expect(result.warnings.some((w) => w.includes('마스터 HS코드') && w.includes('인보이스 HS코드'))).toBe(true);
+    });
+
+    it('마스터 매핑이 없으면(NotFoundException) composition은 null로 저장하고 마스터에는 등록하지 않으며 warnings를 남긴다', async () => {
+      (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
+        header: { invoiceNo: null, invoiceDate: null, portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null },
+        lines: [mockParsedLine({ description: "WOMEN'S SKIRT", invoiceHsCode: '62045100' })],
+        warnings: [],
+      });
+      (hsCodeService.findByStyle as jest.Mock).mockRejectedValue(new NotFoundException('no mapping'));
+
+      const result = await service.importFromFile(Buffer.from(''));
+
+      expect(hsCodeService.upsertOne).not.toHaveBeenCalled();
+      expect(hsCodeService.upsertStyleMapping).not.toHaveBeenCalled();
+      expect(lineRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ itemType: "WOMEN'S SKIRT", composition: null, hsCode: '62045100' }),
+      );
+      expect(result.warnings.some((w) => w.includes('신규 스타일'))).toBe(true);
     });
 
     it('MasterStyle에 없는 styleNo는 건너뛰고 warnings에 남긴다(나머지는 계속 생성)', async () => {
       (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
         header: { invoiceNo: null, invoiceDate: null, portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null },
         lines: [
-          { styleNo: 'STY-EXISTS', itemType: "WOMEN'S PANTS", composition: 'COTTON 100%', qty: 10, unit: 'PCS', unitPrice: 1, amount: 10, netWeight: 1, grossWeight: 2, packageCount: 1 },
-          { styleNo: 'STY-TYPO', itemType: "WOMEN'S JACKET", composition: 'WOOL 100%', qty: 5, unit: 'PCS', unitPrice: 2, amount: 10, netWeight: 1, grossWeight: 2, packageCount: 1 },
+          mockParsedLine({ styleNo: 'STY-EXISTS' }),
+          mockParsedLine({ styleNo: 'STY-TYPO', description: "WOMEN'S JACKET" }),
         ],
         warnings: [],
       });
       (masterStyleRepo.findOne as jest.Mock).mockImplementation((opts: any) =>
         Promise.resolve(opts.where.styleNo === 'STY-EXISTS' ? { styleNo: 'STY-EXISTS' } : null),
       );
-      (hsCodeService.findMatch as jest.Mock).mockResolvedValue(null);
-      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, styleNo: 'STY-EXISTS', lines: [] });
+      (hsCodeService.findByStyle as jest.Mock).mockRejectedValue(new NotFoundException('no mapping'));
 
       const result = await service.importFromFile(Buffer.from(''));
 
