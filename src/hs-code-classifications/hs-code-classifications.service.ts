@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { HsCodeClassification } from './entities/hs-code-classification.entity';
 import { StyleHsCodeMapping } from './entities/style-hs-code-mapping.entity';
 import { CreateHsCodeClassificationDto } from './dto/create-hs-code-classification.dto';
@@ -129,6 +129,10 @@ export class HsCodeClassificationsService {
     );
   }
 
+  // PR-084: 화면에서 "이 스타일 이미 마스터에 있나?"를 목록만 보고도 알 수 있도록
+  // 각 classification에 연결된 styleNo들을 붙여서 내려준다. N+1을 피하려고
+  // 조회된 classification id들을 모아 StyleHsCodeMapping을 한 번에 IN(...) 조회해
+  // 그룹핑한다(한 조합에 스타일이 여러 개 연결될 수 있음 — 드물지만 실제로 있다).
   async findAll(filter: GetHsCodeClassificationsFilterDto) {
     const qb = this.classificationRepository.createQueryBuilder('c');
 
@@ -149,6 +153,15 @@ export class HsCodeClassificationsService {
         composition: `%${filter.composition}%`,
       });
     }
+    if (filter.styleNo) {
+      // 스타일번호로 검색할 때만 매핑 테이블을 조인한다 — 한 classification에
+      // 매칭되는 매핑이 여러 개면 행이 중복될 수 있어 distinct로 정리한다.
+      qb.innerJoin(StyleHsCodeMapping, 'm', 'm.classificationId = c.id').andWhere(
+        'LOWER(m.styleNo) LIKE LOWER(:styleNo)',
+        { styleNo: `%${filter.styleNo}%` },
+      );
+      qb.distinct(true);
+    }
 
     qb.orderBy('c.itemType', 'ASC')
       .addOrderBy('c.fabricType', 'ASC')
@@ -156,7 +169,24 @@ export class HsCodeClassificationsService {
       .take(filter.limit);
 
     const [items, total] = await qb.getManyAndCount();
-    return { items, total, page: filter.page ?? 1, limit: filter.limit ?? 10 };
+
+    const ids = items.map((i) => i.id);
+    const mappings = ids.length
+      ? await this.styleMappingRepository.find({ where: { classificationId: In(ids) } })
+      : [];
+    const styleNosByClassificationId = new Map<number, string[]>();
+    for (const mapping of mappings) {
+      const list = styleNosByClassificationId.get(mapping.classificationId) ?? [];
+      list.push(mapping.styleNo);
+      styleNosByClassificationId.set(mapping.classificationId, list);
+    }
+
+    const itemsWithStyleNos = items.map((item) => ({
+      ...item,
+      styleNos: styleNosByClassificationId.get(item.id) ?? [],
+    }));
+
+    return { items: itemsWithStyleNos, total, page: filter.page ?? 1, limit: filter.limit ?? 10 };
   }
 
   // 관리 화면에서 1건 수동 등록/수정 — import와 동일한 upsert 규칙을 따른다
