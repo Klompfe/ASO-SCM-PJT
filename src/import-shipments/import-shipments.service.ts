@@ -3,9 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ImportShipment, ImportShipmentStatus } from './entities/import-shipment.entity';
 import { ImportShipmentLine } from './entities/import-shipment-line.entity';
+import { MasterStyle } from '../styles/entities/master-style.entity';
 import { CreateImportShipmentDto } from './dto/create-import-shipment.dto';
 import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.dto';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
+import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
 
 // PENDING_CLEARANCE -> CLEARED만 허용, 역행 불가 — export-shipments.service.ts의
 // ALLOWED_TRANSITIONS와 동일 패턴(완제품 수입통관은 3단계까지는 불필요해 2단계로 단순화).
@@ -42,6 +44,8 @@ export class ImportShipmentsService {
     private readonly importShipmentRepository: Repository<ImportShipment>,
     @InjectRepository(ImportShipmentLine)
     private readonly importShipmentLineRepository: Repository<ImportShipmentLine>,
+    @InjectRepository(MasterStyle)
+    private readonly masterStyleRepository: Repository<MasterStyle>,
     private readonly hsCodeClassificationsService: HsCodeClassificationsService,
   ) {}
 
@@ -156,5 +160,59 @@ export class ImportShipmentsService {
     await this.hsCodeClassificationsService.upsertStyleMapping(shipment.styleNo, classification.id);
 
     return withUnmatchedFlag(line);
+  }
+
+  // PR-083: 태일 VN 공장이 실제로 작성하는 Vietnam INVOICE/Packing List 엑셀을
+  // 그대로 업로드해 ImportShipment(+lines)를 자동 생성한다. 한 파일에 여러 스타일이
+  // 섞여 있을 수 있는데 ImportShipment은 PR-082 설계상 "1건=1 styleNo"이므로
+  // styleNo별로 그룹핑해 그룹마다 별도 ImportShipment을 만든다. 각 그룹은 파일의
+  // 헤더 정보(invoiceNo/invoiceDate)를 공유한다. HS코드 자동조회는 기존 create()를
+  // 그대로 재사용해 중복 로직을 만들지 않는다.
+  //
+  // ImportShipment.styleNo는 MasterStyle을 참조하는 FK라(nullable 아님) 파일에
+  // 오타 styleNo가 섞여 있으면 DB 제약 위반으로 전체 업로드가 실패해 버린다 — 그런
+  // 사고를 피하려고 그룹마다 미리 MasterStyle 존재 여부를 확인해, 없으면 그 스타일만
+  // 건너뛰고 warnings에 남긴다(나머지 정상 스타일은 계속 생성됨).
+  async importFromFile(buffer: Buffer): Promise<{ shipments: ImportShipmentWithMatch[]; warnings: string[] }> {
+    const parsed = ImportShipmentExcelParser.parse(buffer);
+
+    const groups = new Map<string, typeof parsed.lines>();
+    for (const line of parsed.lines) {
+      if (!groups.has(line.styleNo)) groups.set(line.styleNo, []);
+      groups.get(line.styleNo)!.push(line);
+    }
+
+    const warnings = [...parsed.warnings];
+    const shipments: ImportShipmentWithMatch[] = [];
+
+    for (const [styleNo, lines] of groups) {
+      const styleExists = await this.masterStyleRepository.findOne({ where: { styleNo } });
+      if (!styleExists) {
+        warnings.push(
+          `styleNo="${styleNo}": MasterStyle에 등록되지 않은 스타일번호라 건너뛰었습니다(${lines.length}개 라인). 먼저 스타일을 등록한 뒤 다시 업로드하거나 직접입력을 이용해 주세요.`,
+        );
+        continue;
+      }
+
+      const shipment = await this.create({
+        styleNo,
+        invoiceNo: parsed.header.invoiceNo ?? undefined,
+        invoiceDate: parsed.header.invoiceDate ? parsed.header.invoiceDate.toISOString().slice(0, 10) : undefined,
+        lines: lines.map((l) => ({
+          itemType: l.itemType,
+          composition: l.composition,
+          qty: l.qty,
+          unit: l.unit,
+          unitPrice: l.unitPrice ?? undefined,
+          amount: l.amount ?? undefined,
+          netWeight: l.netWeight ?? undefined,
+          grossWeight: l.grossWeight ?? undefined,
+          packageCount: l.packageCount ?? undefined,
+        })),
+      });
+      shipments.push(shipment);
+    }
+
+    return { shipments, warnings };
   }
 }

@@ -5,6 +5,7 @@ import {
   createImportShipment,
   updateImportShipmentStatus,
   updateImportShipmentLineHsCode,
+  importImportShipmentsFromFile,
   type ImportShipment,
   type CreateImportShipmentLine,
 } from '../api/importShipments.service';
@@ -35,6 +36,13 @@ export const ImportShipmentManager: React.FC = () => {
   const [lines, setLines] = useState<CreateImportShipmentLine[]>([{ ...emptyLine }]);
   const [saving, setSaving] = useState(false);
   const [hsCodeDrafts, setHsCodeDrafts] = useState<Record<number, string>>({});
+
+  // PR-083: Vietnam INVOICE/Packing List 엑셀을 그대로 업로드해 스타일별로
+  // 수입통관 문서를 자동 생성한다 — ExportShipmentManager의 업로드 버튼+경고 목록
+  // 표시 패턴을 그대로 따른다.
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +111,31 @@ export const ImportShipmentManager: React.FC = () => {
     }
   };
 
+  const handleUpload = async () => {
+    if (!uploadFile) {
+      toast.error('업로드할 엑셀 파일을 선택해 주세요.');
+      return;
+    }
+    setUploading(true);
+    setUploadWarnings([]);
+    try {
+      const res = await importImportShipmentsFromFile(uploadFile);
+      const warnings: string[] = res.warnings ?? [];
+      setUploadWarnings(warnings);
+      toast.success(
+        warnings.length > 0
+          ? `${res.shipments?.length ?? 0}건 생성 (경고 ${warnings.length}건 — 아래 목록을 확인해 주세요)`
+          : `${res.shipments?.length ?? 0}건의 수입통관 문서가 생성되었습니다.`,
+      );
+      setUploadFile(null);
+      await load();
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '엑셀 업로드에 실패했습니다. 지원하지 않는 양식일 수 있습니다.'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleClear = async (id: number) => {
     try {
       await updateImportShipmentStatus(id, 'CLEARED');
@@ -146,6 +179,39 @@ export const ImportShipmentManager: React.FC = () => {
         품종/재직/혼용률 조합으로 자동조회되며, 일치하는 값이 없으면 "HS코드 미확인"으로
         표시됩니다. 원부자재단가/선적일 계산은 수입통관 이메일 에이전트가 별도로 처리합니다.
       </p>
+
+      <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+        <h3 className="font-semibold text-gray-700">Vietnam INVOICE/Packing List 엑셀 업로드</h3>
+        <p className="text-xs text-gray-500">
+          태일 VN 공장이 실제로 작성하는 INVOICE/Packing List 엑셀을 그대로 업로드하면
+          스타일번호별로 수입통관 문서를 자동 생성합니다(HS코드 자동조회 포함).
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+            className="border p-2 rounded text-sm"
+          />
+          <button
+            onClick={handleUpload}
+            disabled={uploading}
+            className="bg-purple-600 text-white px-4 py-2 rounded font-medium hover:bg-purple-700 disabled:opacity-50"
+          >
+            {uploading ? '업로드 중...' : '파일 업로드'}
+          </button>
+        </div>
+        {uploadWarnings.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs rounded p-2 space-y-1">
+            <div className="font-medium">업로드 경고 {uploadWarnings.length}건 — 조용히 무시하지 않고 그대로 알려드립니다:</div>
+            <ul className="list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+              {uploadWarnings.map((w, idx) => (
+                <li key={idx}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
 
       <form onSubmit={handleSubmit} className="bg-gray-50 p-4 rounded-lg space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

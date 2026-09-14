@@ -5,12 +5,17 @@ import { Repository } from 'typeorm';
 import { ImportShipmentsService } from './import-shipments.service';
 import { ImportShipment, ImportShipmentStatus } from './entities/import-shipment.entity';
 import { ImportShipmentLine } from './entities/import-shipment-line.entity';
+import { MasterStyle } from '../styles/entities/master-style.entity';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
+import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
+
+jest.mock('./utils/import-shipment-excel-parser.util');
 
 describe('ImportShipmentsService', () => {
   let service: ImportShipmentsService;
   let shipmentRepo: Repository<ImportShipment>;
   let lineRepo: Repository<ImportShipmentLine>;
+  let masterStyleRepo: Repository<MasterStyle>;
   let hsCodeService: HsCodeClassificationsService;
 
   beforeEach(async () => {
@@ -35,6 +40,12 @@ describe('ImportShipmentsService', () => {
           },
         },
         {
+          provide: getRepositoryToken(MasterStyle),
+          useValue: {
+            findOne: jest.fn(),
+          },
+        },
+        {
           provide: HsCodeClassificationsService,
           useValue: {
             findMatch: jest.fn(),
@@ -48,6 +59,7 @@ describe('ImportShipmentsService', () => {
     service = module.get(ImportShipmentsService);
     shipmentRepo = module.get(getRepositoryToken(ImportShipment));
     lineRepo = module.get(getRepositoryToken(ImportShipmentLine));
+    masterStyleRepo = module.get(getRepositoryToken(MasterStyle));
     hsCodeService = module.get(HsCodeClassificationsService);
   });
 
@@ -178,6 +190,54 @@ describe('ImportShipmentsService', () => {
       expect(hsCodeService.upsertStyleMapping).toHaveBeenCalledWith('BF6X27C51', 7);
       expect(result.hsCode).toBe('6202.20.1000');
       expect(result.unmatched).toBe(false);
+    });
+  });
+
+  describe('importFromFile — 엑셀 업로드로 스타일별 ImportShipment 자동 생성', () => {
+    it('여러 스타일이 섞인 파일을 styleNo별로 그룹핑해 각각 별도 ImportShipment을 생성한다', async () => {
+      (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
+        header: { invoiceNo: 'TYVN-SF-08-2026', invoiceDate: new Date('2026-09-15'), portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null },
+        lines: [
+          { styleNo: 'STY-A', itemType: "WOMEN'S PANTS", composition: 'COTTON 100%', qty: 10, unit: 'PCS', unitPrice: 1, amount: 10, netWeight: 1, grossWeight: 2, packageCount: 1 },
+          { styleNo: 'STY-B', itemType: "WOMEN'S JACKET", composition: 'WOOL 100%', qty: 5, unit: 'PCS', unitPrice: 2, amount: 10, netWeight: 1, grossWeight: 2, packageCount: 1 },
+        ],
+        warnings: [],
+      });
+      (masterStyleRepo.findOne as jest.Mock).mockResolvedValue({ styleNo: 'exists' });
+      (hsCodeService.findMatch as jest.Mock).mockResolvedValue(null);
+      (shipmentRepo.findOne as jest.Mock).mockImplementation((opts: any) =>
+        Promise.resolve({ id: opts.where.id, styleNo: 'X', lines: [] }),
+      );
+
+      const result = await service.importFromFile(Buffer.from(''));
+
+      expect(masterStyleRepo.findOne).toHaveBeenCalledWith({ where: { styleNo: 'STY-A' } });
+      expect(masterStyleRepo.findOne).toHaveBeenCalledWith({ where: { styleNo: 'STY-B' } });
+      expect(shipmentRepo.save).toHaveBeenCalledTimes(2);
+      expect(result.shipments).toHaveLength(2);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('MasterStyle에 없는 styleNo는 건너뛰고 warnings에 남긴다(나머지는 계속 생성)', async () => {
+      (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
+        header: { invoiceNo: null, invoiceDate: null, portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null },
+        lines: [
+          { styleNo: 'STY-EXISTS', itemType: "WOMEN'S PANTS", composition: 'COTTON 100%', qty: 10, unit: 'PCS', unitPrice: 1, amount: 10, netWeight: 1, grossWeight: 2, packageCount: 1 },
+          { styleNo: 'STY-TYPO', itemType: "WOMEN'S JACKET", composition: 'WOOL 100%', qty: 5, unit: 'PCS', unitPrice: 2, amount: 10, netWeight: 1, grossWeight: 2, packageCount: 1 },
+        ],
+        warnings: [],
+      });
+      (masterStyleRepo.findOne as jest.Mock).mockImplementation((opts: any) =>
+        Promise.resolve(opts.where.styleNo === 'STY-EXISTS' ? { styleNo: 'STY-EXISTS' } : null),
+      );
+      (hsCodeService.findMatch as jest.Mock).mockResolvedValue(null);
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, styleNo: 'STY-EXISTS', lines: [] });
+
+      const result = await service.importFromFile(Buffer.from(''));
+
+      expect(result.shipments).toHaveLength(1);
+      expect(result.warnings.some((w) => w.includes('STY-TYPO'))).toBe(true);
+      expect(shipmentRepo.save).toHaveBeenCalledTimes(1);
     });
   });
 });

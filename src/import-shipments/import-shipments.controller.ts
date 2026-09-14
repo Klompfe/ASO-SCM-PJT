@@ -1,5 +1,18 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import 'multer';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Put,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ImportShipmentsService } from './import-shipments.service';
 import { CreateImportShipmentDto } from './dto/create-import-shipment.dto';
 import { UpdateImportShipmentStatusDto } from './dto/update-import-shipment-status.dto';
@@ -19,6 +32,17 @@ export class ImportShipmentsController {
   @ApiOperation({ summary: '완제품 수입통관 문서 등록(헤더+라인, HS코드 자동조회)' })
   create(@Body() dto: CreateImportShipmentDto) {
     return this.importShipmentsService.create(dto);
+  }
+
+  @Post('import-from-file')
+  @ApiOperation({ summary: 'Vietnam INVOICE/Packing List 엑셀을 업로드해 스타일별로 수입통관 문서 자동 생성' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  importFromFile(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('업로드할 엑셀 파일이 없습니다.');
+    }
+    return this.importShipmentsService.importFromFile(file.buffer);
   }
 
   @Get()
