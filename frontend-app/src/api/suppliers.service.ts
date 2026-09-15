@@ -8,15 +8,18 @@ export interface Supplier {
   contactPhone?: string;
   email?: string;
   address?: string;
+  abbrCode?: string | null;
 }
 
+// PR-088: code는 더 이상 클라이언트가 보내지 않는다(서버가 "TY-{업체약칭}-
+// {YY}{일련번호4자리}" 형식으로 자동채번).
 export interface CreateSupplier {
-  code: string;
   name: string;
   businessNumber?: string;
   contactPhone?: string;
   email?: string;
   address?: string;
+  abbrCode?: string;
 }
 
 export type UpdateSupplier = Partial<CreateSupplier>;

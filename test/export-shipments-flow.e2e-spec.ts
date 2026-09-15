@@ -79,7 +79,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
     const supplierRes = await request(app.getHttpServer())
       .post('/suppliers')
       .set('Authorization', `Bearer ${userToken}`)
-      .send({ code: `SUP-EXPORT-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, name: 'Export E2E Supplier' })
+      .send({ name: 'Export E2E Supplier' })
       .expect(201);
 
     const itemRes = await request(app.getHttpServer())
@@ -312,7 +312,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
       const supplierRes = await request(app.getHttpServer())
         .post('/suppliers')
         .set('Authorization', `Bearer ${userToken}`)
-        .send({ code: `SUP-NOBOM-${Date.now()}`, name: 'No BOM Supplier' })
+        .send({ name: 'No BOM Supplier' })
         .expect(201);
       const itemRes = await request(app.getHttpServer())
         .post('/items')

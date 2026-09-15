@@ -46,7 +46,7 @@ describe('Inventory 연동 회귀 테스트 (PO RECEIVED / WO COMPLETED)', () =>
       .post('/suppliers')
       .set('Authorization', `Bearer ${jwtToken}`)
       .send({
-        code: `SUP_INV_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        // PR-088: code는 서버가 자동채번하므로 더 이상 보내지 않는다.
         name: 'Inventory E2E 공급사',
         email: 'inv-e2e@supplier.com',
         contactPhone: '010-0000-0000',

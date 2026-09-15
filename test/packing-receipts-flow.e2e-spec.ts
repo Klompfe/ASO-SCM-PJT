@@ -50,7 +50,7 @@ describe('포장내역(PackingReceipt) 등록 회귀 테스트 (PR-074)', () => 
     const supplierRes = await request(app.getHttpServer())
       .post('/suppliers')
       .set('Authorization', `Bearer ${jwtToken}`)
-      .send({ code: `SUP-PACKING-${Date.now()}`, name: '포장내역 테스트 공급사' })
+      .send({ name: '포장내역 테스트 공급사' })
       .expect(201);
 
     const itemRes = await request(app.getHttpServer())

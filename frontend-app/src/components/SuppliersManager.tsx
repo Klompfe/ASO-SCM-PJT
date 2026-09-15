@@ -10,7 +10,7 @@ import {
 } from '../api/suppliers.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
-const emptyForm: CreateSupplier = { code: '', name: '', businessNumber: '', contactPhone: '', email: '', address: '' };
+const emptyForm: CreateSupplier = { name: '', businessNumber: '', contactPhone: '', email: '', address: '', abbrCode: '' };
 
 export const SuppliersManager: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -43,8 +43,8 @@ export const SuppliersManager: React.FC = () => {
     e.preventDefault();
     setError(null);
     try {
-      await createSupplier(newSupplier);
-      toast.success('공급업체가 등록되었습니다.');
+      const res = await createSupplier(newSupplier);
+      toast.success(`공급업체가 등록되었습니다. (코드: ${res?.code ?? '-'})`);
       setNewSupplier(emptyForm);
       loadSuppliers();
     } catch (err: any) {
@@ -55,12 +55,12 @@ export const SuppliersManager: React.FC = () => {
   const startEdit = (s: Supplier) => {
     setEditingId(s.id);
     setEditForm({
-      code: s.code,
       name: s.name,
       businessNumber: s.businessNumber || '',
       contactPhone: s.contactPhone || '',
       email: s.email || '',
       address: s.address || '',
+      abbrCode: s.abbrCode || '',
     });
   };
 
@@ -101,12 +101,12 @@ export const SuppliersManager: React.FC = () => {
 
       <form onSubmit={handleCreate} className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg">
         <div className="flex flex-col">
-          <label className="text-sm text-gray-600 mb-1">코드</label>
-          <input className="border border-gray-300 rounded px-3 py-2" required value={newSupplier.code} onChange={(e) => setNewSupplier({ ...newSupplier, code: e.target.value })} />
-        </div>
-        <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">이름</label>
           <input className="border border-gray-300 rounded px-3 py-2" required value={newSupplier.name} onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })} />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">업체약칭 (선택, 비우면 업체명에서 자동생성)</label>
+          <input className="border border-gray-300 rounded px-3 py-2" value={newSupplier.abbrCode} onChange={(e) => setNewSupplier({ ...newSupplier, abbrCode: e.target.value })} />
         </div>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">사업자번호</label>
@@ -134,6 +134,7 @@ export const SuppliersManager: React.FC = () => {
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="px-4 py-2 text-left">코드</th>
+              <th className="px-4 py-2 text-left">업체약칭</th>
               <th className="px-4 py-2 text-left">이름</th>
               <th className="px-4 py-2 text-left">사업자번호</th>
               <th className="px-4 py-2 text-left">연락처</th>
@@ -147,6 +148,7 @@ export const SuppliersManager: React.FC = () => {
               editingId === s.id ? (
                 <tr key={s.id} className="bg-yellow-50">
                   <td className="px-4 py-2 font-mono">{s.code}</td>
+                  <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.abbrCode} onChange={(e) => setEditForm({ ...editForm, abbrCode: e.target.value })} /></td>
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></td>
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.businessNumber} onChange={(e) => setEditForm({ ...editForm, businessNumber: e.target.value })} /></td>
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.contactPhone} onChange={(e) => setEditForm({ ...editForm, contactPhone: e.target.value })} /></td>
@@ -160,6 +162,7 @@ export const SuppliersManager: React.FC = () => {
               ) : (
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2 font-mono">{s.code}</td>
+                  <td className="px-4 py-2">{s.abbrCode ?? '-'}</td>
                   <td className="px-4 py-2">{s.name}</td>
                   <td className="px-4 py-2">{s.businessNumber}</td>
                   <td className="px-4 py-2">{s.contactPhone}</td>
