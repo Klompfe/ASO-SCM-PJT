@@ -1,12 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
+// PR-088: code는 더 이상 클라이언트가 넘기지 않는다 — 서버가 "TY-{업체약칭}-
+// {YY}{일련번호4자리}"(예: TY-GM-260001) 형식으로 자동채번한다(SuppliersService.create()
+// 참고, Buyer/PR-085와 동일 패턴). businessNumber/contactPhone/email/address는
+// 이미 선택 필드였으므로 code만 제거하면 업체명만으로 등록이 자연스럽게 달성된다.
 export class CreateSupplierDto {
-  @ApiProperty({ description: '공급업체 코드', example: 'SUP-001' })
-  @IsNotEmpty({ message: '공급업체 코드는 필수입니다.' })
-  @IsString()
-  code: string;
-
   @ApiProperty({ description: '공급업체명', example: '(주) 글로벌 자재' })
   @IsNotEmpty({ message: '공급업체명은 필수입니다.' })
   @IsString()
@@ -31,4 +30,11 @@ export class CreateSupplierDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  // PR-088: 비워두면 업체명(name)에서 알파벳만 추출해 자동 결정한다(SuppliersService
+  // 참고) — 업체약칭.
+  @ApiPropertyOptional({ description: '업체약칭(선택, 비우면 업체명에서 자동생성)', example: 'GM' })
+  @IsOptional()
+  @IsString()
+  abbrCode?: string;
 }

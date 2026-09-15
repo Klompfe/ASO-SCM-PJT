@@ -70,7 +70,7 @@ describe('SCM API (E2E Integration Test)', () => {
       .post('/suppliers')
       .set('Authorization', `Bearer ${jwtToken}`)
       .send({
-        code: `SUP_E2E_${Date.now()}`,
+        // PR-088: code는 서버가 자동채번하므로 더 이상 보내지 않는다.
         name: 'E2E 테스트 공급사',
         email: 'e2e@supplier.com',
         contactPhone: '010-0000-0000',
