@@ -28,8 +28,11 @@ export class BomItem {
   @Column('decimal')
   requiredQty: number;
 
-  @Column()
-  supplier: string;
+  // PR-098: 공급처는 작업지시서 문서 자체에는 없는 정보(실제 발주 단계에서 결정)라
+  // "값이 없음"과 "N/A라는 문자열"을 구분해야 화면에서 정확히 "미정"으로 표시할 수
+  // 있다 — nullable로 바꿔 mapping-commit.service.ts가 실제로 null을 저장하게 한다.
+  @Column({ nullable: true })
+  supplier: string | null;
 
   @Column('decimal')
   unitPrice: number;

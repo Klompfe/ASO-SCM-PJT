@@ -57,7 +57,7 @@ export class WorkOrdersService {
       throw new BadRequestException('Style No.를 읽지 못했습니다 — 저장 전에 직접 입력해 주세요.');
     }
 
-    await this.mappingCommitService.commit({
+    const commitResult = await this.mappingCommitService.commit({
       styleNo,
       overviewData: {
         styleNo,
@@ -111,7 +111,9 @@ export class WorkOrdersService {
     contract.triggeredByWorkOrderSpecId = spec.id;
     await contractRepository.save(contract);
 
-    return spec;
+    // PR-098: 병합 중 자동 반영을 보류한 항목(기존 factory 충돌, 기존 BomItem과 수량/
+    // 요척 차이 등)을 업로드 화면이 사용자에게 보여줄 수 있게 그대로 얹어서 돌려준다.
+    return Object.assign(spec, { warnings: commitResult.warnings });
   }
 
   async findSpecByStyleNo(styleNo: string) {

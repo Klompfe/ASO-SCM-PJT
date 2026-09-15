@@ -210,4 +210,73 @@ describe('자재명세 업로드/커밋 회귀 테스트 (PR-025/026/028/029/031
       expect(updatedItem.hsCode).toBe('5208.11');
     });
   });
+
+  // PR-098: 같은 styleNo로 작업지시서/매핑이 두 번째로 들어와도 기존 자재명세를
+  // 통째로 덮어쓰지 않고 "병합"해야 한다(실무에서 기존 BK 컬러는 유지, 신규 CR/BR
+  // 컬러만 추가하던 실제 사례 재현).
+  describe('/mapping/commit - 같은 styleNo 재커밋 시 병합 (PR-098)', () => {
+    const styleNo = `E2E-MERGE-${Date.now()}`;
+    const materialName = `E2E_MERGE_MATERIAL_${Date.now()}`;
+
+    it('1차 커밋: BomItem 2개(BK/CR), factory=베트남으로 등록', async () => {
+      await request(app.getHttpServer())
+        .post('/mapping/commit')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({
+          styleNo,
+          overviewData: { styleNo, totalQty: 215, factory: '베트남', buyer: 'E2E바이어', shipDate: '' },
+          bomItems: [
+            { category: 'FABRIC', itemName: materialName, colorCode: 'BK', spec: '', consumption: 1, requiredQty: 215 },
+            { category: 'FABRIC', itemName: materialName, colorCode: 'CR', spec: '', consumption: 1, requiredQty: 215 },
+          ],
+        })
+        .expect(201);
+
+      const bom = await dataSource.query('SELECT * FROM bom_master WHERE styleStyleNo = ?', [styleNo]);
+      expect(bom).toHaveLength(1);
+      const bomItems = await dataSource.query('SELECT * FROM bom_item_details WHERE bomId = ?', [bom[0].id]);
+      expect(bomItems).toHaveLength(2);
+    });
+
+    it('2차 재커밋: 기존 BK/CR은 그대로 두고 신규 BR 컬러만 추가되고, factory 충돌은 반영되지 않는다', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/mapping/commit')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({
+          styleNo,
+          overviewData: { styleNo, totalQty: 430, factory: '삼정', buyer: 'E2E바이어', shipDate: '' },
+          bomItems: [
+            // 기존과 동일한 조합 — 수량이 달라도 건드리면 안 됨.
+            { category: 'FABRIC', itemName: materialName, colorCode: 'BK', spec: '', consumption: 9, requiredQty: 9999 },
+            { category: 'FABRIC', itemName: materialName, colorCode: 'CR', spec: '', consumption: 1, requiredQty: 215 },
+            // 신규 컬러 — 추가되어야 함.
+            { category: 'FABRIC', itemName: materialName, colorCode: 'BR', spec: '', consumption: 1, requiredQty: 215 },
+          ],
+        })
+        .expect(201);
+
+      expect(res.body.data.warnings.some((w: string) => w.includes("기존 factory 값 '베트남' → 새 값 '삼정'"))).toBe(true);
+      expect(res.body.data.warnings.some((w: string) => w.includes(`${materialName}(BK/N/A)`))).toBe(true);
+
+      // (d) Bom row가 여전히 1개(중복 생성 안 됨).
+      const bom = await dataSource.query('SELECT * FROM bom_master WHERE styleStyleNo = ?', [styleNo]);
+      expect(bom).toHaveLength(1);
+
+      // (a)+(b) 기존 BK/CR 2개는 그대로, 신규 BR 1개만 추가되어 총 3개.
+      const bomItems = await dataSource.query('SELECT * FROM bom_item_details WHERE bomId = ?', [bom[0].id]);
+      expect(bomItems).toHaveLength(3);
+      const bk = bomItems.find((b: any) => b.colorCode === 'BK');
+      expect(Number(bk.requiredQty)).toBe(215); // 9999로 안 바뀌고 1차 값 그대로.
+      const br = bomItems.find((b: any) => b.colorCode === 'BR');
+      expect(br).toBeDefined();
+      expect(Number(br.requiredQty)).toBe(215);
+
+      // (c) factory는 기존 '베트남' 그대로.
+      const masterStyle = await dataSource.query('SELECT * FROM master_style WHERE styleNo = ?', [styleNo]);
+      const overview = await dataSource.query('SELECT * FROM style_overview WHERE id = ?', [masterStyle[0].overviewId]);
+      expect(overview[0].factory).toBe('베트남');
+      // totalQty는 factory와 달리 예외가 없어 새 값(430)으로 갱신된다.
+      expect(Number(overview[0].totalQty)).toBe(430);
+    });
+  });
 });
