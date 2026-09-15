@@ -59,7 +59,12 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'master',
     label: '마스터·설정',
+    // PR-095: 공급업체/품목은 "자재·발주" 그룹에도 그대로 남겨두고(제거하지 않음),
+    // 같은 TabId(suppliers/items)를 이 그룹에도 추가로 노출한다 — 실제로는 마스터
+    // 데이터라 "마스터·설정"에서도 접근 가능해야 한다는 요청.
     items: [
+      { id: 'suppliers', label: '공급업체' },
+      { id: 'items', label: '품목' },
       { id: 'buyers', label: '고객사' },
       { id: 'exportShipmentDefaults', label: '선적서류 기본정보', adminOnly: true },
       { id: 'users', label: '사용자 관리', adminOnly: true },
