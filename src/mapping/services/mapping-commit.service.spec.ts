@@ -7,6 +7,7 @@ import { Bom } from '../../boms/entities/bom.entity';
 import { BomItem } from '../../boms/entities/bom-item.entity';
 import { ImportFile } from '../../imports/entities/import-file.entity';
 import { Item } from '../../items/entities/item.entity';
+import { MasterStyle } from '../../styles/entities/master-style.entity';
 import { CommitMappingDto } from '../dto/commit-mapping.dto';
 
 describe('MappingCommitService', () => {
@@ -59,7 +60,7 @@ describe('MappingCommitService', () => {
     it('overviewData.shipDate를 StyleOverview.firstShipDate로 매핑하고 status 기본값을 채워 저장해야 한다', async () => {
       const result = await service.commit(validPayload);
 
-      expect(result).toEqual({ success: true, styleNo: 'MB62SLM103Z' });
+      expect(result).toEqual({ success: true, styleNo: 'MB62SLM103Z', warnings: [] });
 
       // MasterStyle은 queryRunner.manager.save(style)처럼 단일 엔티티 인스턴스로 저장되므로
       // (엔티티 클래스, data) 2-인자 형태가 아니라 overview 속성을 가진 인자로 찾는다.
@@ -165,6 +166,138 @@ describe('MappingCommitService', () => {
       const dto = plainToInstance(CommitMappingDto, validPayload);
       const errors = await validate(dto);
       expect(errors).toHaveLength(0);
+    });
+  });
+
+  // PR-098: 같은 styleNo로 재커밋될 때 기존 StyleOverview/Bom을 통째로 교체·중복
+  // 생성하지 않고 병합하는지 검증한다. LB6YSLM107Z(기존 BK 컬러 215장 + 신규 CR/BR
+  // 컬러 추가) 실사례를 그대로 재현한다.
+  describe('commit (병합 — 같은 styleNo 재커밋)', () => {
+    const existingBomItem: BomItem = {
+      id: 501,
+      bom: undefined as any,
+      material: { id: 10, name: '원단' } as any,
+      category: 'FABRIC',
+      colorCode: 'BK',
+      spec: 'N/A',
+      consumption: 1 as any,
+      requiredQty: 215 as any,
+      supplier: null,
+      unitPrice: 0 as any,
+      remarks: 'N/A',
+      composition: null,
+      hsCode: null,
+    };
+    const existingBom: Bom = {
+      id: 77,
+      bomNo: 'BOM-LB6YSLM107Z-001',
+      version: 'V1',
+      style: undefined as any,
+      items: [existingBomItem],
+    };
+    const existingOverview = {
+      id: 88,
+      factory: '베트남',
+      totalQty: 215,
+      buyer: '미도컴퍼니',
+      firstShipDate: null,
+      status: StyleOverviewStatus.PENDING_APPROVAL,
+      brand: null,
+      itemType: null,
+      productionType: null,
+      targetRdd: null,
+      cmtPrice: null,
+      fobPrice: null,
+      styleName: null,
+      style: undefined as any,
+    };
+    const existingStyle: MasterStyle = { styleNo: 'LB6YSLM107Z', overview: existingOverview as any, boms: [] };
+
+    const rebuildPayload = (): CommitMappingDto => ({
+      styleNo: 'LB6YSLM107Z',
+      overviewData: {
+        styleNo: 'LB6YSLM107Z',
+        totalQty: 430,
+        factory: '삼정', // 기존 '베트남'과 충돌하는 값 — 자동 반영되면 안 됨.
+        buyer: '미도컴퍼니',
+        shipDate: '',
+      },
+      bomItems: [
+        // 기존과 완전히 동일한 (자재명, 색상, 규격) — 건드리면 안 됨.
+        { itemName: '원단', category: 'FABRIC', colorCode: 'BK', spec: '', consumption: 1, requiredQty: 215 },
+        // 신규 컬러 — 새로 추가되어야 함.
+        { itemName: '원단', category: 'FABRIC', colorCode: 'CR', spec: '', consumption: 1, requiredQty: 215 },
+      ],
+    });
+
+    beforeEach(() => {
+      mockQueryRunnerManager.findOne.mockImplementation((entity: any, options?: any) => {
+        if (entity === MasterStyle) return Promise.resolve({ ...existingStyle, overview: { ...existingOverview } });
+        if (entity === Bom) return Promise.resolve({ ...existingBom, items: [{ ...existingBomItem }] });
+        if (entity === Item) return Promise.resolve({ id: 10, name: '원단' });
+        return Promise.resolve(null);
+      });
+    });
+
+    it('(a) 기존 BomItem은 그대로 유지되고 수정 저장되지 않는다', async () => {
+      await service.commit(rebuildPayload());
+
+      const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+      // 기존 BK 항목에 대한 save 호출이 없어야 한다(새 CR 항목 1건만 저장됨).
+      expect(bomItemSaveCalls.some(([, data]: any) => data.colorCode === 'BK')).toBe(false);
+    });
+
+    it('(b) 신규 컬러 조합만 새 BomItem으로 추가된다', async () => {
+      await service.commit(rebuildPayload());
+
+      const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+      expect(bomItemSaveCalls).toHaveLength(1);
+      expect(bomItemSaveCalls[0][1]).toEqual(
+        expect.objectContaining({ colorCode: 'CR', requiredQty: 215 }),
+      );
+    });
+
+    it('(c) 기존 factory 값이 있으면 자동으로 바뀌지 않고 warnings에 기록된다', async () => {
+      const result = await service.commit(rebuildPayload());
+
+      const styleSave = mockQueryRunnerManager.save.mock.calls.find(
+        ([arg]: any) => arg && typeof arg === 'object' && arg.overview,
+      );
+      expect(styleSave[0].overview.factory).toBe('베트남');
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([expect.stringContaining("기존 factory 값 '베트남' → 새 값 '삼정'")]),
+      );
+    });
+
+    it('(d) Bom이 이미 있으면 재사용하고 새로 생성하지 않는다', async () => {
+      await service.commit(rebuildPayload());
+
+      const bomCreateOrSave = mockQueryRunnerManager.save.mock.calls.some(
+        ([arg]: any) => arg && typeof arg === 'object' && 'bomNo' in arg,
+      );
+      expect(bomCreateOrSave).toBe(false);
+    });
+
+    it('기존 BomItem과 요척/소요량이 다르면 자동 반영하지 않고 warnings에 차이를 기록한다', async () => {
+      const payload = rebuildPayload();
+      payload.bomItems[0].requiredQty = 999; // 기존 215와 다른 값
+
+      const result = await service.commit(payload);
+
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([expect.stringContaining('원단(BK/N/A)')]),
+      );
+      const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+      expect(bomItemSaveCalls.some(([, data]: any) => data.colorCode === 'BK')).toBe(false);
+    });
+
+    it('totalQty가 값을 보내면 새 값으로 갱신된다(factory와 달리 예외 없음)', async () => {
+      await service.commit(rebuildPayload());
+
+      const styleSave = mockQueryRunnerManager.save.mock.calls.find(
+        ([arg]: any) => arg && typeof arg === 'object' && arg.overview,
+      );
+      expect(styleSave[0].overview.totalQty).toBe(430);
     });
   });
 });

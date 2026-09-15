@@ -133,7 +133,7 @@ describe('Inventory 연동 회귀 테스트 (PO RECEIVED / WO COMPLETED)', () =>
     expect(await getInventoryQuantity(itemId)).toBe(200);
   });
 
-  it('WO COMPLETED → BOM 기반 원자재 차감 + 완제품 가산, 같은 style에 Bom이 여러 개면 최신(id DESC) 것을 사용해야 한다 (PR-005, PR-008)', async () => {
+  it('WO COMPLETED → BOM 기반 원자재 차감 + 완제품 가산, 같은 style을 재커밋해도 Bom이 중복 생성되지 않고 기존 자재 소요량이 유지되어야 한다 (PR-005, PR-008, PR-098)', async () => {
     const styleNo = `E2E-STYLE-${Date.now()}`;
     const materialName = `E2E_BOM_MATERIAL_${Date.now()}`;
 
@@ -150,18 +150,22 @@ describe('Inventory 연동 회귀 테스트 (PO RECEIVED / WO COMPLETED)', () =>
       styleNo,
     });
 
-    // 1차 Bom 커밋(소요량 1) — 의도적으로 먼저 만들어 "옛 Bom"으로 남긴다.
+    // 1차 Bom 커밋(소요량 1).
     await commitStyle(styleNo, [
       { id: 1, category: 'GENERAL', itemName: materialName, consumption: 1, requiredQty: 100 },
     ]);
 
-    // 2차 Bom 커밋(소요량 3) — 같은 styleNo로 다시 커밋하면 Bom이 새로 하나 더 생성되는
-    // 알려진 이슈(CHARTER.md)가 있고, 소비 측은 항상 id DESC(최신) 하나만 써야 한다.
-    await commitStyle(styleNo, [
+    // 2차 재커밋(같은 자재·같은 색상/규격, 소요량만 3으로 다르게 보냄) — PR-098부터는
+    // Bom을 새로 만들지 않고 기존 Bom을 재사용하며, 이미 등록된 (자재명, 색상, 규격)
+    // 조합은 수량/요척이 달라도 자동으로 덮어쓰지 않는다(실수로 잘못된 값이 기존 값을
+    // 갈아엎지 않도록 warnings에만 기록). 그래서 소비 시 여전히 1차 소요량(1)이 쓰여야 한다.
+    const secondCommitRes = await commitStyle(styleNo, [
       { id: 1, category: 'GENERAL', itemName: materialName, consumption: 3, requiredQty: 300 },
     ]);
+    expect(secondCommitRes.body.data.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining('자동 반영하지 않음')]),
+    );
 
-    // 최신 Bom(소요량 3) 기준으로 targetQuantity(10)만큼 필요한 원자재 = 30. 여유 있게 입고.
     const poId = await createPo(supplierId, materialItemId, 100);
     await receivePo(poId).expect(200);
     expect(await getInventoryQuantity(materialItemId)).toBe(100);
@@ -180,9 +184,8 @@ describe('Inventory 연동 회귀 테스트 (PO RECEIVED / WO COMPLETED)', () =>
       .expect(200);
     expect(completeRes.body.data.status).toBe('COMPLETED');
 
-    // 옛 Bom(소요량 1)을 썼다면 100-10=90이 되어버린다. 최신 Bom(소요량 3)을 썼어야
-    // 100 - (3*10) = 70 이 되므로, 이 값으로 "최신 Bom 선택"을 검증한다.
-    expect(await getInventoryQuantity(materialItemId)).toBe(70);
+    // 1차 소요량(1)이 그대로 쓰여야 하므로 100 - (1*10) = 90.
+    expect(await getInventoryQuantity(materialItemId)).toBe(90);
     expect(await getInventoryQuantity(finishedItemId)).toBe(10);
   });
 
