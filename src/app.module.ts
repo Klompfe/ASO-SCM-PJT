@@ -28,6 +28,7 @@ import { ExportShipmentsModule } from './export-shipments/export-shipments.modul
 import { ExportShipmentDefaultsModule } from './export-shipment-defaults/export-shipment-defaults.module';
 import { HsCodeClassificationsModule } from './hs-code-classifications/hs-code-classifications.module';
 import { ImportShipmentsModule } from './import-shipments/import-shipments.module';
+import { ProductionContractsModule } from './production-contracts/production-contracts.module';
 import { HealthController } from './health/health.controller';
 import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
@@ -87,6 +88,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     ExportShipmentDefaultsModule,
     HsCodeClassificationsModule,
     ImportShipmentsModule,
+    ProductionContractsModule,
   ],
   controllers: [HealthController],
   providers: [
