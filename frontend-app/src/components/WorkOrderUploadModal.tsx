@@ -18,6 +18,10 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
   const [savedIndexes, setSavedIndexes] = useState<Set<number>>(new Set());
   const [dragActive, setDragActive] = useState(false);
   const [lastChargeKrw, setLastChargeKrw] = useState<number | null>(null);
+  // PR-096: GEMINI_API_KEY 미설정 시 서버가 목업 데이터를 반환하는데(vision.service.ts),
+  // 이 사실이 화면에 전혀 드러나지 않아 가짜 데이터를 실제 결과로 오인하고 그대로 진행할
+  // 뻔한 사고가 있었다 — 응답의 isMock을 명시적으로 저장해 배너로 경고하고 저장을 막는다.
+  const [isMock, setIsMock] = useState(false);
   const [usageSummary, setUsageSummary] = useState<AiUsageSummary | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(0);
@@ -57,11 +61,15 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
       const res = await uploadWorkOrderImage(file);
       const data: AiWorkOrderResult[] = Array.isArray(res?.results) ? res.results : [];
       const charge: number = typeof res?.chargedAmountKrw === 'number' ? res.chargedAmountKrw : 0;
+      const mock: boolean = res?.isMock === true;
       setResults(data);
       setLastChargeKrw(charge);
+      setIsMock(mock);
       setSavedIndexes(new Set());
       setStep(2);
-      if (charge > 0) {
+      if (mock) {
+        toast.error('⚠️ 목업 데이터입니다 — 실제 AI 분석이 아닙니다. 관리자에게 GEMINI_API_KEY 설정을 요청하세요.', { duration: 10000 });
+      } else if (charge > 0) {
         toast.success(`AI 분석 완료 — ${charge.toLocaleString()}원 과금되었습니다.`);
         getAiUsageSummary().then((r) => setUsageSummary(r)).catch(() => {});
       }
@@ -73,6 +81,10 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
   };
 
   const handleSave = async (index: number) => {
+    if (isMock) {
+      toast.error('목업 데이터는 저장할 수 없습니다.');
+      return;
+    }
     const result = results[index];
     setSavingIndex(index);
     try {
@@ -91,6 +103,10 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
   // 병렬 실행하면 서로 다른 스타일이 같은 자재명을 참조할 때 mapping-commit의 "없으면 새로
   // 생성" 로직이 경합할 수 있어(PR-052와 동일한 이유) 순차 실행한다.
   const handleBulkSave = async () => {
+    if (isMock) {
+      toast.error('목업 데이터는 저장할 수 없습니다.');
+      return;
+    }
     const targets = results
       .map((result, index) => ({ result, index }))
       .filter(({ result, index }) => !!result.overview.styleNo && !savedIndexes.has(index));
@@ -147,6 +163,7 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     setStep(1);
     setSavedIndexes(new Set());
     setLastChargeKrw(null);
+    setIsMock(false);
     onClose();
   };
 
@@ -191,20 +208,30 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
 
           {step === 2 && (
             <div className="space-y-6">
+              {isMock && (
+                <div className="bg-red-50 border-2 border-red-400 text-red-800 rounded-lg p-3 text-sm font-semibold">
+                  ⚠️ 목업 데이터입니다 — 실제 AI 분석이 아닙니다. 관리자에게 GEMINI_API_KEY 설정을 요청하세요. (저장이 비활성화되었습니다)
+                </div>
+              )}
               <div className="flex justify-between items-center gap-4">
                 <p className="text-sm text-gray-500">
                   {results.length}건 분석됨{lastChargeKrw != null && lastChargeKrw > 0 ? ` — 이번 분석 요금 ${lastChargeKrw.toLocaleString()}원` : ''} — 각 항목을 확인 후 개별 저장하거나, 일괄저장하세요.
                 </p>
                 <button
                   onClick={handleBulkSave}
-                  disabled={bulkSaving}
+                  disabled={bulkSaving || isMock}
                   className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
                 >
                   {bulkSaving ? `일괄저장 중... (${bulkProgress}/${results.length})` : '일괄저장'}
                 </button>
               </div>
               {results.map((result, index) => (
-                <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-3">
+                <div key={index} className={`border rounded-lg p-4 space-y-3 ${isMock ? 'border-red-300 bg-red-50/30' : 'border-gray-200'}`}>
+                  {isMock && (
+                    <div className="bg-red-100 border border-red-300 text-red-700 rounded p-2 text-xs font-semibold">
+                      ⚠️ 목업 데이터 — 저장 불가
+                    </div>
+                  )}
                   <div className="flex justify-between items-center">
                     <h4 className="font-bold">
                       {index + 1}. {result.overview.styleNo ?? '(Style No. 인식 실패)'}
@@ -212,7 +239,7 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
                     </h4>
                     <button
                       onClick={() => handleSave(index)}
-                      disabled={savingIndex === index || savedIndexes.has(index)}
+                      disabled={savingIndex === index || savedIndexes.has(index) || isMock}
                       className={`px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50 ${savedIndexes.has(index) ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
                     >
                       {savedIndexes.has(index) ? '저장됨' : savingIndex === index ? '저장 중...' : '저장'}
