@@ -12,6 +12,11 @@ export interface AiAnalysisUsage {
 export interface AiAnalysisOutcome {
   results: AiWorkOrderResultDto[];
   usage: AiAnalysisUsage;
+  // PR-096: GEMINI_API_KEY 미설정으로 목업 데이터를 반환한 경우 true. 기존에는
+  // usage.pageCount === 0(과금 로그를 안 남기려는 목적으로 우회 도입된 값)으로
+  // 간접 추론했는데, 이 우회 신호에 프론트가 의존하다 보니 화면에 목업 여부가 전혀
+  // 드러나지 않는 사고로 이어졌다 — 그래서 명시적인 boolean 하나로 통일한다.
+  isMock: boolean;
 }
 
 const RESPONSE_SCHEMA = {
@@ -102,7 +107,11 @@ export class VisionService {
   async analyzeWorkOrder(file: Express.Multer.File): Promise<AiAnalysisOutcome> {
     if (!this.genAI) {
       // 목업 응답은 실제 API 비용이 없으므로 pageCount=0으로 반환해 과금 로그를 남기지 않는다.
-      return { results: this.mockResult(), usage: { pageCount: 0, promptTokens: 0, outputTokens: 0 } };
+      return {
+        results: this.mockResult(),
+        usage: { pageCount: 0, promptTokens: 0, outputTokens: 0 },
+        isMock: true,
+      };
     }
 
     const model = this.genAI.getGenerativeModel({
@@ -140,7 +149,7 @@ export class VisionService {
         promptTokens,
         outputTokens: Math.max(0, totalTokens - promptTokens),
       };
-      return { results: parsed, usage };
+      return { results: parsed, usage, isMock: false };
     } catch (err) {
       this.logger.error(`Gemini 작업지시서 분석 실패: ${(err as Error).message}`);
       throw new InternalServerErrorException('작업지시서 AI 분석에 실패했습니다.');

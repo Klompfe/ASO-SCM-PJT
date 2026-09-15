@@ -382,6 +382,7 @@ describe('WorkOrdersService', () => {
       mockVisionService.analyzeWorkOrder.mockResolvedValue({
         results: [{ overview: {}, bomItems: [], sizeSpecs: [], workNotes: null }],
         usage: { pageCount: 6, promptTokens: 3699, outputTokens: 11765 },
+        isMock: false,
       });
       mockAiUsageLogService.log.mockResolvedValue({ id: 1, chargedAmountKrw: 1000 });
 
@@ -391,19 +392,22 @@ describe('WorkOrdersService', () => {
       expect(result).toEqual({
         results: [{ overview: {}, bomItems: [], sizeSpecs: [], workNotes: null }],
         chargedAmountKrw: 1000,
+        isMock: false,
       });
     });
 
-    it('목업 응답(pageCount === 0)이면 과금 로그를 남기지 않고 과금액 0을 반환해야 한다', async () => {
+    it('목업 응답(pageCount === 0)이면 과금 로그를 남기지 않고 과금액 0, isMock: true를 반환해야 한다(PR-096)', async () => {
       mockVisionService.analyzeWorkOrder.mockResolvedValue({
         results: [{ overview: {}, bomItems: [], sizeSpecs: [], workNotes: null }],
         usage: { pageCount: 0, promptTokens: 0, outputTokens: 0 },
+        isMock: true,
       });
 
       const result = await service.analyzeWorkOrderImage({} as any, 42);
 
       expect(mockAiUsageLogService.log).not.toHaveBeenCalled();
       expect(result.chargedAmountKrw).toBe(0);
+      expect(result.isMock).toBe(true);
     });
   });
 });
