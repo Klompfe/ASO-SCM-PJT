@@ -75,6 +75,37 @@ export class ContractsService {
     }
   }
 
+  // PR-090: 일괄승인. ids가 있으면 그 목록만, 없으면 현재 PENDING_APPROVAL 전체를
+  // 대상으로 한다. 새 로직을 따로 만들지 않고 기존 approve()를 건별로 그대로 재사용해
+  // "같은 styleNo의 기존 APPROVED를 SUPERSEDED로 내린다"는 불변식이 깨지지 않게 한다.
+  // 동시성을 위해 병렬(Promise.all)로 돌리면 같은 styleNo의 계약 두 건이 배치에 함께
+  // 들어있을 때 경쟁이 생길 수 있어 순차 처리한다.
+  async bulkApprove(
+    ids: number[] | undefined,
+    approvedByUserId: number,
+  ): Promise<{ approvedCount: number; failed: { id: number; reason: string }[] }> {
+    const targetIds =
+      ids && ids.length > 0
+        ? ids
+        : (
+            await this.contractRepository.find({ where: { status: ContractStatus.PENDING_APPROVAL } })
+          ).map((c) => c.id);
+
+    let approvedCount = 0;
+    const failed: { id: number; reason: string }[] = [];
+
+    for (const id of targetIds) {
+      try {
+        await this.approve(id, approvedByUserId);
+        approvedCount++;
+      } catch (err) {
+        failed.push({ id, reason: err instanceof Error ? err.message : '알 수 없는 오류' });
+      }
+    }
+
+    return { approvedCount, failed };
+  }
+
   async reject(id: number): Promise<Contract> {
     const contract = await this.contractRepository.findOne({ where: { id } });
     if (!contract) {

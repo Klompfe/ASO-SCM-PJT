@@ -29,6 +29,15 @@ export const getContractsByStyleNo = (styleNo: string): Promise<any> =>
 export const approveContract = (id: number): Promise<any> =>
   apiClient.patch(`/contracts/${id}/approve`);
 
+export interface BulkApproveResult {
+  approvedCount: number;
+  failed: { id: number; reason: string }[];
+}
+
+// PR-090: ids를 생략하면 현재 PENDING_APPROVAL 전체를 대상으로 한다.
+export const bulkApproveContracts = (ids?: number[]): Promise<BulkApproveResult> =>
+  apiClient.patch('/contracts/bulk-approve', ids ? { ids } : {});
+
 export const rejectContract = (id: number): Promise<any> =>
   apiClient.patch(`/contracts/${id}/reject`);
 

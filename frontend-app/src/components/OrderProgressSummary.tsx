@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getOrderProgressSummary, type OrderProgressSummaryRow } from '../api/orderProgressSummary.service';
+import { bulkApproveContracts } from '../api/contracts.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
 interface Props {
@@ -24,6 +25,7 @@ const pct = (rate: number) => `${Math.round(rate)}%`;
 export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
   const [rows, setRows] = useState<OrderProgressSummaryRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [bulkApproving, setBulkApproving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,6 +43,32 @@ export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
   useEffect(() => {
     load();
   }, [load]);
+
+  const pendingCount = rows.filter((r) => r.contractStatus === 'PENDING_APPROVAL').length;
+
+  // PR-090: 이 화면은 스타일당 계약상태 하나만 보여줄 뿐 개별 계약 id는 갖고 있지
+  // 않으므로(한 스타일에 계약이 여러 건 쌓일 수 있음), ids 없이 호출해 서버가
+  // 현재 PENDING_APPROVAL 전체를 대상으로 하게 한다.
+  const handleBulkApprove = async () => {
+    if (pendingCount === 0) return;
+    const confirmed = window.confirm(`현재 미승인 상태인 계약 ${pendingCount}건을 모두 승인하시겠습니까?`);
+    if (!confirmed) return;
+
+    setBulkApproving(true);
+    try {
+      const result = await bulkApproveContracts();
+      if (result.failed.length > 0) {
+        toast.error(`${result.approvedCount}건 승인, ${result.failed.length}건 실패`);
+      } else {
+        toast.success(`${result.approvedCount}건 모두 승인되었습니다.`);
+      }
+      await load();
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '일괄승인에 실패했습니다.'));
+    } finally {
+      setBulkApproving(false);
+    }
+  };
 
   // 이행률 낮은 순 우선, 같으면 D-day 가까운(임박/초과) 순 — 위험한 오더가 위로 오게.
   // D-day가 없는 행(납기 미입력)은 정렬 안정성을 위해 맨 뒤로 보낸다.
@@ -62,7 +90,18 @@ export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
     <div>
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-lg font-semibold text-gray-800">오더 진행현황 요약 ({rows.length}건)</h3>
-        <button onClick={load} className="text-sm text-blue-600 hover:underline">새로고침</button>
+        <div className="flex items-center gap-3">
+          {pendingCount > 0 && (
+            <button
+              onClick={handleBulkApprove}
+              disabled={bulkApproving}
+              className="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {bulkApproving ? '승인 중...' : `미승인 계약 일괄 승인 (${pendingCount}건)`}
+            </button>
+          )}
+          <button onClick={load} className="text-sm text-blue-600 hover:underline">새로고침</button>
+        </div>
       </div>
       {rows.length === 0 ? (
         <p className="text-sm text-gray-500">등록된 오더가 없습니다.</p>
