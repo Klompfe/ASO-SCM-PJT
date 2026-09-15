@@ -12,6 +12,7 @@ import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { HsCodeManager } from './components/HsCodeManager';
 import { ImportShipmentManager } from './components/ImportShipmentManager';
+import { TopNav, type TabId } from './components/TopNav';
 import { LoginPage } from './components/LoginPage';
 import { getCurrentUser, type CurrentUser } from './api/auth.service';
 import './App.css';
@@ -42,7 +43,7 @@ function App() {
   });
   
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'items' | 'workOrders' | 'shipments' | 'styles' | 'suppliers' | 'buyers' | 'users' | 'purchaseOrders' | 'exportShipmentDefaults' | 'hsCodeClassifications'>('dashboard');
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
 
   // PR-070: "사용자 관리" 탭은 MANAGER/ADMIN에게만 보여야 한다 — GET /auth/me(PR-066)로
   // 현재 사용자의 role을 조회해 탭 자체를 목록에서 숨긴다(USER는 존재를 알 필요도 없음).
@@ -126,10 +127,6 @@ function App() {
     return <FallbackUI message="인증 정보를 확인할 수 없습니다." />;
   }
 
-  const tabButtonStyle = "px-4 py-2 rounded-lg font-medium transition-colors";
-  const activeTabStyle = "bg-blue-600 text-white";
-  const inactiveTabStyle = "bg-gray-200 text-gray-700 hover:bg-gray-300";
-
   const renderContent = () => {
     try {
       // Safe rendering switch
@@ -203,23 +200,15 @@ function App() {
         </button>
       </header>
       
-      <nav className="flex space-x-4 mb-6">
-        <button className={`${tabButtonStyle} ${activeTab === 'dashboard' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('dashboard')}>Dashboard</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'items' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('items')}>Items</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'workOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('workOrders')}>Work Orders</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'styles' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('styles')}>오더관리</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'shipments' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('shipments')}>선적관리</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'suppliers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('suppliers')}>Suppliers</button>
-        <button className={`${tabButtonStyle} ${activeTab === 'buyers' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('buyers')}>고객사</button>
-        {canManageUsers && (
-          <button className={`${tabButtonStyle} ${activeTab === 'users' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('users')}>사용자 관리</button>
-        )}
-        <button className={`${tabButtonStyle} ${activeTab === 'purchaseOrders' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('purchaseOrders')}>Purchase Orders</button>
-        {isManagerOrAdmin && (
-          <button className={`${tabButtonStyle} ${activeTab === 'exportShipmentDefaults' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('exportShipmentDefaults')}>선적서류 기본정보</button>
-        )}
-        <button className={`${tabButtonStyle} ${activeTab === 'hsCodeClassifications' ? activeTabStyle : inactiveTabStyle}`} onClick={() => setActiveTab('hsCodeClassifications')}>HS코드 관리</button>
-      </nav>
+      {/* -mx-6로 부모의 좌우 padding을 상쇄해 흰 헤더 바가 화면 끝까지 이어지도록 한다. */}
+      <div className="-mx-6 mb-6">
+        <TopNav
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          canManageUsers={canManageUsers}
+          isManagerOrAdmin={isManagerOrAdmin}
+        />
+      </div>
 
       <main className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 min-h-[400px]">
         {renderContent()}
