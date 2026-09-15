@@ -10,6 +10,7 @@ import { BuyersManager } from './components/BuyersManager';
 import { UsersManager } from './components/UsersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { ProductionContractsManager } from './components/ProductionContractsManager';
+import { CashVouchersManager } from './components/CashVouchersManager';
 import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { HsCodeManager } from './components/HsCodeManager';
@@ -201,6 +202,7 @@ function App() {
         );
         case 'exportShipmentDefaults': return <ExportShipmentDefaultsManager />;
         case 'hsCodeClassifications': return <HsCodeManager />;
+        case 'cashVouchers': return <CashVouchersManager />;
         default:
           // Routing Fallback: If unknown, default to Dashboard
           return <Dashboard />;

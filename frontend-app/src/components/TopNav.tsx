@@ -11,7 +11,8 @@ export type TabId =
   | 'users'
   | 'purchaseOrders'
   | 'exportShipmentDefaults'
-  | 'hsCodeClassifications';
+  | 'hsCodeClassifications'
+  | 'cashVouchers';
 
 interface NavItem {
   id: TabId;
@@ -62,6 +63,15 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'buyers', label: '고객사' },
       { id: 'exportShipmentDefaults', label: '선적서류 기본정보', adminOnly: true },
       { id: 'users', label: '사용자 관리', adminOnly: true },
+    ],
+  },
+  // PR-094: 회계관리 그룹의 첫 항목 — 경비관리/급여관리/부가세관리(다음 PR들)가
+  // 순차적으로 이 그룹 안에 들어올 자리.
+  {
+    key: 'accounting',
+    label: '회계관리',
+    items: [
+      { id: 'cashVouchers', label: '입출금전표관리' },
     ],
   },
 ];
