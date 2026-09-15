@@ -4,6 +4,7 @@ import { ItemsManager } from './components/ItemsManager';
 import { WorkOrdersManager } from './components/WorkOrdersManager';
 import { StylesManager } from './components/StylesManager';
 import { OrderProgressSummary } from './components/OrderProgressSummary';
+import { ProcurementStatusReport } from './components/ProcurementStatusReport';
 import { SuppliersManager } from './components/SuppliersManager';
 import { BuyersManager } from './components/BuyersManager';
 import { UsersManager } from './components/UsersManager';
@@ -62,7 +63,7 @@ function App() {
   // PR-067: 오더관리 탭 하위에 "오더 목록"/"진행현황 요약" 두 서브탭을 둔다.
   // 진행현황 요약에서 행을 클릭하면 오더 목록 서브탭으로 전환하며 해당 styleNo의
   // 상세 모달을 자동으로 연다 — poPrefillItemId와 동일한 패턴.
-  const [orderManagementSubTab, setOrderManagementSubTab] = useState<'list' | 'summary'>('list');
+  const [orderManagementSubTab, setOrderManagementSubTab] = useState<'list' | 'summary' | 'procurement'>('list');
   const [styleNoToOpen, setStyleNoToOpen] = useState<string | null>(null);
 
   const handleSelectStyleFromSummary = (styleNo: string) => {
@@ -145,11 +146,17 @@ function App() {
                 className={`px-3 py-2 text-sm font-medium ${orderManagementSubTab === 'summary' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                 onClick={() => setOrderManagementSubTab('summary')}
               >진행현황 요약</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${orderManagementSubTab === 'procurement' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setOrderManagementSubTab('procurement')}
+              >발주·입고·출고 현황</button>
             </div>
             {orderManagementSubTab === 'list' ? (
               <StylesManager initialStyleNo={styleNoToOpen} onInitialStyleNoConsumed={() => setStyleNoToOpen(null)} />
-            ) : (
+            ) : orderManagementSubTab === 'summary' ? (
               <OrderProgressSummary onSelectStyle={handleSelectStyleFromSummary} />
+            ) : (
+              <ProcurementStatusReport />
             )}
           </div>
         );

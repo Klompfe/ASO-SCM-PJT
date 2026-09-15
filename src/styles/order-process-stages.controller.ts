@@ -31,4 +31,10 @@ export class OrderProcessStagesController {
     }
     return this.stagesService.getMaterialReadiness(styleNo);
   }
+
+  // PR-089: 오더관리 하위 "발주·입고·출고 현황" 서브탭용 배치 리포트.
+  @Get('procurement-status')
+  procurementStatus() {
+    return this.stagesService.getProcurementStatusReport();
+  }
 }
