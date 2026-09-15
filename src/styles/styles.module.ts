@@ -7,6 +7,7 @@ import { OrderProcessStage } from './entities/order-process-stage.entity';
 import { OrderShipment } from './entities/order-shipment.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
+import { ExportShipmentLine } from '../export-shipments/entities/export-shipment-line.entity';
 import { StylesService } from './styles.service';
 import { StylesController } from './styles.controller';
 import { ContractsService } from './contracts.service';
@@ -28,6 +29,7 @@ import { OrderProgressSummaryController } from './order-progress-summary.control
       OrderShipment,
       Bom,
       PurchaseOrder,
+      ExportShipmentLine,
     ]),
   ],
   controllers: [
