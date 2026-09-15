@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ContractsService } from './contracts.service';
 import { IssueContractDto } from './dto/issue-contract.dto';
+import { BulkApproveContractsDto } from './dto/bulk-approve-contracts.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -32,6 +33,15 @@ export class ContractsController {
   @Patch(':id/approve')
   approve(@Param('id', ParseIntPipe) id: number, @GetUser() user: any) {
     return this.contractsService.approve(id, user.userId);
+  }
+
+  // PR-090: bulk-approve는 :id 세그먼트가 아니라 고정 경로라 ':id/approve'와
+  // 세그먼트 수가 달라 라우트 순서와 무관하게 충돌하지 않는다.
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Patch('bulk-approve')
+  bulkApprove(@Body() dto: BulkApproveContractsDto, @GetUser() user: any) {
+    return this.contractsService.bulkApprove(dto?.ids, user.userId);
   }
 
   @UseGuards(RolesGuard)
