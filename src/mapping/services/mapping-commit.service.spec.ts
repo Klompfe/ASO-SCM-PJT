@@ -300,4 +300,88 @@ describe('MappingCommitService', () => {
       expect(styleSave[0].overview.totalQty).toBe(430);
     });
   });
+
+  // PR-100: 안감(조바)류인데 혼용률(composition)이 비어있으면 관례상 기본값
+  // "POLYESTER 100%"를 자동으로 채워야 한다(MB72BLM102Z_TEMP 실사례 재현).
+  describe('commit (안감류 혼용률 기본값 자동 적용 — PR-100)', () => {
+    const basePayload: CommitMappingDto = {
+      styleNo: 'MB72BLM102Z_TEMP',
+      overviewData: {
+        styleNo: 'MB72BLM102Z_TEMP',
+        totalQty: 100,
+        factory: '베트남',
+        buyer: '미도컴퍼니',
+        shipDate: '',
+      },
+      bomItems: [],
+    };
+
+    beforeEach(() => {
+      // 이 describe 블록은 항상 "완전히 새로운 스타일/BOM/자재"를 가정한다(브랜드
+      // 신규 커밋 경로) — 상위 describe의 기본 mock(findOne -> null)을 그대로 쓴다.
+      mockQueryRunnerManager.findOne.mockResolvedValue(null);
+    });
+
+    it('category가 "안감"이고 composition이 없으면 기본값이 채워지고 warnings에 기록된다', async () => {
+      const result = await service.commit({
+        ...basePayload,
+        bomItems: [{ itemName: '안감원단', category: '안감', consumption: 1, requiredQty: 100 }],
+      });
+
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1].composition).toBe('POLYESTER 100%');
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([expect.stringContaining("안감 항목 '안감원단' 혼용률 미기재 — 기본값 POLYESTER 100% 자동 적용")]),
+      );
+    });
+
+    it('itemName에 "조바"가 포함되면(category는 다른 값이어도) 기본값이 채워진다', async () => {
+      await service.commit({
+        ...basePayload,
+        bomItems: [{ itemName: '조바천', category: 'FABRIC', consumption: 1, requiredQty: 100 }],
+      });
+
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1].composition).toBe('POLYESTER 100%');
+    });
+
+    it('안감 항목인데 이미 composition이 있으면 덮어쓰지 않는다', async () => {
+      const result = await service.commit({
+        ...basePayload,
+        bomItems: [
+          { itemName: '안감원단', category: '안감', consumption: 1, requiredQty: 100, composition: 'NYLON 100%' },
+        ],
+      });
+
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1].composition).toBe('NYLON 100%');
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it('안감이 아닌 항목(겉감/부자재)은 composition이 없어도 기본값을 적용하지 않는다', async () => {
+      const result = await service.commit({
+        ...basePayload,
+        bomItems: [
+          { itemName: '겉감원단', category: 'FABRIC', consumption: 1, requiredQty: 100 },
+          { itemName: 'ZIPPER', category: 'TRIM', consumption: 1, requiredQty: 100 },
+        ],
+      });
+
+      const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+      expect(bomItemSaveCalls.every(([, data]: any) => data.composition === null)).toBe(true);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it('겉감(FABRIC)에 실제 혼용률이 기재되어 있으면 그 값이 그대로 저장되고 안감 기본값 로직이 개입하지 않는다', async () => {
+      await service.commit({
+        ...basePayload,
+        bomItems: [
+          { itemName: '겉감원단', category: 'FABRIC', consumption: 1, requiredQty: 100, composition: 'WOOL 98%, POLYURETHANE 2%' },
+        ],
+      });
+
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1].composition).toBe('WOOL 98%, POLYURETHANE 2%');
+    });
+  });
 });

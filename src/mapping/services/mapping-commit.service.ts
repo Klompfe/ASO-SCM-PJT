@@ -22,6 +22,20 @@ export interface CommitResult {
 // — 그래야 예전에 'N/A'로 저장된 행과 이번에 값을 안 보낸 행이 같은 자재로 매칭된다.
 const normalizeKeyPart = (v?: string | null): string => (v && v.trim()) || 'N/A';
 
+// PR-100: 안감(조바)류는 작업지시서 자체에 혼용률 표기가 없는 경우가 실무에서 흔하고,
+// 그때는 관례상 "폴리에스터 100%"를 기본값으로 채운다(관세사 검토 완료된 실제
+// hs_code_classifications.composition 데이터의 표기 관례 — "POLYESTER 100%" 형태를
+// 그대로 따른다).
+const LINING_DEFAULT_COMPOSITION = 'POLYESTER 100%';
+
+// "안감/조바 계열" 판별 — 오탐 방지를 위해 category === '안감'이거나 itemName에
+// "안감"/"조바"가 포함되는 경우로만 좁게 잡는다.
+function isLiningItem(category?: string | null, itemName?: string | null): boolean {
+  if (category === '안감') return true;
+  const name = itemName ?? '';
+  return name.includes('안감') || name.includes('조바');
+}
+
 @Injectable()
 export class MappingCommitService {
   constructor(
@@ -134,6 +148,16 @@ export class MappingCommitService {
           continue;
         }
 
+        // PR-100: 안감(조바)류인데 혼용률이 비어있으면 기본값을 채운다 — 조용히
+        // 채우지 않고 warnings에 남겨 사용자가 알 수 있게 한다.
+        let composition = item.composition ?? null;
+        if (!composition && isLiningItem(item.category, item.itemName)) {
+          composition = LINING_DEFAULT_COMPOSITION;
+          warnings.push(
+            `안감 항목 '${item.itemName}' 혼용률 미기재 — 기본값 ${LINING_DEFAULT_COMPOSITION} 자동 적용`,
+          );
+        }
+
         const savedBomItem = await queryRunner.manager.save(BomItem, {
           bom,
           material,
@@ -148,7 +172,7 @@ export class MappingCommitService {
           supplier: item.supplier || null,
           unitPrice: item.unitPrice ?? 0,
           remarks: item.remarks || 'N/A',
-          composition: item.composition ?? null,
+          composition,
           hsCode: item.hsCode ?? null,
         });
         bom.items = [...(bom.items ?? []), savedBomItem];
