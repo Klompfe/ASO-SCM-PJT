@@ -279,4 +279,43 @@ describe('자재명세 업로드/커밋 회귀 테스트 (PR-025/026/028/029/031
       expect(Number(overview[0].totalQty)).toBe(430);
     });
   });
+
+  // PR-100: 안감(조바)류 자재의 혼용률(composition) 미기재 시 기본값("POLYESTER
+  // 100%") 자동 적용 — 겉감(혼용률 기재)과 안감(미기재)을 함께 커밋해 안감만
+  // 자동으로 채워지는지 확인한다(MB72BLM102Z_TEMP 실사례 재현).
+  describe('/mapping/commit - 안감류 혼용률 기본값 자동 적용 (PR-100)', () => {
+    const styleNo = `E2E-LINING-${Date.now()}`;
+    const outerMaterialName = `E2E_OUTER_${Date.now()}`;
+    const liningMaterialName = `E2E_LINING_${Date.now()}`;
+
+    it('겉감(혼용률 기재)과 안감(혼용률 미기재)을 함께 커밋하면 안감만 기본값이 채워진다', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/mapping/commit')
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({
+          styleNo,
+          overviewData: { styleNo, totalQty: 100, factory: '베트남', buyer: 'E2E바이어', shipDate: '' },
+          bomItems: [
+            { category: 'FABRIC', itemName: outerMaterialName, consumption: 1, requiredQty: 100, composition: 'WOOL 98%, POLYURETHANE 2%' },
+            { category: '안감', itemName: liningMaterialName, consumption: 1, requiredQty: 100 },
+          ],
+        })
+        .expect(201);
+
+      expect(res.body.data.warnings).toEqual(
+        expect.arrayContaining([expect.stringContaining(`안감 항목 '${liningMaterialName}' 혼용률 미기재 — 기본값 POLYESTER 100% 자동 적용`)]),
+      );
+
+      const bom = await dataSource.query('SELECT * FROM bom_master WHERE styleStyleNo = ?', [styleNo]);
+      const bomItems = await dataSource.query('SELECT * FROM bom_item_details WHERE bomId = ?', [bom[0].id]);
+
+      const outerRow = await dataSource.query('SELECT id FROM items WHERE name = ?', [outerMaterialName]);
+      const outerItem = bomItems.find((b: any) => b.materialId === outerRow[0].id);
+      expect(outerItem.composition).toBe('WOOL 98%, POLYURETHANE 2%'); // 원래 값 그대로.
+
+      const liningRow = await dataSource.query('SELECT id FROM items WHERE name = ?', [liningMaterialName]);
+      const liningItem = bomItems.find((b: any) => b.materialId === liningRow[0].id);
+      expect(liningItem.composition).toBe('POLYESTER 100%'); // 기본값 자동 적용.
+    });
+  });
 });
