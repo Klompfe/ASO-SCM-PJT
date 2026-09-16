@@ -20,7 +20,7 @@ export class StylesService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async findAll(filter?: { styleNo?: string; targetRddFrom?: string; targetRddTo?: string }): Promise<MasterStyle[]> {
+  async findAll(filter?: { styleNo?: string; targetRddFrom?: string; targetRddTo?: string; itemType?: string }): Promise<MasterStyle[]> {
     const qb = this.masterStyleRepository
       .createQueryBuilder('style')
       .leftJoinAndSelect('style.overview', 'overview');
@@ -33,6 +33,10 @@ export class StylesService {
     }
     if (filter?.targetRddTo) {
       qb.andWhere('overview.targetRdd <= :targetRddTo', { targetRddTo: filter.targetRddTo });
+    }
+    // PR-101: itemType은 카테고리성 값이라 부분일치가 아니라 정확히 일치로 필터링한다.
+    if (filter?.itemType) {
+      qb.andWhere('overview.itemType = :itemType', { itemType: filter.itemType });
     }
 
     return qb.getMany();
