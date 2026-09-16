@@ -6,17 +6,7 @@ import { getWorkOrders } from '../api/workOrders.service';
 import { getShipments } from '../api/shipments.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
 import { getErrorMessage } from '../utils/errorMessage';
-
-type Season = 'SS' | 'FW';
-
-// SS는 납기 1~6월, FW는 납기 7~12월 — 사용자 정의 기준.
-const getSeasonDateRange = (year: number, season: Season) =>
-  season === 'SS'
-    ? { targetRddFrom: `${year}-01-01`, targetRddTo: `${year}-06-30` }
-    : { targetRddFrom: `${year}-07-01`, targetRddTo: `${year}-12-31` };
-
-const currentYear = new Date().getFullYear();
-const YEAR_OPTIONS = [currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
+import { getSeasonDateRange, YEAR_OPTIONS, type Season } from '../utils/season';
 
 export const Dashboard: React.FC = () => {
   const [stats, setStats] = useState({ items: 0, workOrders: 0, shipments: 0 });

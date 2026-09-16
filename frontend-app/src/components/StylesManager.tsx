@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getMasterStyles, createMasterStyle, type MasterStyle, type CreateMasterStyle } from '../api/styles.service';
+import { getMasterStyles, createMasterStyle, type MasterStyle, type CreateMasterStyle, type FindMasterStylesFilter } from '../api/styles.service';
+import { getSeasonDateRange, YEAR_OPTIONS, type Season } from '../utils/season';
 import {
   issueContract, getContractsByStyleNo, approveContract, rejectContract, deleteContract,
   type Contract, type ContractStatus,
@@ -90,9 +91,20 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
   const canApprove = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
   const [contractActionId, setContractActionId] = useState<number | null>(null);
 
-  const loadStyles = useCallback(async () => {
+  // PR-101: 스타일번호/품목/기간/시즌 검색·필터. 시즌(연도+SS/FW)을 선택하면
+  // Dashboard.tsx와 동일한 규칙(utils/season.ts)으로 기간이 자동 채워지고, 사용자가
+  // 기간을 직접 수정하면 시즌 선택은 해제된다.
+  const [filterStyleNo, setFilterStyleNo] = useState('');
+  const [filterItemType, setFilterItemType] = useState('');
+  const [filterRddFrom, setFilterRddFrom] = useState('');
+  const [filterRddTo, setFilterRddTo] = useState('');
+  const [filterYear, setFilterYear] = useState<number | ''>('');
+  const [filterSeason, setFilterSeason] = useState<Season | ''>('');
+  const [availableItemTypes, setAvailableItemTypes] = useState<string[]>([]);
+
+  const loadStyles = useCallback(async (filter?: FindMasterStylesFilter) => {
     try {
-      const res = await getMasterStyles();
+      const res = await getMasterStyles(filter);
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setStyles(data);
     } catch (err: any) {
@@ -100,6 +112,64 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
       setStyles([]);
     }
   }, []);
+
+  // 품목 드롭다운 옵션 — 현재 등록된 스타일들의 itemType distinct 값으로 동적 구성
+  // (별도 마스터 없이 style_overview.itemType 자유 텍스트를 그대로 씀, DB 확인 결과
+  // 실제 값은 JK/BL/OP/SL 같은 짧은 코드 관례를 따름). 필터링된 목록이 아니라
+  // 전체 목록 기준으로 한 번만 구성해, 필터를 걸어도 옵션 자체가 줄어들지 않게 한다.
+  useEffect(() => {
+    getMasterStyles()
+      .then((res) => {
+        const data: MasterStyle[] = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
+        const types = Array.from(new Set(data.map((s) => s.overview?.itemType).filter((v): v is string => !!v)));
+        setAvailableItemTypes(types.sort());
+      })
+      .catch(() => setAvailableItemTypes([]));
+  }, []);
+
+  const buildFilter = (): FindMasterStylesFilter => ({
+    styleNo: filterStyleNo || undefined,
+    itemType: filterItemType || undefined,
+    targetRddFrom: filterRddFrom || undefined,
+    targetRddTo: filterRddTo || undefined,
+  });
+
+  const handleFilterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    loadStyles(buildFilter());
+  };
+
+  const handleResetFilters = () => {
+    setFilterStyleNo('');
+    setFilterItemType('');
+    setFilterRddFrom('');
+    setFilterRddTo('');
+    setFilterYear('');
+    setFilterSeason('');
+    loadStyles();
+  };
+
+  // 시즌(연도+SS/FW) 선택 시 기간을 자동 채운다.
+  useEffect(() => {
+    if (filterYear && filterSeason) {
+      const range = getSeasonDateRange(filterYear, filterSeason);
+      setFilterRddFrom(range.targetRddFrom);
+      setFilterRddTo(range.targetRddTo);
+    }
+  }, [filterYear, filterSeason]);
+
+  // 사용자가 기간을 직접 수정하면 시즌 선택은 해제한다(자동 채움과 수동 수정이
+  // 서로 충돌하지 않도록).
+  const handleRddFromChange = (value: string) => {
+    setFilterRddFrom(value);
+    setFilterYear('');
+    setFilterSeason('');
+  };
+  const handleRddToChange = (value: string) => {
+    setFilterRddTo(value);
+    setFilterYear('');
+    setFilterSeason('');
+  };
 
   const loadShipmentSummary = useCallback(async () => {
     try {
@@ -122,7 +192,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
     try {
       await createMasterStyle(formData);
       toast.success('스타일이 등록되었습니다.');
-      loadStyles();
+      loadStyles(buildFilter());
       setFormData(initialFormData);
     } catch (err: any) {
       toast.error(getErrorMessage(err, '스타일 등록에 실패했습니다.'));
@@ -356,6 +426,77 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
         {formData.productionType === 'CMT' && <input className="border p-2 mb-4 w-full" placeholder="CMT Price" type="number" step="0.01" value={formData.cmtPrice} onChange={e => setFormData({...formData, cmtPrice: Number(e.target.value)})} />}
         {formData.productionType === 'FOB' && <input className="border p-2 mb-4 w-full" placeholder="FOB Price" type="number" step="0.01" value={formData.fobPrice} onChange={e => setFormData({...formData, fobPrice: Number(e.target.value)})} />}
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">스타일 등록</button>
+      </form>
+
+      {/* PR-101: 스타일번호/품목/기간/시즌 검색·필터 바 — 모두 조합 가능. */}
+      <form onSubmit={handleFilterSubmit} className="bg-gray-50 p-4 rounded mb-4 flex flex-wrap gap-4 items-end">
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">스타일 번호</label>
+          <input
+            className="border border-gray-300 rounded px-3 py-2"
+            placeholder="예: MB62SLM103Z"
+            value={filterStyleNo}
+            onChange={(e) => setFilterStyleNo(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">품목</label>
+          <select
+            className="border border-gray-300 rounded px-3 py-2"
+            value={filterItemType}
+            onChange={(e) => setFilterItemType(e.target.value)}
+          >
+            <option value="">전체</option>
+            {availableItemTypes.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">목표출고일(From)</label>
+          <input
+            className="border border-gray-300 rounded px-3 py-2"
+            type="date"
+            value={filterRddFrom}
+            onChange={(e) => handleRddFromChange(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">목표출고일(To)</label>
+          <input
+            className="border border-gray-300 rounded px-3 py-2"
+            type="date"
+            value={filterRddTo}
+            onChange={(e) => handleRddToChange(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">연도</label>
+          <select
+            className="border border-gray-300 rounded px-3 py-2"
+            value={filterYear}
+            onChange={(e) => setFilterYear(e.target.value ? Number(e.target.value) : '')}
+          >
+            <option value="">선택</option>
+            {YEAR_OPTIONS.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">시즌</label>
+          <select
+            className="border border-gray-300 rounded px-3 py-2"
+            value={filterSeason}
+            onChange={(e) => setFilterSeason(e.target.value as Season | '')}
+          >
+            <option value="">선택</option>
+            <option value="SS">SS (1~6월)</option>
+            <option value="FW">FW (7~12월)</option>
+          </select>
+        </div>
+        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">검색</button>
+        <button type="button" onClick={handleResetFilters} className="bg-gray-200 text-gray-700 px-4 py-2 rounded font-medium hover:bg-gray-300">필터 초기화</button>
       </form>
 
       <table className="w-full border-collapse border">

@@ -36,6 +36,8 @@ export interface FindMasterStylesFilter {
   styleNo?: string;
   targetRddFrom?: string;
   targetRddTo?: string;
+  // PR-101: 카테고리성 값(예: JK/BL/OP/SL)이라 정확히 일치로 필터링된다.
+  itemType?: string;
 }
 
 export const getMasterStyles = (filter?: FindMasterStylesFilter): Promise<any> =>
