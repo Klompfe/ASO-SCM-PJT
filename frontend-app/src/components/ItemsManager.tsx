@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
-import { getBomByStyleNo, updateBomItem, type BomDetail, type BomItemRow } from '../api/boms.service';
+import { getBomByStyleNo, updateBomItem, addBomLabelSet, type BomDetail, type BomItemRow } from '../api/boms.service';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
@@ -35,6 +35,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   // PR-073: 자재명세(BOM) 상세 테이블의 혼용율/HS코드 인라인 수정.
   const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
   const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string }>({ composition: '', hsCode: '' });
+  // PR-099: "라벨류 기본 세트 추가" 버튼 처리 중 표시.
+  const [addingLabelSet, setAddingLabelSet] = useState(false);
 
   // 엑셀 업로드 → 매핑 프리뷰
   const [error, setError] = useState<string | null>(null);
@@ -152,6 +154,28 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
       }
     } catch (err: any) {
       toast.error(getErrorMessage(err, '혼용율/HS코드 수정에 실패했습니다.'));
+    }
+  };
+
+  // PR-099: 라벨류 기본 세트(MAIN+SIZE LABEL/CARE LABEL/PRICE TAG/SIZE STICKER/
+  // TAG PIN/이미지택/POLY BAG, 수량 1)를 한 번에 추가한다 — 이미 있는 항목은 서버가
+  // 건너뛰므로 여러 번 눌러도 안전하다.
+  const handleAddLabelSet = async () => {
+    if (!selectedStyleNo) return;
+    setAddingLabelSet(true);
+    try {
+      const res = await addBomLabelSet(selectedStyleNo);
+      if (res.added.length > 0) {
+        toast.success(`라벨류 기본 세트 ${res.added.length}건 추가됨${res.skipped.length > 0 ? ` (이미 있던 ${res.skipped.length}건은 건너뜀)` : ''}.`);
+      } else {
+        toast.error('추가할 항목이 없습니다 — 라벨류 7종이 이미 모두 등록되어 있습니다.');
+      }
+      const bomRes = await getBomByStyleNo(selectedStyleNo);
+      setBom(bomRes);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '라벨류 기본 세트 추가에 실패했습니다.'));
+    } finally {
+      setAddingLabelSet(false);
     }
   };
 
@@ -370,7 +394,18 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
       {selectedStyleNo && (
         <div className="space-y-2">
-          <h3 className="text-lg font-semibold text-gray-800">{selectedStyleNo} 자재명세(BOM)</h3>
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-semibold text-gray-800">{selectedStyleNo} 자재명세(BOM)</h3>
+            {bom && (
+              <button
+                onClick={handleAddLabelSet}
+                disabled={addingLabelSet}
+                className="text-sm px-3 py-1.5 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+              >
+                {addingLabelSet ? '추가 중...' : '라벨류 기본 세트 추가'}
+              </button>
+            )}
+          </div>
           {bomError && <div className="p-4 bg-yellow-50 text-yellow-800 rounded-lg">{bomError}</div>}
           {bom && (
             <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
