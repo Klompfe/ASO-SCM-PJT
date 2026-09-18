@@ -12,6 +12,13 @@ interface ItemsManagerProps {
   onOrderItem?: (itemId: number) => void;
 }
 
+// PR-103: 백엔드 ItemType enum(item-type.enum.ts)과 동일한 값 — 구분 드롭다운 옵션.
+const ITEM_TYPE_LABELS: Record<string, string> = {
+  RAW_MATERIAL: '원자재',
+  SEMI_FINISHED: '반제품',
+  FINISHED_GOOD: '완제품',
+};
+
 export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   // 스타일별 자재명세(BOM) 조회
   const [searchStyleNo, setSearchStyleNo] = useState('');
@@ -25,7 +32,11 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
   // 품목 마스터 (보조 기능)
   const [items, setItems] = useState<Item[]>([]);
-  const [filter] = useState<GetItemsFilter>({ page: 1, limit: 10 });
+  const [filter, setFilter] = useState<GetItemsFilter>({ page: 1, limit: 10 });
+  // PR-103: 검색 바 입력값(초안) — "검색" 버튼을 눌러야 filter에 반영된다(입력 중에는
+  // API를 다시 부르지 않음). 백엔드 keyword는 이름/코드 LIKE 검색이다(items.service.ts).
+  const [searchType, setSearchType] = useState('');
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL' });
   const [loading, setLoading] = useState<boolean>(false);
   // PR-073: 품목 마스터 테이블의 영문명 인라인 수정 (Suppliers/Buyers와 동일한 패턴).
@@ -96,6 +107,18 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   useEffect(() => {
     loadItems();
   }, [loadItems]);
+
+  // PR-103: 구분(type)/키워드(이름·코드) 검색 — 검색 시 page를 1로 리셋한다.
+  const handleItemSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFilter({ page: 1, limit: 10, type: searchType || undefined, keyword: searchKeyword || undefined });
+  };
+
+  const handleItemSearchReset = () => {
+    setSearchType('');
+    setSearchKeyword('');
+    setFilter({ page: 1, limit: 10 });
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -518,6 +541,28 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
               <input className="border border-gray-300 rounded px-3 py-2 w-24" placeholder="예: MTS" value={newItem.unit} onChange={(e) => setNewItem({...newItem, unit: e.target.value})} />
             </div>
             <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50" disabled={loading}>Create</button>
+          </form>
+
+          {/* PR-103: 구분(type)/키워드(이름·코드) 검색 — 기존 백엔드 필터를 화면에 연결. */}
+          <form onSubmit={handleItemSearchSubmit} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <select
+              className="border border-gray-300 rounded px-3 py-2"
+              value={searchType}
+              onChange={(e) => setSearchType(e.target.value)}
+            >
+              <option value="">전체 구분</option>
+              {Object.entries(ITEM_TYPE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+            <input
+              className="border border-gray-300 rounded px-3 py-2"
+              placeholder="품목명/코드 검색"
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+            />
+            <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">검색</button>
+            <button type="button" onClick={handleItemSearchReset} className="bg-gray-200 text-gray-700 px-4 py-2 rounded font-medium hover:bg-gray-300">초기화</button>
           </form>
 
           <table className="w-full">
