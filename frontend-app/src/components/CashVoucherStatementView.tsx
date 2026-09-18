@@ -4,6 +4,7 @@ import { getCashVouchers, getCashVoucherSummary, type CashVoucher, type CashVouc
 import { type Buyer } from '../api/buyers.service';
 import { type Supplier } from '../api/suppliers.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { exportTableToExcel, type ExcelColumn } from '../utils/excelExport';
 
 const COMPANY_INFO = {
   name: '태일무역',
@@ -116,6 +117,26 @@ export const CashVoucherStatementView: React.FC<CashVoucherStatementViewProps> =
               className="bg-indigo-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
             >
               인쇄
+            </button>
+            <button
+              onClick={() => {
+                if (!result) return;
+                const columns: ExcelColumn<CashVoucher>[] = [
+                  { header: '일자', accessor: (v) => v.voucherDate },
+                  { header: '구분', accessor: (v) => (v.voucherType === 'DEPOSIT' ? '입금' : '출금') },
+                  { header: '계좌', accessor: (v) => v.account },
+                  { header: '분류', accessor: (v) => v.category },
+                  { header: '금액', accessor: (v) => Number(v.amount) },
+                  { header: '메모', accessor: (v) => v.note ?? '' },
+                ];
+                exportTableToExcel(columns, result.vouchers, `거래내역서_${selectedParty?.name ?? ''}`).catch(() => {
+                  toast.error('엑셀 다운로드에 실패했습니다.');
+                });
+              }}
+              disabled={!result}
+              className="bg-green-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+            >
+              엑셀 다운로드
             </button>
             <button onClick={onClose} className="bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-sm font-medium hover:bg-gray-300">
               닫기

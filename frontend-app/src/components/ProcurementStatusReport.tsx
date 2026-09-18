@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { getProcurementStatusReport, type ProcurementStatusRow } from '../api/orderProcessStages.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { PrintableReport } from './PrintableReport';
+import type { ExcelColumn } from '../utils/excelExport';
 
 // PR-089: 종합상태별 색상 뱃지 — 회색=미발주, 노랑=입고대기, 파랑=출고대기, 초록=완료.
 const STATUS_BADGE_STYLES: Record<string, string> = {
@@ -47,10 +49,24 @@ export const ProcurementStatusReport: React.FC = () => {
     return <div className="p-4 text-gray-500">불러오는 중...</div>;
   }
 
+  const excelColumns: ExcelColumn<ProcurementStatusRow>[] = [
+    { header: 'Style No', accessor: (r) => r.styleNo },
+    { header: '브랜드·고객사', accessor: (r) => r.buyer ?? '' },
+    { header: '발주상태', accessor: (r) => (r.poCreated ? '발주완료' : '미발주') },
+    { header: '입고상태', accessor: (r) => `${r.materialReadiness.ready}/${r.materialReadiness.total} 입고완료` },
+    { header: '출고상태', accessor: (r) => (r.exported ? '출고완료' : '출고전') },
+    { header: '종합상태', accessor: (r) => r.overallStatus },
+  ];
+
   return (
-    <div>
-      <div className="flex justify-between items-center mb-3">
-        <h3 className="text-lg font-semibold text-gray-800">발주·입고·출고 현황 ({filteredRows.length}건)</h3>
+    <PrintableReport
+      title={`발주·입고·출고 현황 (${filteredRows.length}건)`}
+      subtitle={filter ? `검색어: ${filter}` : undefined}
+      columns={excelColumns}
+      rows={filteredRows}
+      fileName="발주_입고_출고_현황"
+    >
+      <div className="flex justify-end items-center mb-3 print:hidden">
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -100,6 +116,6 @@ export const ProcurementStatusReport: React.FC = () => {
           </table>
         </div>
       )}
-    </div>
+    </PrintableReport>
   );
 };

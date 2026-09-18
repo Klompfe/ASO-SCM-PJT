@@ -3,6 +3,8 @@ import toast from 'react-hot-toast';
 import { getOrderProgressSummary, type OrderProgressSummaryRow } from '../api/orderProgressSummary.service';
 import { bulkApproveContracts } from '../api/contracts.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { PrintableReport } from './PrintableReport';
+import type { ExcelColumn } from '../utils/excelExport';
 
 interface Props {
   onSelectStyle: (styleNo: string) => void;
@@ -86,10 +88,28 @@ export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
     return <div className="p-4 text-gray-500">불러오는 중...</div>;
   }
 
+  const excelColumns: ExcelColumn<OrderProgressSummaryRow>[] = [
+    { header: 'Style No', accessor: (r) => r.styleNo },
+    { header: '공장', accessor: (r) => r.factory ?? '' },
+    { header: '바이어', accessor: (r) => r.buyer ?? '' },
+    { header: 'RDD', accessor: (r) => r.targetRdd ?? '' },
+    { header: '계약상태', accessor: (r) => CONTRACT_STATUS_LABELS[r.contractStatus] ?? r.contractStatus },
+    { header: '재단%', accessor: (r) => Math.round(r.stages.CUTTING.rate) },
+    { header: '봉제%', accessor: (r) => Math.round(r.stages.SEWING.rate) },
+    { header: '포장%', accessor: (r) => Math.round(r.stages.PACKING.rate) },
+    { header: '출고율', accessor: (r) => Math.round(r.shipRate) },
+    { header: '이행률', accessor: (r) => Math.round(r.fulfillmentRate) },
+    { header: '납기상태', accessor: (r) => r.deliveryStatus },
+  ];
+
   return (
-    <div>
-      <div className="flex justify-between items-center mb-3">
-        <h3 className="text-lg font-semibold text-gray-800">오더 진행현황 요약 ({rows.length}건)</h3>
+    <PrintableReport
+      title={`오더 진행현황 요약 (${rows.length}건)`}
+      columns={excelColumns}
+      rows={sortedRows}
+      fileName="오더_진행현황_요약"
+    >
+      <div className="flex justify-end items-center mb-3 print:hidden">
         <div className="flex items-center gap-3">
           {pendingCount > 0 && (
             <button
@@ -149,6 +169,6 @@ export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
           </table>
         </div>
       )}
-    </div>
+    </PrintableReport>
   );
 };
