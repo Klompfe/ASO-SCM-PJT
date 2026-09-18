@@ -49,7 +49,15 @@ export interface GenerateExportShipment {
   sailingDate?: string;
 }
 
-export const getExportShipments = (): Promise<any> => apiClient.get('/export-shipments');
+// PR-102: 스타일번호/자재명/선적건번호 검색 — 셋 다 선택적, AND 결합.
+export interface FindExportShipmentsFilter {
+  styleNo?: string;
+  materialName?: string;
+  sheetNo?: string;
+}
+
+export const getExportShipments = (filter?: FindExportShipmentsFilter): Promise<any> =>
+  apiClient.get('/export-shipments', { params: filter });
 
 export const getExportShipment = (id: number): Promise<any> => apiClient.get(`/export-shipments/${id}`);
 

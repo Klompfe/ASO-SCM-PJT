@@ -39,6 +39,11 @@ export const ExportShipmentManager: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const canFinalize = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
 
+  // PR-102: 목록 검색 — 스타일번호/자재명/선적건번호, 모두 조합 가능.
+  const [searchStyleNo, setSearchStyleNo] = useState('');
+  const [searchMaterialName, setSearchMaterialName] = useState('');
+  const [searchSheetNo, setSearchSheetNo] = useState('');
+
   // PR-080: 기 작성된 INVOICE/Packing List 엑셀을 그대로 가져오는 흐름 — "발주 선택 →
   // 생성" 흐름과 나란히 별도 섹션으로 둔다.
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -58,14 +63,30 @@ export const ExportShipmentManager: React.FC = () => {
     }
   }, []);
 
-  const loadShipments = useCallback(async () => {
+  const loadShipments = useCallback(async (filter?: { styleNo?: string; materialName?: string; sheetNo?: string }) => {
     try {
-      const res = await getExportShipments();
+      const res = await getExportShipments(filter);
       setShipments(Array.isArray(res) ? res : []);
     } catch (err: any) {
       toast.error(getErrorMessage(err, '수출선적서류 목록을 불러오는 데 실패했습니다.'));
     }
   }, []);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    loadShipments({
+      styleNo: searchStyleNo || undefined,
+      materialName: searchMaterialName || undefined,
+      sheetNo: searchSheetNo || undefined,
+    });
+  };
+
+  const handleSearchReset = () => {
+    setSearchStyleNo('');
+    setSearchMaterialName('');
+    setSearchSheetNo('');
+    loadShipments();
+  };
 
   // PR-079: 기본값이 설정되어 있으면 생성 폼을 미리 채워둔다 — 미설정(null)이면 빈
   // 폼 그대로 둔다(에러 아님). 건별로 필요하면 그대로 덮어써서 수정할 수 있다.
@@ -248,6 +269,30 @@ export const ExportShipmentManager: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* PR-102: 스타일번호/자재명/선적건번호 검색 — 모두 조합 가능. */}
+      <form onSubmit={handleSearchSubmit} className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <input
+          className="border border-gray-300 rounded px-3 py-2"
+          placeholder="스타일번호 검색"
+          value={searchStyleNo}
+          onChange={(e) => setSearchStyleNo(e.target.value)}
+        />
+        <input
+          className="border border-gray-300 rounded px-3 py-2"
+          placeholder="자재명 검색"
+          value={searchMaterialName}
+          onChange={(e) => setSearchMaterialName(e.target.value)}
+        />
+        <input
+          className="border border-gray-300 rounded px-3 py-2"
+          placeholder="선적건번호(Sheet No.) 검색"
+          value={searchSheetNo}
+          onChange={(e) => setSearchSheetNo(e.target.value)}
+        />
+        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">검색</button>
+        <button type="button" onClick={handleSearchReset} className="bg-gray-200 text-gray-700 px-4 py-2 rounded font-medium hover:bg-gray-300">초기화</button>
+      </form>
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
         <table className="w-full">

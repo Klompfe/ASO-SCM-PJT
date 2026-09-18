@@ -1,12 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { PackingReceipt, PackingMaterialCategory } from '../purchase-orders/entities/packing-receipt.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
 import { ExportShipment, ExportShipmentStatus, ExportShipmentSource } from './entities/export-shipment.entity';
 import { ExportShipmentLine } from './entities/export-shipment-line.entity';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
+import { FindExportShipmentsDto } from './dto/find-export-shipments.dto';
 import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.dto';
 import { UserRole } from '../users/entities/user.entity';
 import { ExportShipmentDefaultsService } from '../export-shipment-defaults/export-shipment-defaults.service';
@@ -237,8 +238,43 @@ export class ExportShipmentsService {
     return Object.assign(saved, { warnings: parsed.warnings });
   }
 
-  async findAll(): Promise<ExportShipment[]> {
+  // PR-102: 스타일번호/자재명/선적건번호 검색 — 셋 다 선택적, AND 결합. styleNo/
+  // materialName은 ExportShipmentLine을 조인해서 판별한다("한 선적서류 안에 여러
+  // 라인/스타일이 섞여 있을 수 있으므로 라인 중 하나라도 (두 조건을 함께) 만족하면
+  // 그 선적서류를 포함"). 필터가 매칭된 선적서류 id만 먼저 뽑고, 화면에는 그
+  // 선적서류의 라인을 전부(필터에 안 걸린 라인도) 보여줘야 하므로 id로 다시
+  // 전체 라인을 조회한다.
+  async findAll(filter?: FindExportShipmentsDto): Promise<ExportShipment[]> {
+    const hasFilter = !!(filter?.styleNo || filter?.materialName || filter?.sheetNo);
+    if (!hasFilter) {
+      return this.exportShipmentRepository.find({
+        relations: ['lines'],
+        order: { id: 'DESC', lines: { id: 'ASC' } } as any,
+      });
+    }
+
+    const qb = this.exportShipmentRepository
+      .createQueryBuilder('shipment')
+      .leftJoin('shipment.lines', 'line')
+      .select('shipment.id', 'id')
+      .distinct(true);
+
+    if (filter?.styleNo) {
+      qb.andWhere('line.styleNo LIKE :styleNo', { styleNo: `%${filter.styleNo}%` });
+    }
+    if (filter?.materialName) {
+      qb.andWhere('line.description LIKE :materialName', { materialName: `%${filter.materialName}%` });
+    }
+    if (filter?.sheetNo) {
+      qb.andWhere('shipment.sheetNo LIKE :sheetNo', { sheetNo: `%${filter.sheetNo}%` });
+    }
+
+    const rows = await qb.getRawMany();
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return [];
+
     return this.exportShipmentRepository.find({
+      where: { id: In(ids) },
       relations: ['lines'],
       order: { id: 'DESC', lines: { id: 'ASC' } } as any,
     });

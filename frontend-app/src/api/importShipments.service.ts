@@ -52,7 +52,15 @@ export interface CreateImportShipment {
   lines: CreateImportShipmentLine[];
 }
 
-export const getImportShipments = (): Promise<any> => apiClient.get('/import-shipments');
+// PR-102: 스타일번호/품목(자재명)/선적건번호(INVOICE 번호) 검색 — 셋 다 선택적, AND 결합.
+export interface FindImportShipmentsFilter {
+  styleNo?: string;
+  materialName?: string;
+  sheetNo?: string;
+}
+
+export const getImportShipments = (filter?: FindImportShipmentsFilter): Promise<any> =>
+  apiClient.get('/import-shipments', { params: filter });
 
 export const getImportShipment = (id: number): Promise<any> => apiClient.get(`/import-shipments/${id}`);
 
