@@ -14,6 +14,7 @@ import { getSuppliers, type Supplier } from '../api/suppliers.service';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { getProductionContracts, type ProductionContract } from '../api/productionContracts.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { CashVoucherStatementView } from './CashVoucherStatementView';
 
 const VOUCHER_TYPE_LABELS: Record<CashVoucherType, string> = {
   DEPOSIT: '입금',
@@ -49,6 +50,7 @@ export const CashVouchersManager: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [productionContracts, setProductionContracts] = useState<ProductionContract[]>([]);
+  const [showStatement, setShowStatement] = useState(false);
 
   const loadOptions = useCallback(async () => {
     try {
@@ -141,6 +143,15 @@ export const CashVouchersManager: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowStatement(true)}
+          className="bg-indigo-600 text-white px-4 py-2 rounded font-medium hover:bg-indigo-700"
+        >
+          거래내역서 발급
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
           <h3 className="text-sm font-medium text-gray-500">입금합계</h3>
@@ -383,6 +394,10 @@ export const CashVouchersManager: React.FC = () => {
           </div>
         )}
       </div>
+
+      {showStatement && (
+        <CashVoucherStatementView buyers={buyers} suppliers={suppliers} onClose={() => setShowStatement(false)} />
+      )}
     </div>
   );
 };

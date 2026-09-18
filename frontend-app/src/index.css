@@ -111,3 +111,23 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* PR-108: 완제품입고증/거래내역서 인쇄 — 모달을 print:static으로 되돌리는 것만으로는
+   배경 페이지(입출금전표 목록 등)도 그대로 함께 인쇄되는 문제가 있어, "이 요소만
+   인쇄" 표준 기법을 쓴다. 그 외 모든 요소는 숨기고 .print-target 서브트리만 보이게
+   한 뒤 문서 맨 위로 끌어올린다. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-target,
+  .print-target * {
+    visibility: visible;
+  }
+  .print-target {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}

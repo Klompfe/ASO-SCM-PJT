@@ -118,8 +118,13 @@ export class GoodsReceiptsService {
     });
   }
 
+  // PR-108: 발급(인쇄) 화면이 스타일번호/INVOICE 번호를 함께 보여줘야 해서
+  // importShipment 관계도 함께 로드한다(목록 조회는 기존대로 lines만).
   async findOneOrFail(id: number): Promise<GoodsReceipt> {
-    const receipt = await this.goodsReceiptRepository.findOne({ where: { id }, relations: ['lines'] });
+    const receipt = await this.goodsReceiptRepository.findOne({
+      where: { id },
+      relations: ['lines', 'importShipment'],
+    });
     if (!receipt) {
       throw new NotFoundException(`ID가 ${id}인 완제품입고증을 찾을 수 없습니다.`);
     }

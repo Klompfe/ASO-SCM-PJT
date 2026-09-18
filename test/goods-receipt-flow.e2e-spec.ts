@@ -196,4 +196,17 @@ describe('완제품입고증(GoodsReceipt) 작성 흐름 (PR-107)', () => {
       .send({ importShipmentId, lines: [{ packingDetailId: 999999 }] })
       .expect(404);
   });
+
+  // PR-108: 입고증 발급(인쇄) 화면이 스타일번호/INVOICE 번호를 보여줘야 해서
+  // GET /goods-receipts/:id 상세 조회에 importShipment 관계가 포함되는지 확인한다.
+  it('상세 조회 시 importShipment(styleNo 포함)가 함께 반환된다', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/goods-receipts/${firstReceiptId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.data.importShipment).toBeDefined();
+    expect(res.body.data.importShipment.id).toBe(importShipmentId);
+    expect(res.body.data.importShipment.styleNo).toMatch(/^GR-E2E-/);
+  });
 });

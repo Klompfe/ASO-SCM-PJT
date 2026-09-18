@@ -22,11 +22,23 @@ export class CashVouchersController {
 
   // 'summary'가 ':id'(숫자) 세그먼트와 겹치지 않도록 ':id' 라우트보다 먼저 선언한다.
   @Get('summary')
-  @ApiOperation({ summary: '기간 입금합계/출금합계/잔액 요약' })
+  @ApiOperation({ summary: '기간 입금합계/출금합계/잔액 요약 (거래처 필터 시 거래내역서용 요약, PR-108)' })
   @ApiQuery({ name: 'from', required: false, example: '2026-09-01' })
   @ApiQuery({ name: 'to', required: false, example: '2026-09-30' })
-  getSummary(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.cashVouchersService.getSummary(from, to);
+  @ApiQuery({ name: 'buyerId', required: false, example: 1 })
+  @ApiQuery({ name: 'supplierId', required: false, example: 1 })
+  getSummary(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('buyerId') buyerId?: string,
+    @Query('supplierId') supplierId?: string,
+  ) {
+    return this.cashVouchersService.getSummary(
+      from,
+      to,
+      buyerId ? Number(buyerId) : undefined,
+      supplierId ? Number(supplierId) : undefined,
+    );
   }
 
   @Get()
