@@ -30,6 +30,7 @@ import { HsCodeClassificationsModule } from './hs-code-classifications/hs-code-c
 import { ImportShipmentsModule } from './import-shipments/import-shipments.module';
 import { ProductionContractsModule } from './production-contracts/production-contracts.module';
 import { CashVouchersModule } from './cash-vouchers/cash-vouchers.module';
+import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { HealthController } from './health/health.controller';
 import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
@@ -91,6 +92,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     ImportShipmentsModule,
     ProductionContractsModule,
     CashVouchersModule,
+    GoodsReceiptsModule,
   ],
   controllers: [HealthController],
   providers: [

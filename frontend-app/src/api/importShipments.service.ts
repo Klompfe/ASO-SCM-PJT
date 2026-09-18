@@ -86,3 +86,41 @@ export const importImportShipmentsFromFile = (file: File): Promise<any> => {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 };
+
+// PR-107: 색상·사이즈별 상세내역 — 완제품입고증 작성의 재료가 되는 값. 엑셀
+// 자동연동(DETAIL PACKING 시트)이 아직 없어 지금은 전부 MANUAL로 등록된다.
+export type ImportShipmentPackingDetailSource = 'EXCEL' | 'MANUAL';
+
+export interface ImportShipmentPackingDetail {
+  id: number;
+  importShipmentId: number;
+  styleNo: string;
+  color: string;
+  size: string;
+  qty: number;
+  source: ImportShipmentPackingDetailSource;
+  hasReceipt: boolean;
+}
+
+export interface CreatePackingDetailRow {
+  color: string;
+  size: string;
+  qty: number;
+}
+
+export const getImportShipmentPackingDetails = (importShipmentId: number): Promise<any> =>
+  apiClient.get(`/import-shipments/${importShipmentId}/packing-details`);
+
+export const createImportShipmentPackingDetails = (
+  importShipmentId: number,
+  details: CreatePackingDetailRow[],
+): Promise<any> => apiClient.post(`/import-shipments/${importShipmentId}/packing-details`, { details });
+
+export const updateImportShipmentPackingDetail = (
+  importShipmentId: number,
+  detailId: number,
+  data: Partial<CreatePackingDetailRow>,
+): Promise<any> => apiClient.put(`/import-shipments/${importShipmentId}/packing-details/${detailId}`, data);
+
+export const deleteImportShipmentPackingDetail = (importShipmentId: number, detailId: number): Promise<any> =>
+  apiClient.delete(`/import-shipments/${importShipmentId}/packing-details/${detailId}`);

@@ -11,6 +11,7 @@ import {
 } from '../api/importShipments.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { GoodsReceiptPanel } from './GoodsReceiptPanel';
 
 const emptyLine: CreateImportShipmentLine = {
   itemType: '',
@@ -43,6 +44,8 @@ export const ImportShipmentManager: React.FC = () => {
   const [lines, setLines] = useState<CreateImportShipmentLine[]>([{ ...emptyLine }]);
   const [saving, setSaving] = useState(false);
   const [hsCodeDrafts, setHsCodeDrafts] = useState<Record<number, string>>({});
+  // PR-107: 완제품입고증 패널 — 한 번에 한 shipment만 펼쳐 화면이 복잡해지지 않게 한다.
+  const [expandedShipmentId, setExpandedShipmentId] = useState<number | null>(null);
 
   // PR-083: Vietnam INVOICE/Packing List 엑셀을 그대로 업로드해 스타일별로
   // 수입통관 문서를 자동 생성한다 — ExportShipmentManager의 업로드 버튼+경고 목록
@@ -386,6 +389,12 @@ export const ImportShipmentManager: React.FC = () => {
                       onClick={() => handleClear(s.id)}
                     >통관완료 처리</button>
                   )}
+                  <button
+                    className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded text-sm hover:bg-indigo-200"
+                    onClick={() => setExpandedShipmentId(expandedShipmentId === s.id ? null : s.id)}
+                  >
+                    {expandedShipmentId === s.id ? '완제품입고증 닫기' : '완제품입고증'}
+                  </button>
                 </div>
               </div>
 
@@ -431,6 +440,8 @@ export const ImportShipmentManager: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+
+              {expandedShipmentId === s.id && <GoodsReceiptPanel importShipmentId={s.id} />}
             </div>
           ))}
           {shipments.length === 0 && (
