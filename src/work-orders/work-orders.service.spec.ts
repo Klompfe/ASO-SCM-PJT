@@ -135,6 +135,17 @@ describe('WorkOrdersService', () => {
       const result = await service.create(dto as any);
       expect(result).toEqual(expectedWo);
     });
+
+    // PR-105: 화면에 직접 입력 등록 폼을 새로 연결하면서, 존재하지 않는 itemId를
+    // 보내면 백엔드가 이미 구현해둔 404 처리가 실제로 동작하는지 회귀 검증한다.
+    it('존재하지 않는 itemId면 NotFoundException을 던져야 한다', async () => {
+      mockItemRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.create({ itemId: 9999, targetQuantity: 5 } as any)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(mockWoRepository.save).not.toHaveBeenCalled();
+    });
   });
 
   describe('updateStatus', () => {

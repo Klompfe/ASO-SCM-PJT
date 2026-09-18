@@ -4,8 +4,8 @@ export interface WorkOrder {
   id: number;
   status: string;
   itemId: number;
-  quantity: number;
-  dueDate: string;
+  targetQuantity: number;
+  item?: { id: number; name: string; code: string; type: string };
   createdAt?: string;
   updatedAt?: string;
 }
@@ -21,6 +21,11 @@ export interface GetWorkOrdersFilter {
 
 export interface UpdateWorkOrderStatus {
   status: string;
+}
+
+export interface CreateWorkOrder {
+  itemId: number;
+  targetQuantity: number;
 }
 
 // 작업지시서 AI 분석 결과 3단 구조 — vision.service.ts의 AiWorkOrderResultDto와 동일한 shape.
@@ -64,6 +69,7 @@ export interface AiWorkOrderResult {
 }
 
 export const getWorkOrders = (filter: GetWorkOrdersFilter): Promise<any> => apiClient.get('/work-orders', { params: filter });
+export const createWorkOrder = (data: CreateWorkOrder): Promise<any> => apiClient.post('/work-orders', data);
 export const updateWorkOrderStatus = (id: number, data: UpdateWorkOrderStatus): Promise<any> => apiClient.patch(`/work-orders/${id}/status`, data);
 export const uploadWorkOrderImage = (file: File): Promise<any> => {
   const formData = new FormData();
