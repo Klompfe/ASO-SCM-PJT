@@ -15,7 +15,7 @@ import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { HsCodeManager } from './components/HsCodeManager';
 import { ImportShipmentManager } from './components/ImportShipmentManager';
-import { TopNav, type TabId } from './components/TopNav';
+import { Sidebar, TAB_LABELS, type TabId } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
 import { getCurrentUser, type CurrentUser } from './api/auth.service';
 import './App.css';
@@ -217,31 +217,50 @@ function App() {
     }
   };
 
+  // PR-109: B안(라이트 탑네비)에서 A안(다크 사이드바)으로 교체 — 화면 전체를 좌측
+  // 고정폭 사이드바 + 우측 메인 콘텐츠로 나눈다. 로그인 화면(PR-097, 남색 사이드
+  // 패널)과 톤을 맞췄다.
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <header className="mb-8 flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">SCM Dashboard</h1>
-        <button 
-          onClick={handleLogout} 
-          className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
-        >
-          Logout
-        </button>
-      </header>
-      
-      {/* -mx-6로 부모의 좌우 padding을 상쇄해 흰 헤더 바가 화면 끝까지 이어지도록 한다. */}
-      <div className="-mx-6 mb-6">
-        <TopNav
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          canManageUsers={canManageUsers}
-          isManagerOrAdmin={isManagerOrAdmin}
-        />
-      </div>
+    <div className="min-h-screen flex bg-gray-50">
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        canManageUsers={canManageUsers}
+        isManagerOrAdmin={isManagerOrAdmin}
+        userName={currentUser?.username ?? currentUser?.email ?? ''}
+        userRole={currentUser?.role ?? ''}
+      />
 
-      <main className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 min-h-[400px]">
-        {renderContent()}
-      </main>
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="bg-white border-b border-[#e2e8f0] px-8 py-[18px] flex items-center justify-between">
+          <h1 className="text-lg font-semibold text-gray-900">{TAB_LABELS[activeTab] ?? 'SCM Dashboard'}</h1>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              aria-label="알림"
+              className="w-9 h-9 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
+            >
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+              </svg>
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2 rounded-lg font-medium text-sm transition-colors"
+              style={{ background: '#eef2ff', color: '#4338ca' }}
+            >
+              로그아웃
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 p-6 min-w-0">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 min-h-[400px]">
+            {renderContent()}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
