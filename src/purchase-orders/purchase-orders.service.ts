@@ -37,6 +37,7 @@ export class PurchaseOrdersService {
     const po = this.poRepository.create({
       quantity: dto.quantity,
       unitPrice: dto.unitPrice,
+      notes: dto.notes,
       supplier,
       item,
     });

@@ -27,7 +27,7 @@ export const ShipmentsManager: React.FC = () => {
       await createShipment(newShipment);
       toast.success('출하가 생성되었습니다.');
       loadShipments();
-      setNewShipment({ shipmentNumber: '' });
+      setNewShipment({ shipmentNumber: '', carrierName: '', trackingNumber: '', estimatedArrival: '' });
     } catch (error) {
       // toast.error는 Axios 인터셉터에서 처리됨
     }
@@ -67,10 +67,22 @@ export const ShipmentsManager: React.FC = () => {
         <button onClick={downloadCSV} className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700">Download CSV</button>
       </div>
       
-      <form onSubmit={handleCreate} className="flex gap-4 items-end bg-gray-50 p-4 rounded-lg">
+      <form onSubmit={handleCreate} className="flex flex-wrap gap-4 items-end bg-gray-50 p-4 rounded-lg">
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">Shipment Number</label>
           <input className="border border-gray-300 rounded px-3 py-2 w-64" placeholder="Shipment Number" value={newShipment.shipmentNumber} onChange={(e) => setNewShipment({...newShipment, shipmentNumber: e.target.value})} />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">운송사</label>
+          <input className="border border-gray-300 rounded px-3 py-2 w-40" placeholder="예: DHL" value={newShipment.carrierName || ''} onChange={(e) => setNewShipment({...newShipment, carrierName: e.target.value})} />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">운송장번호</label>
+          <input className="border border-gray-300 rounded px-3 py-2 w-40" placeholder="운송장번호" value={newShipment.trackingNumber || ''} onChange={(e) => setNewShipment({...newShipment, trackingNumber: e.target.value})} />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">예상 도착일</label>
+          <input type="date" className="border border-gray-300 rounded px-3 py-2" value={newShipment.estimatedArrival || ''} onChange={(e) => setNewShipment({...newShipment, estimatedArrival: e.target.value})} />
         </div>
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">Create</button>
       </form>
@@ -80,6 +92,9 @@ export const ShipmentsManager: React.FC = () => {
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="px-4 py-2 text-left">Shipment Number</th>
+              <th className="px-4 py-2 text-left">운송사</th>
+              <th className="px-4 py-2 text-left">운송장번호</th>
+              <th className="px-4 py-2 text-left">예상 도착일</th>
               <th className="px-4 py-2 text-left">Status</th>
               <th className="px-4 py-2 text-left">Action</th>
             </tr>
@@ -88,6 +103,9 @@ export const ShipmentsManager: React.FC = () => {
             {shipments.map((s) => (
               <tr key={s.id} className="hover:bg-gray-50">
                 <td className="px-4 py-2 font-mono">{s.shipmentNumber}</td>
+                <td className="px-4 py-2">{s.carrierName ?? '-'}</td>
+                <td className="px-4 py-2">{s.trackingNumber ?? '-'}</td>
+                <td className="px-4 py-2">{s.estimatedArrival ? s.estimatedArrival.slice(0, 10) : '-'}</td>
                 <td className="px-4 py-2">
                   <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800">
                     {s.status}

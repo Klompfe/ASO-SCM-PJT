@@ -193,13 +193,14 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
           ) : (
             <div className="space-y-2">
               {cartons.map((c, idx) => (
-                <div key={idx} className="grid grid-cols-6 gap-2">
+                <div key={idx} className="grid grid-cols-7 gap-2">
                   <input placeholder="카톤No" className="border p-1 rounded text-sm" value={c.cartonNo} onChange={(e) => updateCarton(idx, 'cartonNo', e.target.value)} />
                   <input placeholder="컬러" className="border p-1 rounded text-sm" value={c.color ?? ''} onChange={(e) => updateCarton(idx, 'color', e.target.value)} />
                   <input placeholder="사이즈" className="border p-1 rounded text-sm" value={c.size ?? ''} onChange={(e) => updateCarton(idx, 'size', e.target.value)} />
                   <input placeholder="LOT" className="border p-1 rounded text-sm" value={c.lotNo ?? ''} onChange={(e) => updateCarton(idx, 'lotNo', e.target.value)} />
                   <input placeholder="수량" type="number" className="border p-1 rounded text-sm" value={c.qty || ''} onChange={(e) => updateCarton(idx, 'qty', e.target.value)} />
                   <input placeholder="품목명" className="border p-1 rounded text-sm" value={c.itemName ?? ''} onChange={(e) => updateCarton(idx, 'itemName', e.target.value)} />
+                  <input placeholder="중량(kg)" type="number" step="0.01" className="border p-1 rounded text-sm" value={c.weightKg ?? ''} onChange={(e) => updateCarton(idx, 'weightKg', e.target.value)} />
                 </div>
               ))}
               <button type="button" onClick={() => setCartons([...cartons, { ...emptyCarton }])} className="text-blue-600 text-sm">+ 카톤 추가</button>

@@ -185,6 +185,16 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           <label className="text-sm text-gray-600 mb-1">단가</label>
           <input type="number" min={0} step="0.01" className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.unitPrice} onChange={(e) => setNewPo({ ...newPo, unitPrice: Number(e.target.value) })} />
         </div>
+        <div className="flex flex-col flex-1 min-w-[200px]">
+          <label className="text-sm text-gray-600 mb-1">비고</label>
+          <textarea
+            className="border border-gray-300 rounded px-3 py-2"
+            rows={1}
+            placeholder="비고"
+            value={newPo.notes || ''}
+            onChange={(e) => setNewPo({ ...newPo, notes: e.target.value })}
+          />
+        </div>
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700" disabled={loading}>발주 생성</button>
       </form>
 
@@ -218,6 +228,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               <th className="px-4 py-2 text-right">단가</th>
               <th className="px-4 py-2 text-right">총액</th>
               <th className="px-4 py-2 text-left">공급업체</th>
+              <th className="px-4 py-2 text-left">비고</th>
               <th className="px-4 py-2 text-left">상태</th>
               <th className="px-4 py-2 text-left">Action</th>
             </tr>
@@ -230,6 +241,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 <td className="px-4 py-2 text-right">{po.unitPrice ?? '-'}</td>
                 <td className="px-4 py-2 text-right">{po.unitPrice != null ? (po.unitPrice * po.quantity).toLocaleString() : '-'}</td>
                 <td className="px-4 py-2">{po.supplier?.name ?? '-'}</td>
+                <td className="px-4 py-2 max-w-[200px] truncate" title={po.notes ?? ''}>{po.notes ?? '-'}</td>
                 <td className="px-4 py-2">{statusBadge(po.status)}</td>
                 <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                   {po.status === 'PENDING' && (

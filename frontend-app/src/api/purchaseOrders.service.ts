@@ -9,6 +9,7 @@ export interface PurchaseOrder {
   status: 'PENDING' | 'RECEIVED' | 'CANCELLED';
   supplierId?: number;
   supplier?: { id: number; code: string; name: string };
+  notes?: string;
   createdAt?: string;
 }
 
