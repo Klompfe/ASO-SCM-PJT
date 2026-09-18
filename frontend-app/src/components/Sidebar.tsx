@@ -12,7 +12,8 @@ export type TabId =
   | 'purchaseOrders'
   | 'exportShipmentDefaults'
   | 'hsCodeClassifications'
-  | 'cashVouchers';
+  | 'cashVouchers'
+  | 'inventories';
 
 interface NavItem {
   id: TabId;
@@ -49,6 +50,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'items', label: '자재' },
       { id: 'purchaseOrders', label: '발주관리' },
       { id: 'suppliers', label: '공급업체' },
+      // PR-110: 재고현황 보고서 — 기존 GET /inventories(백엔드만 있던 API)에
+      // 화면을 처음 연결했다.
+      { id: 'inventories', label: '재고현황' },
     ],
   },
   {
@@ -182,6 +186,13 @@ const ICONS: Record<TabId, React.ReactNode> = {
       <rect x="2.5" y="6" width="19" height="13" rx="2" />
       <path d="M2.5 10h19" />
       <path d="M6 15h4" />
+    </svg>
+  ),
+  inventories: (
+    <svg {...ICON_PROPS}>
+      <path d="M3 7l9-4 9 4-9 4-9-4z" />
+      <path d="M3 7v10l9 4 9-4V7" />
+      <path d="M12 11v10" />
     </svg>
   ),
 };

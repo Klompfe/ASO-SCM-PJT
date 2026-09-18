@@ -15,6 +15,7 @@ import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { HsCodeManager } from './components/HsCodeManager';
 import { ImportShipmentManager } from './components/ImportShipmentManager';
+import { InventoryReport } from './components/InventoryReport';
 import { Sidebar, TAB_LABELS, type TabId } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
 import { getCurrentUser, type CurrentUser } from './api/auth.service';
@@ -203,6 +204,7 @@ function App() {
         case 'exportShipmentDefaults': return <ExportShipmentDefaultsManager />;
         case 'hsCodeClassifications': return <HsCodeManager />;
         case 'cashVouchers': return <CashVouchersManager />;
+        case 'inventories': return <InventoryReport />;
         default:
           // Routing Fallback: If unknown, default to Dashboard
           return <Dashboard />;
