@@ -27,6 +27,13 @@ const emptyLine: CreateImportShipmentLine = {
 export const ImportShipmentManager: React.FC = () => {
   const [shipments, setShipments] = useState<ImportShipment[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // PR-102: 목록 검색 — 스타일번호/자재명(품목)/선적건번호, 모두 조합 가능. 아래
+  // styleQuery(등록 폼에서 스타일 고르는 용도)와는 완전히 별개다 — 혼동을 피하려고
+  // 접두어를 다르게 두고 목록 상단에 별도 섹션으로 배치한다.
+  const [filterStyleNo, setFilterStyleNo] = useState('');
+  const [filterMaterialName, setFilterMaterialName] = useState('');
+  const [filterSheetNo, setFilterSheetNo] = useState('');
   const [styles, setStyles] = useState<MasterStyle[]>([]);
   const [styleQuery, setStyleQuery] = useState('');
 
@@ -44,10 +51,10 @@ export const ImportShipmentManager: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (filter?: { styleNo?: string; materialName?: string; sheetNo?: string }) => {
     setLoading(true);
     try {
-      const res = await getImportShipments();
+      const res = await getImportShipments(filter);
       setShipments(Array.isArray(res) ? res : []);
     } catch (err: any) {
       toast.error(getErrorMessage(err, '수입통관 목록을 불러오는 데 실패했습니다.'));
@@ -55,6 +62,22 @@ export const ImportShipmentManager: React.FC = () => {
       setLoading(false);
     }
   }, []);
+
+  const handleFilterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    load({
+      styleNo: filterStyleNo || undefined,
+      materialName: filterMaterialName || undefined,
+      sheetNo: filterSheetNo || undefined,
+    });
+  };
+
+  const handleFilterReset = () => {
+    setFilterStyleNo('');
+    setFilterMaterialName('');
+    setFilterSheetNo('');
+    load();
+  };
 
   useEffect(() => {
     load();
@@ -314,6 +337,31 @@ export const ImportShipmentManager: React.FC = () => {
         >
           {saving ? '등록 중...' : '수입통관 문서 등록'}
         </button>
+      </form>
+
+      {/* PR-102: 목록 검색(위 등록 폼의 스타일 선택과는 별개) — 스타일번호/품목(자재명)/
+          선적건번호(INVOICE 번호), 모두 조합 가능. */}
+      <form onSubmit={handleFilterSubmit} className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <input
+          className="border border-gray-300 rounded px-3 py-2"
+          placeholder="스타일번호 검색"
+          value={filterStyleNo}
+          onChange={(e) => setFilterStyleNo(e.target.value)}
+        />
+        <input
+          className="border border-gray-300 rounded px-3 py-2"
+          placeholder="품목(자재명) 검색"
+          value={filterMaterialName}
+          onChange={(e) => setFilterMaterialName(e.target.value)}
+        />
+        <input
+          className="border border-gray-300 rounded px-3 py-2"
+          placeholder="선적건번호(INVOICE) 검색"
+          value={filterSheetNo}
+          onChange={(e) => setFilterSheetNo(e.target.value)}
+        />
+        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">검색</button>
+        <button type="button" onClick={handleFilterReset} className="bg-gray-200 text-gray-700 px-4 py-2 rounded font-medium hover:bg-gray-300">초기화</button>
       </form>
 
       {loading ? (

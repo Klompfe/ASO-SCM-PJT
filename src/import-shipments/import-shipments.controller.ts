@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Post,
   Put,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import { ImportShipmentsService } from './import-shipments.service';
 import { CreateImportShipmentDto } from './dto/create-import-shipment.dto';
 import { UpdateImportShipmentStatusDto } from './dto/update-import-shipment-status.dto';
 import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.dto';
+import { FindImportShipmentsDto } from './dto/find-import-shipments.dto';
 
 // PR-082: 완제품 수입통관 추적(HS코드 자동조회/기록까지만 — 원부자재단가/선적일
 // 계산은 이 저장소 밖의 수입통관 이메일 에이전트가 담당). export-shipments처럼
@@ -46,9 +48,9 @@ export class ImportShipmentsController {
   }
 
   @Get()
-  @ApiOperation({ summary: '수입통관 문서 목록 조회 (MasterStyle 조인)' })
-  findAll() {
-    return this.importShipmentsService.findAll();
+  @ApiOperation({ summary: '수입통관 문서 목록 조회 (MasterStyle 조인, 스타일번호/자재명/선적건번호 검색)' })
+  findAll(@Query() query: FindImportShipmentsDto) {
+    return this.importShipmentsService.findAll(query);
   }
 
   @Get(':id')

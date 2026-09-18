@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ExportShipmentsService } from './export-shipments.service';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
+import { FindExportShipmentsDto } from './dto/find-export-shipments.dto';
 import { UpdateExportShipmentStatusDto } from './dto/update-export-shipment-status.dto';
 import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.dto';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -59,9 +60,9 @@ export class ExportShipmentsController {
   }
 
   @Get()
-  @ApiOperation({ summary: '수출선적서류 목록 조회' })
-  findAll() {
-    return this.exportShipmentsService.findAll();
+  @ApiOperation({ summary: '수출선적서류 목록 조회 (스타일번호/자재명/선적건번호 검색)' })
+  findAll(@Query() query: FindExportShipmentsDto) {
+    return this.exportShipmentsService.findAll(query);
   }
 
   @Get(':id')

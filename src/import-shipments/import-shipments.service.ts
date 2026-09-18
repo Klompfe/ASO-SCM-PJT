@@ -1,11 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ImportShipment, ImportShipmentStatus } from './entities/import-shipment.entity';
 import { ImportShipmentLine } from './entities/import-shipment-line.entity';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { CreateImportShipmentDto } from './dto/create-import-shipment.dto';
 import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.dto';
+import { FindImportShipmentsDto } from './dto/find-import-shipments.dto';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
 import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
 
@@ -98,8 +99,41 @@ export class ImportShipmentsService {
     return this.findOneOrFail(shipment.id);
   }
 
-  async findAll(): Promise<ImportShipmentWithMatch[]> {
+  // PR-102: 스타일번호/자재명(품목)/선적건번호(INVOICE 번호) 검색 — 셋 다 선택적,
+  // AND 결합. styleNo는 ImportShipment 헤더 자체에 있어(한 문서=한 스타일) 조인이
+  // 필요 없고, materialName만 ImportShipmentLine.itemType을 조인해서 판별한다.
+  async findAll(filter?: FindImportShipmentsDto): Promise<ImportShipmentWithMatch[]> {
+    const hasFilter = !!(filter?.styleNo || filter?.materialName || filter?.sheetNo);
+    if (!hasFilter) {
+      const shipments = await this.importShipmentRepository.find({
+        relations: ['lines', 'style', 'style.overview'],
+        order: { id: 'DESC', lines: { id: 'ASC' } } as any,
+      });
+      return shipments.map(decorateShipment);
+    }
+
+    const qb = this.importShipmentRepository
+      .createQueryBuilder('shipment')
+      .leftJoin('shipment.lines', 'line')
+      .select('shipment.id', 'id')
+      .distinct(true);
+
+    if (filter?.styleNo) {
+      qb.andWhere('shipment.styleNo LIKE :styleNo', { styleNo: `%${filter.styleNo}%` });
+    }
+    if (filter?.materialName) {
+      qb.andWhere('line.itemType LIKE :materialName', { materialName: `%${filter.materialName}%` });
+    }
+    if (filter?.sheetNo) {
+      qb.andWhere('shipment.invoiceNo LIKE :sheetNo', { sheetNo: `%${filter.sheetNo}%` });
+    }
+
+    const rows = await qb.getRawMany();
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return [];
+
     const shipments = await this.importShipmentRepository.find({
+      where: { id: In(ids) },
       relations: ['lines', 'style', 'style.overview'],
       order: { id: 'DESC', lines: { id: 'ASC' } } as any,
     });
