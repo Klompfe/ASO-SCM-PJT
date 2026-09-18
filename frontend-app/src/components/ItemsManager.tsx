@@ -37,11 +37,15 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   // API를 다시 부르지 않음). 백엔드 keyword는 이름/코드 LIKE 검색이다(items.service.ts).
   const [searchType, setSearchType] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL' });
+  // PR-104: type은 기존과 동일하게 기본값 RAW_MATERIAL로 두되 select로 바꿀 수 있게
+  // 하고, spec/description/styleNo도 생성 시점에 입력할 수 있게 한다(백엔드
+  // CreateItemDto에는 이미 있었지만 화면에 입력란이 없어 죽어있던 필드들).
+  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '' });
   const [loading, setLoading] = useState<boolean>(false);
   // PR-073: 품목 마스터 테이블의 영문명 인라인 수정 (Suppliers/Buyers와 동일한 패턴).
+  // PR-104: spec/description/styleNo도 함께 수정 가능하게 확장.
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
-  const [editItemForm, setEditItemForm] = useState<{ name: string; englishName: string; unit: string }>({ name: '', englishName: '', unit: '' });
+  const [editItemForm, setEditItemForm] = useState<{ name: string; englishName: string; unit: string; spec: string; description: string; styleNo: string }>({ name: '', englishName: '', unit: '', spec: '', description: '', styleNo: '' });
 
   // PR-073: 자재명세(BOM) 상세 테이블의 혼용율/HS코드 인라인 수정.
   const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
@@ -124,10 +128,17 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await createItem(newItem);
+      await createItem({
+        ...newItem,
+        spec: newItem.spec || undefined,
+        description: newItem.description || undefined,
+        // styleNo는 FINISHED_GOOD에만 지정 가능(items.service.ts 검증) — 다른
+        // 타입에서 빈 문자열이 그대로 넘어가지 않게 정리한다.
+        styleNo: newItem.type === 'FINISHED_GOOD' ? (newItem.styleNo || undefined) : undefined,
+      });
       toast.success('품목이 생성되었습니다.');
       loadItems();
-      setNewItem({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL' });
+      setNewItem({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '' });
     } catch (error) {
       // toast.error는 Axios 인터셉터에서 처리됨
     } finally {
@@ -137,17 +148,31 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
   const startEditItem = (item: Item) => {
     setEditingItemId(item.id);
-    setEditItemForm({ name: item.name, englishName: item.englishName || '', unit: item.unit || '' });
+    setEditItemForm({
+      name: item.name,
+      englishName: item.englishName || '',
+      unit: item.unit || '',
+      spec: item.spec || '',
+      description: item.description || '',
+      styleNo: item.styleNo || '',
+    });
   };
 
   const cancelEditItem = () => {
     setEditingItemId(null);
-    setEditItemForm({ name: '', englishName: '', unit: '' });
+    setEditItemForm({ name: '', englishName: '', unit: '', spec: '', description: '', styleNo: '' });
   };
 
   const handleUpdateItem = async (id: number) => {
     try {
-      await updateItem(id, { name: editItemForm.name, englishName: editItemForm.englishName, unit: editItemForm.unit });
+      await updateItem(id, {
+        name: editItemForm.name,
+        englishName: editItemForm.englishName,
+        unit: editItemForm.unit,
+        spec: editItemForm.spec,
+        description: editItemForm.description,
+        styleNo: editItemForm.styleNo || undefined,
+      });
       toast.success('품목 정보가 수정되었습니다.');
       cancelEditItem();
       loadItems();
@@ -523,7 +548,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
       <details className="bg-white border border-gray-200 rounded-lg">
         <summary className="px-4 py-3 cursor-pointer font-medium text-gray-700">품목 마스터 관리 (전체 품목 등록/조회)</summary>
         <div className="p-4 space-y-4 border-t border-gray-200">
-          <form onSubmit={handleCreate} className="flex gap-4 items-end bg-gray-50 p-4 rounded-lg">
+          <form onSubmit={handleCreate} className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-50 p-4 rounded-lg">
             <div className="flex flex-col">
               <label className="text-sm text-gray-600 mb-1">Code</label>
               <input className="border border-gray-300 rounded px-3 py-2" placeholder="Code" value={newItem.code} onChange={(e) => setNewItem({...newItem, code: e.target.value})} />
@@ -538,9 +563,41 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
             </div>
             <div className="flex flex-col">
               <label className="text-sm text-gray-600 mb-1">단위</label>
-              <input className="border border-gray-300 rounded px-3 py-2 w-24" placeholder="예: MTS" value={newItem.unit} onChange={(e) => setNewItem({...newItem, unit: e.target.value})} />
+              <input className="border border-gray-300 rounded px-3 py-2" placeholder="예: MTS" value={newItem.unit} onChange={(e) => setNewItem({...newItem, unit: e.target.value})} />
             </div>
-            <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50" disabled={loading}>Create</button>
+            {/* PR-104: 품목유형 — 기본값은 기존과 동일하게 원자재(RAW_MATERIAL), 사용자가 바꿀 수 있음. */}
+            <div className="flex flex-col">
+              <label className="text-sm text-gray-600 mb-1">품목유형</label>
+              <select
+                className="border border-gray-300 rounded px-3 py-2"
+                value={newItem.type}
+                onChange={(e) => setNewItem({ ...newItem, type: e.target.value, styleNo: e.target.value === 'FINISHED_GOOD' ? newItem.styleNo : '' })}
+              >
+                {Object.entries(ITEM_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col">
+              <label className="text-sm text-gray-600 mb-1">규격</label>
+              <input className="border border-gray-300 rounded px-3 py-2" placeholder="규격" value={newItem.spec} onChange={(e) => setNewItem({...newItem, spec: e.target.value})} />
+            </div>
+            <div className="flex flex-col col-span-2">
+              <label className="text-sm text-gray-600 mb-1">설명</label>
+              <input className="border border-gray-300 rounded px-3 py-2" placeholder="설명" value={newItem.description} onChange={(e) => setNewItem({...newItem, description: e.target.value})} />
+            </div>
+            {/* PR-104: styleNo는 FINISHED_GOOD 품목이 소속 MasterStyle을 참조하는 값이라
+                다른 경로에서 자동으로 채워지지 않는다(items.service.ts create()가 사람이
+                입력한 값만 그대로 저장) — 재고 차감(work-orders.service.ts)이 이 값으로
+                스타일을 찾으므로 완제품 등록 시 반드시 채워야 한다. 오탐 방지를 위해
+                FINISHED_GOOD을 선택했을 때만 노출한다. */}
+            {newItem.type === 'FINISHED_GOOD' && (
+              <div className="flex flex-col col-span-2">
+                <label className="text-sm text-gray-600 mb-1">스타일번호 (완제품 전용)</label>
+                <input className="border border-gray-300 rounded px-3 py-2" placeholder="예: MB62SLM103Z" value={newItem.styleNo} onChange={(e) => setNewItem({...newItem, styleNo: e.target.value})} />
+              </div>
+            )}
+            <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50 self-end" disabled={loading}>Create</button>
           </form>
 
           {/* PR-103: 구분(type)/키워드(이름·코드) 검색 — 기존 백엔드 필터를 화면에 연결. */}
@@ -565,6 +622,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
             <button type="button" onClick={handleItemSearchReset} className="bg-gray-200 text-gray-700 px-4 py-2 rounded font-medium hover:bg-gray-300">초기화</button>
           </form>
 
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-100 text-gray-700">
               <tr>
@@ -573,6 +631,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                 <th className="px-4 py-2 text-left">영문명</th>
                 <th className="px-4 py-2 text-left">단위</th>
                 <th className="px-4 py-2 text-left">Type</th>
+                <th className="px-4 py-2 text-left">규격</th>
+                <th className="px-4 py-2 text-left">설명</th>
+                <th className="px-4 py-2 text-left">스타일번호</th>
                 <th className="px-4 py-2 text-left">Action</th>
               </tr>
             </thead>
@@ -603,6 +664,34 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                       />
                     </td>
                     <td className="px-4 py-2 text-sm text-gray-500">{item.type}</td>
+                    <td className="px-4 py-2">
+                      <input
+                        className="border rounded px-2 py-1 w-full"
+                        value={editItemForm.spec}
+                        onChange={(e) => setEditItemForm({ ...editItemForm, spec: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        className="border rounded px-2 py-1 w-full"
+                        value={editItemForm.description}
+                        onChange={(e) => setEditItemForm({ ...editItemForm, description: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      {/* PR-104: FINISHED_GOOD이 아닌 품목은 items.service.ts가 styleNo
+                          지정을 400으로 거부하므로 그 타입일 때만 편집 가능하게 한다. */}
+                      {item.type === 'FINISHED_GOOD' ? (
+                        <input
+                          className="border rounded px-2 py-1 w-full"
+                          placeholder="예: MB62SLM103Z"
+                          value={editItemForm.styleNo}
+                          onChange={(e) => setEditItemForm({ ...editItemForm, styleNo: e.target.value })}
+                        />
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                       <button className="text-blue-600" onClick={() => handleUpdateItem(item.id)}>저장</button>
                       <button className="text-gray-500" onClick={cancelEditItem}>취소</button>
@@ -615,6 +704,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                     <td className="px-4 py-2">{item.englishName ?? '-'}</td>
                     <td className="px-4 py-2">{item.unit ?? '-'}</td>
                     <td className="px-4 py-2 text-sm text-gray-500">{item.type}</td>
+                    <td className="px-4 py-2">{item.spec ?? '-'}</td>
+                    <td className="px-4 py-2">{item.description ?? '-'}</td>
+                    <td className="px-4 py-2">{item.styleNo ?? '-'}</td>
                     <td className="px-4 py-2">
                       <button className="text-blue-600" onClick={() => startEditItem(item)}>수정</button>
                     </td>
@@ -623,6 +715,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </details>
     </div>

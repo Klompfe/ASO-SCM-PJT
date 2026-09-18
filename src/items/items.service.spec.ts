@@ -114,4 +114,51 @@ describe('ItemsService', () => {
       expect(mockItemRepository.save).not.toHaveBeenCalled();
     });
   });
+
+  // PR-104: 화면에 입력란이 없어 죽어있던 type 선택/spec/description 필드를
+  // 화면에 연결하면서, 백엔드가 이미 이 값들을 정상적으로 저장·수정하는지 확인한다
+  // (백엔드 자체는 이번 PR에서 변경하지 않았지만, 실제로 동작하는지 회귀 검증).
+  describe('create - type 값별 생성 (PR-104)', () => {
+    it.each([ItemType.RAW_MATERIAL, ItemType.SEMI_FINISHED])(
+      '%s 타입은 정상적으로 생성되어야 한다',
+      async (type) => {
+        const result = await service.create({ code: `TYPE_${type}`, name: `테스트 ${type}`, type });
+        expect(result.type).toBe(type);
+      },
+    );
+
+    it('FINISHED_GOOD 타입은 styleNo 없이도 정상 생성되어야 한다', async () => {
+      const result = await service.create({ code: 'TYPE_FIN', name: '테스트 완제품', type: ItemType.FINISHED_GOOD });
+      expect(result.type).toBe(ItemType.FINISHED_GOOD);
+    });
+  });
+
+  describe('create/update - spec/description 저장 (PR-104)', () => {
+    it('생성 시 spec/description을 지정하면 그대로 저장되어야 한다', async () => {
+      const result = await service.create({
+        code: 'SPEC_DESC_1',
+        name: '테스트 품목',
+        type: ItemType.RAW_MATERIAL,
+        spec: '53"',
+        description: '메모: 겉감용 폴리 원단',
+      });
+
+      expect(result.spec).toBe('53"');
+      expect(result.description).toBe('메모: 겉감용 폴리 원단');
+    });
+
+    it('수정 시 spec/description을 바꾸면 정상 반영되어야 한다', async () => {
+      const existing = { id: 7, code: 'SPEC_DESC_2', name: '기존 품목', type: ItemType.RAW_MATERIAL, spec: '', description: '' };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.save.mockImplementation((item: any) => Promise.resolve(item));
+
+      const result = await service.update(7, { spec: '65"', description: '수정된 설명' });
+
+      expect(result.spec).toBe('65"');
+      expect(result.description).toBe('수정된 설명');
+      expect(mockItemRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ spec: '65"', description: '수정된 설명' }),
+      );
+    });
+  });
 });
