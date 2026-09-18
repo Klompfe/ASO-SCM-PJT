@@ -57,6 +57,9 @@ export class PurchaseOrder {
   @Column({ nullable: true })
   shipmentId?: number;
 
+  @Column({ type: 'text', nullable: true })
+  notes?: string;
+
   @ManyToOne(() => Shipment, (shipment) => shipment.purchaseOrders, {
     nullable: true,
     onDelete: 'SET NULL',

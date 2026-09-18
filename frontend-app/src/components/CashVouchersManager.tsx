@@ -9,6 +9,10 @@ import {
   type CashVoucherSummary,
   type CashVoucherType,
 } from '../api/cashVouchers.service';
+import { getBuyers, type Buyer } from '../api/buyers.service';
+import { getSuppliers, type Supplier } from '../api/suppliers.service';
+import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
+import { getProductionContracts, type ProductionContract } from '../api/productionContracts.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
 const VOUCHER_TYPE_LABELS: Record<CashVoucherType, string> = {
@@ -21,8 +25,12 @@ const emptyForm = {
   voucherDate: '',
   amount: '',
   counterpartyName: '',
+  counterpartyBuyerId: '',
+  counterpartySupplierId: '',
   account: '',
   category: '',
+  relatedPurchaseOrderId: '',
+  relatedProductionContractId: '',
   note: '',
 };
 
@@ -37,6 +45,32 @@ export const CashVouchersManager: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<CashVoucherType | ''>('');
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  const [buyers, setBuyers] = useState<Buyer[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [productionContracts, setProductionContracts] = useState<ProductionContract[]>([]);
+
+  const loadOptions = useCallback(async () => {
+    try {
+      const [buyersRes, suppliersRes, poRes, pcRes] = await Promise.all([
+        getBuyers(),
+        getSuppliers(),
+        getPurchaseOrders(),
+        getProductionContracts(),
+      ]);
+      setBuyers(Array.isArray(buyersRes) ? buyersRes : []);
+      setSuppliers(Array.isArray(suppliersRes) ? suppliersRes : []);
+      const poData = Array.isArray(poRes) ? poRes : (poRes && Array.isArray(poRes.data) ? poRes.data : []);
+      setPurchaseOrders(poData);
+      setProductionContracts(Array.isArray(pcRes) ? pcRes : []);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '거래처/발주/생산계약 목록을 불러오는 데 실패했습니다.'));
+    }
+  }, []);
+
+  useEffect(() => {
+    loadOptions();
+  }, [loadOptions]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,6 +112,10 @@ export const CashVouchersManager: React.FC = () => {
         counterpartyName: form.counterpartyName,
         account: form.account,
         category: form.category,
+        ...(form.counterpartyBuyerId ? { counterpartyBuyerId: Number(form.counterpartyBuyerId) } : {}),
+        ...(form.counterpartySupplierId ? { counterpartySupplierId: Number(form.counterpartySupplierId) } : {}),
+        ...(form.relatedPurchaseOrderId ? { relatedPurchaseOrderId: Number(form.relatedPurchaseOrderId) } : {}),
+        ...(form.relatedProductionContractId ? { relatedProductionContractId: Number(form.relatedProductionContractId) } : {}),
         ...(form.note ? { note: form.note } : {}),
       });
       toast.success('입출금전표가 등록되었습니다.');
@@ -191,6 +229,58 @@ export const CashVouchersManager: React.FC = () => {
               className="border rounded px-2 py-1 w-full text-sm"
             />
           </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">거래처(고객사) 연결</label>
+            <select
+              value={form.counterpartyBuyerId}
+              onChange={(e) => setForm({ ...form, counterpartyBuyerId: e.target.value })}
+              className="border rounded px-2 py-1 w-full text-sm"
+            >
+              <option value="">연결 안 함</option>
+              {buyers.map((b) => (
+                <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">거래처(공급업체) 연결</label>
+            <select
+              value={form.counterpartySupplierId}
+              onChange={(e) => setForm({ ...form, counterpartySupplierId: e.target.value })}
+              className="border rounded px-2 py-1 w-full text-sm"
+            >
+              <option value="">연결 안 함</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">관련 발주 연결</label>
+            <select
+              value={form.relatedPurchaseOrderId}
+              onChange={(e) => setForm({ ...form, relatedPurchaseOrderId: e.target.value })}
+              className="border rounded px-2 py-1 w-full text-sm"
+            >
+              <option value="">연결 안 함</option>
+              {purchaseOrders.map((po) => (
+                <option key={po.id} value={po.id}>발주 #{po.id} ({po.item?.name ?? `#${po.itemId}`})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">관련 생산계약 연결</label>
+            <select
+              value={form.relatedProductionContractId}
+              onChange={(e) => setForm({ ...form, relatedProductionContractId: e.target.value })}
+              className="border rounded px-2 py-1 w-full text-sm"
+            >
+              <option value="">연결 안 함</option>
+              {productionContracts.map((pc) => (
+                <option key={pc.id} value={pc.id}>{pc.styleNo} ({pc.manufacturer?.name ?? `#${pc.manufacturerId}`})</option>
+              ))}
+            </select>
+          </div>
           <div className="col-span-2">
             <label className="block text-xs text-gray-500 mb-1">메모</label>
             <input
@@ -252,6 +342,7 @@ export const CashVouchersManager: React.FC = () => {
                   <th className="p-2">일자</th>
                   <th className="p-2">구분</th>
                   <th className="p-2">거래처</th>
+                  <th className="p-2">연결</th>
                   <th className="p-2">계좌</th>
                   <th className="p-2">분류</th>
                   <th className="p-2">금액</th>
@@ -260,7 +351,14 @@ export const CashVouchersManager: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {vouchers.map((v) => (
+                {vouchers.map((v) => {
+                  const linked = [
+                    v.counterpartyBuyerId ? `고객사: ${buyers.find((b) => b.id === v.counterpartyBuyerId)?.name ?? `#${v.counterpartyBuyerId}`}` : null,
+                    v.counterpartySupplierId ? `공급업체: ${suppliers.find((s) => s.id === v.counterpartySupplierId)?.name ?? `#${v.counterpartySupplierId}`}` : null,
+                    v.relatedPurchaseOrderId ? `발주 #${v.relatedPurchaseOrderId}` : null,
+                    v.relatedProductionContractId ? `생산계약 #${v.relatedProductionContractId}` : null,
+                  ].filter(Boolean);
+                  return (
                   <tr key={v.id} className="border-t hover:bg-gray-50">
                     <td className="p-2">{v.voucherDate}</td>
                     <td className="p-2">
@@ -269,6 +367,7 @@ export const CashVouchersManager: React.FC = () => {
                       </span>
                     </td>
                     <td className="p-2">{v.counterpartyName}</td>
+                    <td className="p-2 text-xs text-gray-500">{linked.length > 0 ? linked.join(', ') : '-'}</td>
                     <td className="p-2">{v.account}</td>
                     <td className="p-2">{v.category}</td>
                     <td className="p-2">{formatAmount(v.amount)}</td>
@@ -277,7 +376,8 @@ export const CashVouchersManager: React.FC = () => {
                       <button onClick={() => handleDelete(v.id)} className="text-red-600 hover:underline text-xs">삭제</button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

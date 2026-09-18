@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateShipmentDto {
   @ApiProperty({ description: '출하 번호', example: 'SHIP-2026-001' })
@@ -16,4 +16,9 @@ export class CreateShipmentDto {
   @IsOptional()
   @IsString()
   trackingNumber?: string;
+
+  @ApiPropertyOptional({ description: '예상 도착일', example: '2026-09-30' })
+  @IsOptional()
+  @IsDateString()
+  estimatedArrival?: string;
 }

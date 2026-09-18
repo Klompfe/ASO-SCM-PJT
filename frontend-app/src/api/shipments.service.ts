@@ -6,6 +6,7 @@ export interface Shipment {
   status: string;
   carrierName?: string;
   trackingNumber?: string;
+  estimatedArrival?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -14,6 +15,7 @@ export interface CreateShipment {
   shipmentNumber: string;
   carrierName?: string;
   trackingNumber?: string;
+  estimatedArrival?: string;
 }
 
 export const getShipments = (): Promise<any> => apiClient.get('/shipments');

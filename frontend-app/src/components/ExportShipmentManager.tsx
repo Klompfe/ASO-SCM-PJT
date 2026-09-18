@@ -126,7 +126,12 @@ export const ExportShipmentManager: React.FC = () => {
     setGenerating(true);
     setGenerateWarnings([]);
     try {
-      const res = await generateExportShipment(selectedPoIds, header);
+      // 빈 문자열로 둔 선택 필드(예: 미입력 Sailing Date/Invoice Date)를 그대로 보내면
+      // @IsDateString 등 백엔드 검증에서 400이 난다 — 빈 값은 아예 제외하고 보낸다.
+      const payload = Object.fromEntries(
+        Object.entries(header).filter(([, v]) => v !== ''),
+      ) as GenerateExportShipment;
+      const res = await generateExportShipment(selectedPoIds, payload);
       const warnings: string[] = res.warnings ?? [];
       setGenerateWarnings(warnings);
       toast.success(
@@ -231,6 +236,7 @@ export const ExportShipmentManager: React.FC = () => {
           <input className="border p-2 rounded text-sm" placeholder="Final Destination" value={header.finalDestination} onChange={(e) => setHeader({ ...header, finalDestination: e.target.value })} />
           <input className="border p-2 rounded text-sm" placeholder="Carrier" value={header.carrier} onChange={(e) => setHeader({ ...header, carrier: e.target.value })} />
           <input type="date" className="border p-2 rounded text-sm" placeholder="Sailing Date" value={header.sailingDate} onChange={(e) => setHeader({ ...header, sailingDate: e.target.value })} />
+          <input type="date" className="border p-2 rounded text-sm" placeholder="Invoice Date" value={header.invoiceDate} onChange={(e) => setHeader({ ...header, invoiceDate: e.target.value })} />
         </div>
         <button onClick={handleGenerate} disabled={generating} className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50">
           {generating ? '생성 중...' : '수출선적서류 생성'}
@@ -326,9 +332,12 @@ export const ExportShipmentManager: React.FC = () => {
       {selected && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded w-4/5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-1">
               <h3 className="text-xl font-bold">#{selected.id} {selected.sheetNo ?? ''}</h3>
               <span className={`px-2 py-1 rounded text-sm font-medium ${STATUS_CLASSES[selected.status]}`}>{STATUS_LABELS[selected.status]}</span>
+            </div>
+            <div className="text-xs text-gray-500 mb-4">
+              Invoice Date: {selected.invoiceDate ? selected.invoiceDate.slice(0, 10) : '-'} · Sailing Date: {selected.sailingDate ? selected.sailingDate.slice(0, 10) : '-'}
             </div>
 
             <div className="flex gap-2 mb-4">
