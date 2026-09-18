@@ -169,4 +169,80 @@ describe('입출금전표관리 흐름 (PR-094)', () => {
       .expect(200);
     expect(allRes.body.data.some((v: any) => v.id === created.body.data.id)).toBe(true);
   });
+
+  // PR-108: 거래내역서 발급 — 특정 거래처(Buyer)로 필터링했을 때 다른 거래처
+  // 전표가 섞이지 않는지, 기간 필터와 조합해도 정확한지 확인한다.
+  describe('거래처 필터 — 거래내역서 발급 (PR-108)', () => {
+    let buyerAId: number;
+    let buyerBId: number;
+    const ts = Date.now();
+
+    it('사전 준비: 고객사 2곳을 만들고 각각 전표를 등록한다', async () => {
+      const buyerA = await request(app.getHttpServer())
+        .post('/buyers')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name: `거래내역서 테스트 A ${ts}` })
+        .expect(201);
+      buyerAId = buyerA.body.data.id;
+
+      const buyerB = await request(app.getHttpServer())
+        .post('/buyers')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name: `거래내역서 테스트 B ${ts}` })
+        .expect(201);
+      buyerBId = buyerB.body.data.id;
+
+      // A: 입금 2건(2026-09-05, 2026-09-10), B: 입금 1건(2026-09-07) — 기간/거래처
+      // 조합으로 A만, 기간까지 좁혔을 때 A의 일부만 나오는지 확인할 수 있게 구성.
+      await request(app.getHttpServer())
+        .post('/cash-vouchers')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ voucherType: 'DEPOSIT', voucherDate: '2026-09-05', amount: 1000000, counterpartyName: 'A거래처', counterpartyBuyerId: buyerAId, account: '현금', category: '기타' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post('/cash-vouchers')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ voucherType: 'WITHDRAWAL', voucherDate: '2026-09-10', amount: 300000, counterpartyName: 'A거래처', counterpartyBuyerId: buyerAId, account: '현금', category: '기타' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post('/cash-vouchers')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ voucherType: 'DEPOSIT', voucherDate: '2026-09-07', amount: 500000, counterpartyName: 'B거래처', counterpartyBuyerId: buyerBId, account: '현금', category: '기타' })
+        .expect(201);
+    });
+
+    it('buyerId로 필터하면 그 거래처 전표만 반환되고 다른 거래처 전표는 섞이지 않는다', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/cash-vouchers')
+        .query({ buyerId: buyerAId })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(2);
+      expect(res.body.data.every((v: any) => v.counterpartyBuyerId === buyerAId)).toBe(true);
+    });
+
+    it('buyerId + summary는 그 거래처만의 입금/출금/잔액을 정확히 계산한다', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/cash-vouchers/summary')
+        .query({ buyerId: buyerAId })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(Number(res.body.data.depositTotal)).toBe(1000000);
+      expect(Number(res.body.data.withdrawalTotal)).toBe(300000);
+      expect(Number(res.body.data.balance)).toBe(700000);
+    });
+
+    it('buyerId + 기간 필터를 조합하면 그 기간 안의 해당 거래처 전표만 반환된다', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/cash-vouchers')
+        .query({ buyerId: buyerAId, from: '2026-09-01', to: '2026-09-06' })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(1);
+      expect(Number(res.body.data[0].amount)).toBe(1000000);
+    });
+  });
 });

@@ -10,6 +10,7 @@ import {
 } from '../api/importShipments.service';
 import { getGoodsReceipts, createGoodsReceipt, type GoodsReceipt } from '../api/goodsReceipts.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { GoodsReceiptPrintView } from './GoodsReceiptPrintView';
 
 interface GoodsReceiptPanelProps {
   importShipmentId: number;
@@ -41,6 +42,7 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
   const [reviewLines, setReviewLines] = useState<ReviewLine[] | null>(null);
   const [remark, setRemark] = useState('');
   const [saving, setSaving] = useState(false);
+  const [printReceiptId, setPrintReceiptId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -373,7 +375,10 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
               <div key={r.id} className="bg-white border border-gray-200 rounded p-2 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-mono font-medium">{r.receiptNo}</span>
-                  <span className="text-xs text-gray-400">{r.issuedDate?.slice(0, 10)}{r.remark ? ` · ${r.remark}` : ''}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{r.issuedDate?.slice(0, 10)}{r.remark ? ` · ${r.remark}` : ''}</span>
+                    <button className="text-indigo-600 text-xs font-medium" onClick={() => setPrintReceiptId(r.id)}>입고증 발급</button>
+                  </div>
                 </div>
                 <ul className="text-xs text-gray-600 mt-1 space-y-0.5">
                   {r.lines.map((l) => (
@@ -390,6 +395,10 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
           </div>
         )}
       </div>
+
+      {printReceiptId !== null && (
+        <GoodsReceiptPrintView goodsReceiptId={printReceiptId} onClose={() => setPrintReceiptId(null)} />
+      )}
     </div>
   );
 };

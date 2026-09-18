@@ -55,6 +55,8 @@ export class CashVouchersService {
       where: {
         ...(dateWhere ? { voucherDate: dateWhere } : {}),
         ...(filter.voucherType ? { voucherType: filter.voucherType } : {}),
+        ...(filter.buyerId ? { counterpartyBuyerId: filter.buyerId } : {}),
+        ...(filter.supplierId ? { counterpartySupplierId: filter.supplierId } : {}),
       },
       order: { voucherDate: 'DESC', id: 'DESC' },
     });
@@ -85,10 +87,16 @@ export class CashVouchersService {
 
   // PR-094: 기간 합계(입금합계/출금합계/잔액=입금-출금). voucherType 필터는 요약
   // 성격상 받지 않는다(둘 다 합쳐서 봐야 잔액이 의미가 있으므로) — from/to만 받는다.
-  async getSummary(from?: string, to?: string): Promise<CashVoucherSummary> {
+  // PR-108: 거래내역서 발급을 위해 buyerId/supplierId로도 필터할 수 있게 확장했다
+  // (기존엔 회사 전체 합계만 가능했음) — 둘 다 없으면 기존과 동일하게 전체 합계.
+  async getSummary(from?: string, to?: string, buyerId?: number, supplierId?: number): Promise<CashVoucherSummary> {
     const dateWhere = buildDateWhere(from, to);
     const vouchers = await this.cashVoucherRepository.find({
-      where: dateWhere ? { voucherDate: dateWhere } : {},
+      where: {
+        ...(dateWhere ? { voucherDate: dateWhere } : {}),
+        ...(buyerId ? { counterpartyBuyerId: buyerId } : {}),
+        ...(supplierId ? { counterpartySupplierId: supplierId } : {}),
+      },
     });
 
     let depositTotal = 0;

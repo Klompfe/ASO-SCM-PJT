@@ -38,6 +38,9 @@ export interface CashVoucherFilter {
   from?: string;
   to?: string;
   voucherType?: CashVoucherType;
+  // PR-108: 거래내역서 발급 — 특정 거래처만 필터링.
+  buyerId?: number;
+  supplierId?: number;
 }
 
 export interface CashVoucherSummary {
@@ -49,8 +52,12 @@ export interface CashVoucherSummary {
 export const getCashVouchers = (filter?: CashVoucherFilter): Promise<any> =>
   apiClient.get('/cash-vouchers', { params: filter });
 
-export const getCashVoucherSummary = (from?: string, to?: string): Promise<any> =>
-  apiClient.get('/cash-vouchers/summary', { params: { from, to } });
+export const getCashVoucherSummary = (
+  from?: string,
+  to?: string,
+  buyerId?: number,
+  supplierId?: number,
+): Promise<any> => apiClient.get('/cash-vouchers/summary', { params: { from, to, buyerId, supplierId } });
 
 export const createCashVoucher = (data: CreateCashVoucher): Promise<any> =>
   apiClient.post('/cash-vouchers', data);

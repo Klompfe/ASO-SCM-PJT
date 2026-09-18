@@ -17,6 +17,9 @@ export interface GoodsReceipt {
   receiptNo: string;
   issuedDate: string;
   importShipmentId: number;
+  // PR-108: 발급(인쇄) 화면에 스타일번호/INVOICE 번호를 표시하기 위한 관계 — 상세
+  // 조회(getGoodsReceipt)에서만 채워진다(목록 조회는 기존대로 없음).
+  importShipment?: { id: number; styleNo: string; invoiceNo?: string | null } | null;
   remark?: string | null;
   lines: GoodsReceiptLine[];
   createdAt: string;
