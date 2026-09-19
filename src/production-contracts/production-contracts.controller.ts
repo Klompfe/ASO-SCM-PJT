@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, ParseIntPipe, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { ProductionContractsService } from './production-contracts.service';
 import { CreateProductionContractDto } from './dto/create-production-contract.dto';
 import { UpdateProductionContractDto } from './dto/update-production-contract.dto';
+import { FindProductionContractsDto } from './dto/find-production-contracts.dto';
 import { ProductionContract } from './entities/production-contract.entity';
 
 @ApiTags('생산계약 (태일비나 Sales Contract)')
@@ -20,10 +21,10 @@ export class ProductionContractsController {
   }
 
   @Get()
-  @ApiOperation({ summary: '생산계약 전체 목록 조회' })
+  @ApiOperation({ summary: '생산계약 목록 조회(from/to: 계약일 기간, 선택)' })
   @ApiResponse({ status: 200, description: '조회 성공', type: [ProductionContract] })
-  findAll(): Promise<ProductionContract[]> {
-    return this.productionContractsService.findAll();
+  findAll(@Query() filter: FindProductionContractsDto): Promise<ProductionContract[]> {
+    return this.productionContractsService.findAll(filter);
   }
 
   @Get(':id')

@@ -29,7 +29,8 @@ export interface CreateProductionContract {
   note?: string;
 }
 
-export const getProductionContracts = (): Promise<any> => apiClient.get('/production-contracts');
+export const getProductionContracts = (params?: { from?: string; to?: string }): Promise<any> =>
+  apiClient.get('/production-contracts', { params });
 export const createProductionContract = (data: CreateProductionContract): Promise<any> =>
   apiClient.post('/production-contracts', data);
 export const deleteProductionContract = (id: number): Promise<any> =>
