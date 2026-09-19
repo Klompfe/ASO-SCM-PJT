@@ -7,6 +7,7 @@ import { MasterStyle } from '../styles/entities/master-style.entity';
 import { CreateImportShipmentDto } from './dto/create-import-shipment.dto';
 import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.dto';
 import { FindImportShipmentsDto } from './dto/find-import-shipments.dto';
+import { UpdateImportShipmentHeaderDto } from './dto/update-import-shipment-header.dto';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
 import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
 import { ImportShipmentPackingDetailExcelParser, type ParsedPackingDetailRow } from './utils/import-shipment-packing-detail-excel-parser.util';
@@ -46,6 +47,16 @@ const decorateShipment = (shipment: ImportShipment, rules: BrandPrefixRuleLike[]
   return Object.assign(shipment, { brand: classifyBrand(shipment.styleNo, rules) }) as ImportShipmentWithMatch;
 };
 
+const blankToNull = (v?: string | null): string | null => (v && v.trim() !== '' ? v.trim() : null);
+const toDateString = (d: Date | string): string => (d instanceof Date ? d.toISOString() : String(d)).slice(0, 10);
+
+// ETA가 ETD보다 앞서는 입력은 오타일 가능성이 높아 막는다(둘 다 있을 때만 비교).
+function assertEtaNotBeforeEtd(etd?: string | null, eta?: string | null): void {
+  if (etd && eta && eta.slice(0, 10) < etd.slice(0, 10)) {
+    throw new BadRequestException('ETA(도착예정일)는 ETD(출항일)보다 빠를 수 없습니다.');
+  }
+}
+
 @Injectable()
 export class ImportShipmentsService {
   constructor(
@@ -65,12 +76,20 @@ export class ImportShipmentsService {
   // ImportShipment의 styleNo로 StyleHsCodeMapping을 upsert한다 — "품종은 최초
   // 수입용 INV/PKL 확인 시점에 파악된다"는 요구사항이 반영되는 지점이 여기다.
   // 일치하지 않으면 hsCode는 null로 저장한다(호출 측에서 unmatched 표시).
-  async create(dto: CreateImportShipmentDto): Promise<ImportShipmentWithMatch> {
+  async create(dto: CreateImportShipmentDto): Promise<ImportShipmentWithMatch & { styleAutoCreated: boolean }> {
+    assertEtaNotBeforeEtd(dto.etd, dto.eta);
+    // PR-124: 최초 자료화 — 아직 MasterStyle에 없는 스타일번호도 이 자리에서 최소 스텁으로 만든다.
+    const styleAutoCreated = await this.ensureMasterStyle(dto.styleNo);
     const shipment = await this.importShipmentRepository.save(
       this.importShipmentRepository.create({
         styleNo: dto.styleNo,
         invoiceNo: dto.invoiceNo ?? null,
         invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
+        pol: blankToNull(dto.pol),
+        pod: blankToNull(dto.pod),
+        etd: dto.etd ? new Date(dto.etd) : null,
+        eta: dto.eta ? new Date(dto.eta) : null,
+        vessel: blankToNull(dto.vessel),
         status: ImportShipmentStatus.PENDING_CLEARANCE,
       }),
     );
@@ -106,7 +125,7 @@ export class ImportShipmentsService {
       );
     }
 
-    return this.findOneOrFail(shipment.id);
+    return Object.assign(await this.findOneOrFail(shipment.id), { styleAutoCreated });
   }
 
   // PR-102: 스타일번호/자재명(품목)/선적건번호(INVOICE 번호) 검색 — 셋 다 선택적,
@@ -168,6 +187,38 @@ export class ImportShipmentsService {
     }
     const rules = await this.brandPrefixRulesService.findAll();
     return decorateShipment(shipment, rules);
+  }
+
+  // PR-124: 스타일번호가 MasterStyle에 없으면 styleNo만 가진 최소 스텁을 만든다(overview/BOM 없음 — 이후 정식 오더
+  // 매핑 커밋이 mapping-commit.service.ts의 "있으면 병합" 경로로 같은 스타일에 overview/BOM을 채운다). 새로
+  // 만들었으면 true. 동시에 같은 스타일이 만들어져 저장이 실패한 경우엔 이미 있는지 다시 확인해 그대로 진행한다.
+  private async ensureMasterStyle(styleNo: string): Promise<boolean> {
+    const existing = await this.masterStyleRepository.findOne({ where: { styleNo } });
+    if (existing) return false;
+    try {
+      await this.masterStyleRepository.save(this.masterStyleRepository.create({ styleNo }));
+      return true;
+    } catch (err) {
+      if (await this.masterStyleRepository.findOne({ where: { styleNo } })) return false;
+      throw err;
+    }
+  }
+
+  // PR-124: 선적 일정/경로(POL/POD/ETD/ETA/선명)만 수정한다. 보내지 않은 필드는 유지, null/빈 문자열은 지움.
+  async updateHeader(id: number, dto: UpdateImportShipmentHeaderDto): Promise<ImportShipmentWithMatch> {
+    const shipment = await this.findOneOrFail(id);
+    const etd = dto.etd !== undefined ? dto.etd : shipment.etd ? toDateString(shipment.etd) : null;
+    const eta = dto.eta !== undefined ? dto.eta : shipment.eta ? toDateString(shipment.eta) : null;
+    assertEtaNotBeforeEtd(etd, eta);
+
+    const patch: Partial<ImportShipment> = {};
+    if (dto.pol !== undefined) patch.pol = blankToNull(dto.pol);
+    if (dto.pod !== undefined) patch.pod = blankToNull(dto.pod);
+    if (dto.vessel !== undefined) patch.vessel = blankToNull(dto.vessel);
+    if (dto.etd !== undefined) patch.etd = dto.etd ? new Date(dto.etd) : null;
+    if (dto.eta !== undefined) patch.eta = dto.eta ? new Date(dto.eta) : null;
+    await this.importShipmentRepository.update(id, patch);
+    return this.findOneOrFail(id);
   }
 
   async updateStatus(id: number, newStatus: ImportShipmentStatus): Promise<ImportShipmentWithMatch> {
@@ -232,10 +283,9 @@ export class ImportShipmentsService {
   // HS코드가 이미 확정값)이라 create()를 재사용하지 않고 직접 헤더/라인을 만든다.
   // HS코드/혼용률 해석은 resolveInvoiceLine()에 위임한다.
   //
-  // ImportShipment.styleNo는 MasterStyle을 참조하는 FK라(nullable 아님) 파일에
-  // 오타 styleNo가 섞여 있으면 DB 제약 위반으로 전체 업로드가 실패해 버린다 — 그런
-  // 사고를 피하려고 그룹마다 미리 MasterStyle 존재 여부를 확인해, 없으면 그 스타일만
-  // 건너뛰고 warnings에 남긴다(나머지 정상 스타일은 계속 생성됨).
+  // ImportShipment.styleNo는 MasterStyle을 참조하는 FK라(nullable 아님) MasterStyle이 없으면 DB 제약 위반이 된다.
+  // PR-124부터는 그런 스타일번호를 건너뛰지 않고 그 자리에서 최소 스텁 MasterStyle을 만든 뒤 계속 진행한다
+  // ("처음 자료화하는 것이라 꼭 사전 등록될 필요는 없다"는 사용자 판단).
   async importFromFile(buffer: Buffer): Promise<{ shipments: ImportShipmentWithMatch[]; warnings: string[] }> {
     const parsed = ImportShipmentExcelParser.parse(buffer);
 
@@ -258,19 +308,24 @@ export class ImportShipmentsService {
     const shipments: ImportShipmentWithMatch[] = [];
 
     for (const [styleNo, lines] of groups) {
-      const styleExists = await this.masterStyleRepository.findOne({ where: { styleNo } });
-      if (!styleExists) {
+      // PR-124: 미등록 스타일번호도 건너뛰지 않고 최소 스텁 MasterStyle을 만들어 그대로 자료화한다(최초 자료화 흐름).
+      // 데이터가 통째로 누락되는 것보다 낫고, 사용자가 알 수 있도록 정보성 warning으로만 남긴다.
+      if (await this.ensureMasterStyle(styleNo)) {
         warnings.push(
-          `styleNo="${styleNo}": MasterStyle에 등록되지 않은 스타일번호라 건너뛰었습니다(${lines.length}개 라인). 먼저 스타일을 등록한 뒤 다시 업로드하거나 직접입력을 이용해 주세요.`,
+          `styleNo="${styleNo}": 새 스타일번호로 자동 등록되었습니다(마스터에 오더/BOM 정보 없음). 나중에 오더가 등록되면 이 스타일과 병합됩니다.`,
         );
-        continue;
       }
 
+      // 선적 일정/경로는 파일 헤더가 그룹(스타일)마다 공유한다. ETA는 이 문서에 없어 채우지 않는다.
       const shipment = await this.importShipmentRepository.save(
         this.importShipmentRepository.create({
           styleNo,
           invoiceNo: parsed.header.invoiceNo ?? null,
           invoiceDate: parsed.header.invoiceDate ?? null,
+          pol: parsed.header.portOfLoading ?? null,
+          pod: parsed.header.finalDestination ?? null,
+          etd: parsed.header.sailingDate ?? null,
+          vessel: parsed.header.vessel ?? null,
           status: ImportShipmentStatus.PENDING_CLEARANCE,
         }),
       );

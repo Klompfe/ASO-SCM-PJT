@@ -227,14 +227,14 @@ describe('Vietnam INV/PKL 엑셀 업로드(ImportShipment import-from-file) 회�
     expect(listRes.body.data.items.some((i: any) => i.hsCode === '6204.33.0000')).toBe(false);
   });
 
-  it('MasterStyle에 등록되지 않은 styleNo는 건너뛰고 warnings로 안내한다', async () => {
+  it('MasterStyle에 등록되지 않은 styleNo도 건너뛰지 않고 자동 등록해 전부 자료화하며 정보성 warning으로 안내한다 (PR-124)', async () => {
     const styleExists = `VN-EXISTS-${Date.now()}`;
     await createStyle(styleExists);
-    const styleTypo = `VN-TYPO-${Date.now()}`;
+    const styleNew = `VN-NEWSTYLE-${Date.now()}`;
 
     const buffer = buildVnInvoiceWorkbook([
       { description: "WOMEN'S PANTS", styleNo: styleExists, qty: 100, unitPrice: 5, amount: 500, hsCode: '6204.63.0000', grossWeight: 60 },
-      { description: "WOMEN'S COAT", styleNo: styleTypo, qty: 50, unitPrice: 20, amount: 1000, hsCode: '6202.20.0000', grossWeight: 80 },
+      { description: "WOMEN'S COAT", styleNo: styleNew, qty: 50, unitPrice: 20, amount: 1000, hsCode: '6202.20.0000', grossWeight: 80 },
     ]);
 
     const res = await request(app.getHttpServer())
@@ -243,9 +243,11 @@ describe('Vietnam INV/PKL 엑셀 업로드(ImportShipment import-from-file) 회�
       .attach('file', buffer, 'vn-invoice.xlsx')
       .expect(201);
 
-    expect(res.body.data.shipments).toHaveLength(1);
-    expect(res.body.data.shipments[0].styleNo).toBe(styleExists);
-    expect(res.body.data.warnings.some((w: string) => w.includes(styleTypo))).toBe(true);
+    expect(res.body.data.shipments.map((s: any) => s.styleNo).sort()).toEqual([styleExists, styleNew].sort());
+    const autoWarnings = res.body.data.warnings.filter((w: string) => w.includes('자동 등록'));
+    expect(autoWarnings).toHaveLength(1);
+    expect(autoWarnings[0]).toContain(styleNew);
+    expect(res.body.data.warnings.some((w: string) => w.includes('건너뛰'))).toBe(false);
   });
 
   it('IV FOB/PK 헤더 정보(invoiceNo/invoiceDate/portOfLoading/finalDestination/carrier/sailingDate)를 정확히 추출한다', async () => {

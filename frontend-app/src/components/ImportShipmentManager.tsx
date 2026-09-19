@@ -15,6 +15,8 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { GoodsReceiptPanel } from './GoodsReceiptPanel';
 import { PrintableReport } from './PrintableReport';
 import { ImportShipmentReportTable } from './ImportShipmentReportTable';
+import { ImportShipmentVoyagePanel } from './ImportShipmentVoyagePanel';
+import { effectiveStyleNo, isNewStyleNo, validateVoyageDates } from '../utils/importShipmentForm';
 import { describeImportFilters, importShipmentColumns, summarizeShipments } from '../utils/importShipmentReport';
 
 const emptyLine: CreateImportShipmentLine = {
@@ -70,6 +72,13 @@ export const ImportShipmentManager: React.FC = () => {
   const [styleQuery, setStyleQuery] = useState('');
 
   const [styleNo, setStyleNo] = useState('');
+  // PR-124: 마지막으로 스타일 목록을 조회한 입력값(신규 스타일 안내 판정용) + 선적 정보 입력값(전부 선택).
+  const [stylesLoadedFor, setStylesLoadedFor] = useState<string | null>(null);
+  const [pol, setPol] = useState('');
+  const [pod, setPod] = useState('');
+  const [etd, setEtd] = useState('');
+  const [eta, setEta] = useState('');
+  const [vessel, setVessel] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
   const [invoiceDate, setInvoiceDate] = useState('');
   const [lines, setLines] = useState<CreateImportShipmentLine[]>([{ ...emptyLine }]);
@@ -136,8 +145,10 @@ export const ImportShipmentManager: React.FC = () => {
         const res = await getMasterStyles(styleQuery ? { styleNo: styleQuery } : undefined);
         const data = Array.isArray(res) ? res : (res?.items ?? []);
         setStyles(data);
+        setStylesLoadedFor(styleQuery);
       } catch {
         setStyles([]);
+        setStylesLoadedFor(styleQuery);
       }
     }, 300);
     return () => clearTimeout(timer);
@@ -152,26 +163,48 @@ export const ImportShipmentManager: React.FC = () => {
 
   const resetForm = () => {
     setStyleNo('');
+    setStyleQuery('');
     setInvoiceNo('');
     setInvoiceDate('');
+    setPol('');
+    setPod('');
+    setEtd('');
+    setEta('');
+    setVessel('');
     setLines([{ ...emptyLine }]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!styleNo) {
-      toast.error('스타일번호를 선택해 주세요.');
+    // PR-124: 스타일번호는 자유 입력이다. 목록에 없으면 서버가 최소 스텁으로 함께 등록한다(최초 자료화).
+    const finalStyleNo = effectiveStyleNo(styleNo, styleQuery);
+    if (!finalStyleNo) {
+      toast.error('스타일번호를 입력해 주세요.');
+      return;
+    }
+    const dateError = validateVoyageDates(etd, eta);
+    if (dateError) {
+      toast.error(dateError);
       return;
     }
     setSaving(true);
     try {
-      await createImportShipment({
-        styleNo,
+      const created = await createImportShipment({
+        styleNo: finalStyleNo,
         invoiceNo: invoiceNo || undefined,
         invoiceDate: invoiceDate || undefined,
+        pol: pol.trim() || undefined,
+        pod: pod.trim() || undefined,
+        etd: etd || undefined,
+        eta: eta || undefined,
+        vessel: vessel.trim() || undefined,
         lines,
       });
-      toast.success('수입통관 문서가 등록되었습니다.');
+      toast.success(
+        created?.styleAutoCreated
+          ? `수입통관 문서가 등록되었습니다. (${finalStyleNo}은(는) 새 스타일번호로 함께 등록되었습니다)`
+          : '수입통관 문서가 등록되었습니다.',
+      );
       resetForm();
       await load();
     } catch (err: any) {
@@ -300,6 +333,11 @@ export const ImportShipmentManager: React.FC = () => {
                 if (styles.some((s) => s.styleNo === e.target.value)) setStyleNo(e.target.value);
               }}
             />
+            {isNewStyleNo(styleNo, styleQuery, styles, stylesLoadedFor) && (
+              <span className="mt-1 text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 self-start" data-testid="new-style-badge">
+                신규 스타일로 등록됩니다 (마스터에 오더/BOM 정보 없음)
+              </span>
+            )}
             <datalist id="import-shipment-style-options">
               {styles.map((s) => (
                 <option key={s.styleNo} value={s.styleNo}>
@@ -325,6 +363,29 @@ export const ImportShipmentManager: React.FC = () => {
               value={invoiceDate}
               onChange={(e) => setInvoiceDate(e.target.value)}
             />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-testid="voyage-form">
+          <div className="flex flex-col">
+            <label className="text-sm text-gray-600 mb-1">도착항(POD)</label>
+            <input className="border border-gray-300 rounded px-3 py-2" placeholder="예: INCHEON , KOREA" value={pod} onChange={(e) => setPod(e.target.value)} aria-label="도착항 POD" />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-sm text-gray-600 mb-1">출항일(ETD)</label>
+            <input type="date" className="border border-gray-300 rounded px-3 py-2" value={etd} onChange={(e) => setEtd(e.target.value)} aria-label="출항일 ETD" />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-sm text-gray-600 mb-1">도착예정일(ETA) <span className="text-xs text-gray-400">선택</span></label>
+            <input type="date" className="border border-gray-300 rounded px-3 py-2" value={eta} onChange={(e) => setEta(e.target.value)} aria-label="도착예정일 ETA" />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-sm text-gray-600 mb-1">선적항(POL) <span className="text-xs text-gray-400">선택</span></label>
+            <input className="border border-gray-300 rounded px-3 py-2" value={pol} onChange={(e) => setPol(e.target.value)} aria-label="선적항 POL" />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-sm text-gray-600 mb-1">선명 <span className="text-xs text-gray-400">선택</span></label>
+            <input className="border border-gray-300 rounded px-3 py-2" value={vessel} onChange={(e) => setVessel(e.target.value)} aria-label="선명" />
           </div>
         </div>
 
@@ -463,6 +524,8 @@ export const ImportShipmentManager: React.FC = () => {
                   </button>
                 </div>
               </div>
+
+              <ImportShipmentVoyagePanel shipment={s} onSaved={() => load(appliedFilter)} />
 
               <table className="w-full text-sm">
                 <thead>

@@ -39,6 +39,7 @@ describe('ImportShipmentsService', () => {
           useValue: {
             create: jest.fn((v) => v),
             save: jest.fn((v) => Promise.resolve({ id: 1, ...v })),
+            update: jest.fn(),
             findOne: jest.fn(),
             find: jest.fn(),
             createQueryBuilder: jest.fn(),
@@ -55,7 +56,10 @@ describe('ImportShipmentsService', () => {
         {
           provide: getRepositoryToken(MasterStyle),
           useValue: {
-            findOne: jest.fn(),
+            // 기본은 "이미 있는 스타일" — 미등록 스타일 케이스는 각 테스트에서 덮어쓴다(PR-124).
+            findOne: jest.fn().mockResolvedValue({ styleNo: 'exists' }),
+            create: jest.fn((v) => v),
+            save: jest.fn((v) => Promise.resolve(v)),
           },
         },
         {
@@ -302,12 +306,15 @@ describe('ImportShipmentsService', () => {
       expect(result.warnings.some((w) => w.includes('신규 스타일'))).toBe(true);
     });
 
-    it('MasterStyle에 없는 styleNo는 건너뛰고 warnings에 남긴다(나머지는 계속 생성)', async () => {
+    it('MasterStyle에 없는 styleNo도 건너뛰지 않고 최소 스텁 MasterStyle을 만들어 전부 자료화하며, 정보성 warning만 남긴다(PR-124)', async () => {
       (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
-        header: { invoiceNo: null, invoiceDate: null, portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null },
+        header: {
+          invoiceNo: 'TYVN2026-99', invoiceDate: new Date(Date.UTC(2026, 6, 16)), portOfLoading: 'HAIPHONG, VIETNAM',
+          finalDestination: 'INCHEON , KOREA', carrier: 'BY SEA', sailingDate: new Date(Date.UTC(2026, 6, 19)), vessel: 'STARSHIP TAURUS 2613N',
+        },
         lines: [
           mockParsedLine({ styleNo: 'STY-EXISTS' }),
-          mockParsedLine({ styleNo: 'STY-TYPO', description: "WOMEN'S JACKET" }),
+          mockParsedLine({ styleNo: 'STY-NEW', description: "WOMEN'S JACKET" }),
         ],
         warnings: [],
       });
@@ -318,9 +325,119 @@ describe('ImportShipmentsService', () => {
 
       const result = await service.importFromFile(Buffer.from(''));
 
-      expect(result.shipments).toHaveLength(1);
-      expect(result.warnings.some((w) => w.includes('STY-TYPO'))).toBe(true);
+      expect(result.shipments).toHaveLength(2); // 이전에는 1건(STY-NEW 누락)
+      expect(shipmentRepo.save).toHaveBeenCalledTimes(2);
+      expect(masterStyleRepo.save).toHaveBeenCalledTimes(1);
+      expect(masterStyleRepo.save).toHaveBeenCalledWith({ styleNo: 'STY-NEW' }); // 스텁: styleNo만, overview/BOM 없음
+      expect(result.warnings.filter((w) => w.includes('STY-NEW') && w.includes('자동 등록'))).toHaveLength(1);
+      expect(result.warnings.some((w) => w.includes('STY-EXISTS') && w.includes('자동 등록'))).toBe(false);
+      expect(result.warnings.some((w) => w.includes('건너뛰'))).toBe(false);
+    });
+
+    it('파일 헤더의 POL/POD/ETD/선명이 저장되고, ETA는 채워지지 않는다(PR-124)', async () => {
+      (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
+        header: {
+          invoiceNo: 'TYVN2026-99', invoiceDate: null, portOfLoading: 'HAIPHONG, VIETNAM', finalDestination: 'INCHEON , KOREA',
+          carrier: null, sailingDate: new Date(Date.UTC(2026, 6, 19)), vessel: 'KJ374',
+        },
+        lines: [mockParsedLine({ styleNo: 'STY-A' })],
+        warnings: [],
+      });
+      (hsCodeService.findByStyle as jest.Mock).mockRejectedValue(new NotFoundException('no mapping'));
+
+      await service.importFromFile(Buffer.from(''));
+
+      const created = (shipmentRepo.create as jest.Mock).mock.calls[0][0];
+      expect(created).toMatchObject({ pol: 'HAIPHONG, VIETNAM', pod: 'INCHEON , KOREA', vessel: 'KJ374' });
+      expect(created.etd).toEqual(new Date(Date.UTC(2026, 6, 19)));
+      expect(created.eta).toBeUndefined();
+    });
+  });
+
+  // PR-124: 수동 등록도 미등록 스타일번호를 허용한다(find-or-create) + 선적 정보 저장/수정.
+  describe('create — 미등록 스타일번호 허용 + 선적 정보 (PR-124)', () => {
+    const dto = (over: any = {}) => ({ styleNo: 'NEW-STYLE', lines: [{ itemType: 'JK', qty: 1, unit: 'EA' }], ...over });
+    beforeEach(() => {
+      (hsCodeService.findMatch as jest.Mock).mockResolvedValue(null);
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, styleNo: 'NEW-STYLE', lines: [] });
+    });
+
+    it('스타일이 이미 있으면 새로 만들지 않고 styleAutoCreated=false', async () => {
+      (masterStyleRepo.findOne as jest.Mock).mockResolvedValue({ styleNo: 'NEW-STYLE' });
+      const result = await service.create(dto() as any);
+      expect(masterStyleRepo.save).not.toHaveBeenCalled();
+      expect(result.styleAutoCreated).toBe(false);
+    });
+
+    it('스타일이 없으면 styleNo만 가진 스텁을 만들고 styleAutoCreated=true(수입통관 문서도 정상 생성)', async () => {
+      (masterStyleRepo.findOne as jest.Mock).mockResolvedValue(null);
+      const result = await service.create(dto() as any);
+      expect(masterStyleRepo.save).toHaveBeenCalledWith({ styleNo: 'NEW-STYLE' });
       expect(shipmentRepo.save).toHaveBeenCalledTimes(1);
+      expect(result.styleAutoCreated).toBe(true);
+      // 스타일 생성이 문서 저장보다 먼저 일어난다(FK 순서)
+      expect((masterStyleRepo.save as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan((shipmentRepo.save as jest.Mock).mock.invocationCallOrder[0]);
+    });
+
+    it('동시에 다른 요청이 같은 스타일을 먼저 만들어 저장이 실패해도, 이미 있으면 그대로 진행한다', async () => {
+      (masterStyleRepo.findOne as jest.Mock).mockResolvedValueOnce(null).mockResolvedValueOnce({ styleNo: 'NEW-STYLE' });
+      (masterStyleRepo.save as jest.Mock).mockRejectedValueOnce(new Error('duplicate key'));
+      const result = await service.create(dto() as any);
+      expect(result.styleAutoCreated).toBe(false);
+      expect(shipmentRepo.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('스타일 저장이 실패했고 실제로도 없으면 에러를 그대로 던진다(문서는 만들지 않는다)', async () => {
+      (masterStyleRepo.findOne as jest.Mock).mockResolvedValue(null);
+      (masterStyleRepo.save as jest.Mock).mockRejectedValueOnce(new Error('db down'));
+      await expect(service.create(dto() as any)).rejects.toThrow('db down');
+      expect(shipmentRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('POL/POD/ETD/ETA/선명을 저장하고, 비어 있는 값은 null로 정규화한다', async () => {
+      await service.create(dto({ pol: ' HAIPHONG, VIETNAM ', pod: 'INCHEON , KOREA', etd: '2026-07-19', eta: '2026-07-24', vessel: '   ' }) as any);
+      const created = (shipmentRepo.create as jest.Mock).mock.calls[0][0];
+      expect(created).toMatchObject({ pol: 'HAIPHONG, VIETNAM', pod: 'INCHEON , KOREA', vessel: null });
+      expect(created.etd).toEqual(new Date('2026-07-19'));
+      expect(created.eta).toEqual(new Date('2026-07-24'));
+    });
+
+    it('ETA가 ETD보다 빠르면 400이고 스타일도 문서도 만들지 않는다', async () => {
+      (masterStyleRepo.findOne as jest.Mock).mockResolvedValue(null);
+      await expect(service.create(dto({ etd: '2026-07-19', eta: '2026-07-18' }) as any)).rejects.toThrow(BadRequestException);
+      expect(masterStyleRepo.save).not.toHaveBeenCalled();
+      expect(shipmentRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('ETD만 또는 ETA만 있어도 정상(ETA는 선택 입력)', async () => {
+      await expect(service.create(dto({ etd: '2026-07-19' }) as any)).resolves.toBeDefined();
+      await expect(service.create(dto({ eta: '2026-07-24' }) as any)).resolves.toBeDefined();
+    });
+  });
+
+  describe('updateHeader — 선적 일정/경로 수정 (PR-124)', () => {
+    const current = (over: any = {}) => ({ id: 1, styleNo: 'S', pol: 'A', pod: 'B', etd: new Date('2026-07-19'), eta: null, vessel: 'V', lines: [], ...over });
+    beforeEach(() => (shipmentRepo.findOne as jest.Mock).mockResolvedValue(current()));
+
+    it('보낸 필드만 바꾸고 나머지는 그대로 둔다', async () => {
+      await service.updateHeader(1, { pod: 'INCHEON , KOREA', eta: '2026-07-24' });
+      expect(shipmentRepo.update).toHaveBeenCalledWith(1, { pod: 'INCHEON , KOREA', eta: new Date('2026-07-24') });
+    });
+
+    it('null 또는 빈 문자열은 값을 지운다', async () => {
+      await service.updateHeader(1, { pod: null, vessel: '  ', etd: null });
+      expect(shipmentRepo.update).toHaveBeenCalledWith(1, { pod: null, vessel: null, etd: null });
+    });
+
+    it('새 ETA가 기존 ETD보다 빠르면 400(기존 값과 함께 검증), ETD를 함께 바꾸면 새 값으로 검증', async () => {
+      await expect(service.updateHeader(1, { eta: '2026-07-01' })).rejects.toThrow(BadRequestException);
+      expect(shipmentRepo.update).not.toHaveBeenCalled();
+      await expect(service.updateHeader(1, { etd: '2026-06-01', eta: '2026-07-01' })).resolves.toBeDefined();
+    });
+
+    it('없는 문서는 404', async () => {
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue(null);
+      await expect(service.updateHeader(999, { pod: 'X' })).rejects.toThrow(NotFoundException);
     });
   });
 

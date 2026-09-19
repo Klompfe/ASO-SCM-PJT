@@ -27,6 +27,12 @@ export interface ImportShipment {
   invoiceDate?: string | null;
   status: ImportShipmentStatus;
   clearedAt?: string | null;
+  // PR-124: 선적 정보. pol/pod/etd/vessel은 INVOICE 엑셀에서 자동 캡처, eta(도착예정일)는 화면에서만 입력.
+  pol?: string | null;
+  pod?: string | null;
+  etd?: string | null;
+  eta?: string | null;
+  vessel?: string | null;
   lines: ImportShipmentLine[];
   createdAt: string;
   updatedAt: string;
@@ -51,7 +57,20 @@ export interface CreateImportShipment {
   styleNo: string;
   invoiceNo?: string;
   invoiceDate?: string;
+  pol?: string;
+  pod?: string;
+  etd?: string;
+  eta?: string;
+  vessel?: string;
   lines: CreateImportShipmentLine[];
+}
+
+export interface ImportShipmentVoyage {
+  pol?: string | null;
+  pod?: string | null;
+  etd?: string | null;
+  eta?: string | null;
+  vessel?: string | null;
 }
 
 // PR-102: 스타일번호/품목(자재명)/선적건번호(INVOICE 번호) 검색 — 셋 다 선택적, AND 결합.
@@ -70,6 +89,10 @@ export const getImportShipment = (id: number): Promise<any> => apiClient.get(`/i
 
 export const createImportShipment = (data: CreateImportShipment): Promise<any> =>
   apiClient.post('/import-shipments', data);
+
+// PR-124: 선적 일정/경로 수정(null 또는 빈 값은 지움, 보내지 않은 필드는 유지).
+export const updateImportShipmentHeader = (id: number, data: ImportShipmentVoyage): Promise<any> =>
+  apiClient.patch(`/import-shipments/${id}`, data);
 
 export const updateImportShipmentStatus = (id: number, status: ImportShipmentStatus): Promise<any> =>
   apiClient.put(`/import-shipments/${id}/status`, { status });

@@ -45,6 +45,24 @@ export class ImportShipment {
   @Column({ type: 'date', nullable: true })
   invoiceDate?: Date | null;
 
+  // PR-124: 선적 일정/경로. 전부 선택값이다. pol/pod/etd/vessel은 INVOICE 엑셀 헤더(Port of Loading / Final Destination /
+  // Departure date / Vessel — 라벨 "바로 아래" 칸)에서 자동으로 채워지고 등록 후 수정할 수 있다. eta(도착예정일)는
+  // 이 문서 종류(COMMERCIAL INVOICE)에 아예 없는 정보라 자동 파싱하지 않고 화면에서만 입력한다.
+  @Column({ type: 'varchar', nullable: true })
+  pol?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  pod?: string | null;
+
+  @Column({ type: 'date', nullable: true })
+  etd?: Date | null;
+
+  @Column({ type: 'date', nullable: true })
+  eta?: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  vessel?: string | null;
+
   @Column({ type: 'varchar', enum: ImportShipmentStatus, default: ImportShipmentStatus.PENDING_CLEARANCE })
   status: ImportShipmentStatus;
 

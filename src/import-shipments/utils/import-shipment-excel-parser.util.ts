@@ -48,6 +48,8 @@ export interface ImportedImportShipmentHeader {
   finalDestination: string | null;
   carrier: string | null;
   sailingDate: Date | null;
+  // PR-124: 선명(예: "STARSHIP TAURUS 2613N"). ETA(도착예정일)는 이 문서에 없어 일부러 파싱하지 않는다.
+  vessel: string | null;
 }
 
 export interface ParsedImportedImportShipment {
@@ -268,6 +270,7 @@ export class ImportShipmentExcelParser {
       finalDestination: findLabelValue(rows, 'Final Destination', 'below'),
       carrier: findLabelValue(rows, 'Carrier', 'below'),
       sailingDate: parseInvoiceDate(findLabelCellRaw(rows, 'Departure date', 'below')),
+      vessel: findLabelValue(rows, 'Vessel', 'below'),
     };
 
     return { header, lines, warnings };
