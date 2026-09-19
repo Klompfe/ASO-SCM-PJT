@@ -190,3 +190,79 @@ export async function findMergePairsForStyle(exec: SqlExecutor, styleNo: string)
   const { pairs, unmatched } = buildMergePairs(await itemsOf(sourceBomIds), await itemsOf([active.id]));
   return { pairs, unmatched, activeBomId: active.id, sourceBomIds };
 }
+
+export interface SystemWideItem {
+  id: number;
+  name: string;
+  type?: string | null;
+}
+
+export interface SystemWideGroup {
+  name: string;
+  canonicalId: number;
+  duplicateIds: number[];
+  // 그룹 내 각 Item의 BomItem 참조 건수(정답 선택 근거)
+  bomRefs: Record<number, number>;
+}
+
+export interface SkippedGroup {
+  name: string;
+  ids: number[];
+  reason: 'REFERENCED_BY_PO_INVENTORY_WORKORDER' | 'TYPE_MISMATCH';
+}
+
+// 순수 로직: 정규화한 이름이 같은 Item을 그룹으로 묶고, 그룹마다 "BomItem 참조 건수가 가장 많은 Item"을 정답으로,
+// 나머지를 중복으로 정한다(동률이면 id가 가장 작은 쪽 — 결정적). 안전을 위해 다음 그룹은 통째로 건너뛴다:
+//  - 그룹 안 어느 Item이든 PurchaseOrder/Inventory/WorkOrder가 참조하는 경우(이 세 관계는 CASCADE라 신중해야 한다)
+//  - 그룹 안 Item의 type이 서로 다른 경우(이름만 같고 다른 종류의 자재일 수 있다)
+// 이름이 비어 있는 Item은 같은 자재로 볼 근거가 없어 그룹으로 묶지 않는다.
+export function buildSystemWideMergePlan(
+  items: SystemWideItem[],
+  bomRefCounts: Map<number, number>,
+  referencedByOthers: Set<number>,
+): { pairs: MergePair[]; groups: SystemWideGroup[]; skipped: SkippedGroup[] } {
+  const byName = new Map<string, SystemWideItem[]>();
+  for (const it of items) {
+    const key = normalizeMaterialName(it.name);
+    if (!key) continue;
+    byName.set(key, [...(byName.get(key) ?? []), it]);
+  }
+
+  const groups: SystemWideGroup[] = [];
+  const skipped: SkippedGroup[] = [];
+  const pairs: MergePair[] = [];
+  for (const [name, members] of [...byName].sort((a, b) => a[1][0].id - b[1][0].id)) {
+    if (members.length < 2) continue;
+    const ids = members.map((m) => m.id).sort((a, b) => a - b);
+    if (members.some((m) => referencedByOthers.has(m.id))) {
+      skipped.push({ name, ids, reason: 'REFERENCED_BY_PO_INVENTORY_WORKORDER' });
+      continue;
+    }
+    if (new Set(members.map((m) => m.type ?? '')).size > 1) {
+      skipped.push({ name, ids, reason: 'TYPE_MISMATCH' });
+      continue;
+    }
+    const refs = (id: number) => bomRefCounts.get(id) ?? 0;
+    const canonicalId = [...ids].sort((a, b) => refs(b) - refs(a) || a - b)[0];
+    const duplicateIds = ids.filter((id) => id !== canonicalId);
+    groups.push({ name, canonicalId, duplicateIds, bomRefs: Object.fromEntries(ids.map((id) => [id, refs(id)])) });
+    for (const d of duplicateIds) pairs.push({ duplicateId: d, canonicalId, name });
+  }
+  pairs.sort((a, b) => a.duplicateId - b.duplicateId);
+  return { pairs, groups, skipped };
+}
+
+// DB에서 읽어 시스템 전체 대응표를 만든다(읽기 전용 쿼리만 실행).
+export async function findSystemWideMergePairs(exec: SqlExecutor) {
+  const items: SystemWideItem[] = ((await exec.query(`SELECT "id", "name", "type" FROM "items" ORDER BY "id"`)) ?? []).map((r: any) => ({ id: Number(r.id), name: String(r.name ?? ''), type: r.type ?? null }));
+  const bomRefCounts = new Map<number, number>(
+    ((await exec.query(`SELECT "materialId" AS id, COUNT(*) AS n FROM "bom_item_details" GROUP BY "materialId"`)) ?? []).map((r: any) => [Number(r.id), Number(r.n)] as [number, number]),
+  );
+  const others = new Set<number>(
+    ((await exec.query(`SELECT "itemId" AS id FROM "purchase_order" UNION SELECT "itemId" AS id FROM "inventories" UNION SELECT "itemId" AS id FROM "work_orders"`)) ?? []).map((r: any) => Number(r.id)),
+  );
+  const plan = buildSystemWideMergePlan(items, bomRefCounts, others);
+  // 예상 리포인트 행 수 = 삭제될 Item들의 BomItem 참조 합계(실행 후 실제 값과 대조한다)
+  const expectedBomRepoints = plan.pairs.reduce((a, p) => a + (bomRefCounts.get(p.duplicateId) ?? 0), 0);
+  return { ...plan, expectedBomRepoints };
+}
