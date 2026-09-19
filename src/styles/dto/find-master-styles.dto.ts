@@ -23,4 +23,11 @@ export class FindMasterStylesDto {
   @IsOptional()
   @IsString()
   itemType?: string;
+
+  // PR-111: 스타일번호 접두사로 분류한 브랜드(BrandPrefixRule) 정확히 일치 필터.
+  // DB 컬럼이 아니라 조회 시점에 계산되는 값이라 서비스에서 in-memory로 필터링한다.
+  @ApiPropertyOptional({ description: '브랜드(스타일번호 접두사로 분류) 정확히 일치', example: '빈폴' })
+  @IsOptional()
+  @IsString()
+  brand?: string;
 }

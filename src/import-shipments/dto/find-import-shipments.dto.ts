@@ -20,4 +20,10 @@ export class FindImportShipmentsDto {
   @IsOptional()
   @IsString()
   sheetNo?: string;
+
+  // PR-111: 스타일번호 접두사로 분류한 브랜드(BrandPrefixRule) 정확히 일치 필터.
+  @ApiPropertyOptional({ description: '브랜드(스타일번호 접두사로 분류) 정확히 일치', example: '빈폴' })
+  @IsOptional()
+  @IsString()
+  brand?: string;
 }

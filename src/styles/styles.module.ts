@@ -18,6 +18,7 @@ import { OrderShipmentsService } from './order-shipments.service';
 import { OrderShipmentsController } from './order-shipments.controller';
 import { OrderProgressSummaryService } from './order-progress-summary.service';
 import { OrderProgressSummaryController } from './order-progress-summary.controller';
+import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules.module';
 
 @Module({
   imports: [
@@ -31,6 +32,8 @@ import { OrderProgressSummaryController } from './order-progress-summary.control
       PurchaseOrder,
       ExportShipmentLine,
     ]),
+    // PR-111: 스타일번호 접두사로 브랜드를 분류하기 위해 규칙 목록이 필요하다.
+    BrandPrefixRulesModule,
   ],
   controllers: [
     StylesController,

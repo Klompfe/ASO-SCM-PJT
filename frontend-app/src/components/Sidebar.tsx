@@ -13,7 +13,8 @@ export type TabId =
   | 'exportShipmentDefaults'
   | 'hsCodeClassifications'
   | 'cashVouchers'
-  | 'inventories';
+  | 'inventories'
+  | 'brands';
 
 interface NavItem {
   id: TabId;
@@ -72,6 +73,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'suppliers', label: '공급업체' },
       { id: 'items', label: '품목' },
       { id: 'buyers', label: '고객사' },
+      // PR-111: 스타일번호 접두사 → 브랜드 매핑 마스터.
+      { id: 'brands', label: '브랜드 관리' },
       { id: 'exportShipmentDefaults', label: '선적서류 기본정보', adminOnly: true },
       { id: 'users', label: '사용자 관리', adminOnly: true },
     ],
@@ -193,6 +196,12 @@ const ICONS: Record<TabId, React.ReactNode> = {
       <path d="M3 7l9-4 9 4-9 4-9-4z" />
       <path d="M3 7v10l9 4 9-4V7" />
       <path d="M12 11v10" />
+    </svg>
+  ),
+  brands: (
+    <svg {...ICON_PROPS}>
+      <path d="M20.6 11.1 12.9 3.4A2 2 0 0 0 11.5 3H4.5A1.5 1.5 0 0 0 3 4.5v7c0 .5.2 1 .6 1.4l7.7 7.7a2 2 0 0 0 2.8 0l6.5-6.5a2 2 0 0 0 0-2.8z" />
+      <circle cx="8" cy="8" r="1.4" />
     </svg>
   ),
 };

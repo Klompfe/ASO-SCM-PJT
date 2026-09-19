@@ -9,6 +9,12 @@ import { OrderShipment } from './entities/order-shipment.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
 import { CreateMasterStyleDto } from './dto/create-master-style.dto';
+import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
+import { classifyBrand } from '../common/utils/brand-classifier.util';
+
+export interface MasterStyleWithBrand extends MasterStyle {
+  brand: string | null;
+}
 
 @Injectable()
 export class StylesService {
@@ -18,9 +24,10 @@ export class StylesService {
     @InjectRepository(StyleOverview)
     private readonly overviewRepository: Repository<StyleOverview>,
     private readonly dataSource: DataSource,
+    private readonly brandPrefixRulesService: BrandPrefixRulesService,
   ) {}
 
-  async findAll(filter?: { styleNo?: string; targetRddFrom?: string; targetRddTo?: string; itemType?: string }): Promise<MasterStyle[]> {
+  async findAll(filter?: { styleNo?: string; targetRddFrom?: string; targetRddTo?: string; itemType?: string; brand?: string }): Promise<MasterStyleWithBrand[]> {
     const qb = this.masterStyleRepository
       .createQueryBuilder('style')
       .leftJoinAndSelect('style.overview', 'overview');
@@ -39,7 +46,19 @@ export class StylesService {
       qb.andWhere('overview.itemType = :itemType', { itemType: filter.itemType });
     }
 
-    return qb.getMany();
+    const styles = await qb.getMany();
+
+    // PR-111: 브랜드는 스타일번호 접두사로 조회 시점에 계산되는 값이라 DB 컬럼이
+    // 아니다 — SQL WHERE로 거를 수 없어 규칙을 불러와 메모리에서 계산/필터한다.
+    const rules = await this.brandPrefixRulesService.findAll();
+    const decorated = styles.map((style) =>
+      Object.assign(style, { brand: classifyBrand(style.styleNo, rules) }),
+    );
+
+    if (filter?.brand) {
+      return decorated.filter((s) => s.brand === filter.brand);
+    }
+    return decorated;
   }
 
   async create(dto: CreateMasterStyleDto): Promise<MasterStyle> {

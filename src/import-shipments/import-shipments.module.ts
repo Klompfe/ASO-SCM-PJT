@@ -10,6 +10,7 @@ import { ImportShipmentsController } from './import-shipments.controller';
 import { ImportShipmentPackingDetailsService } from './import-shipment-packing-details.service';
 import { ImportShipmentPackingDetailsController } from './import-shipment-packing-details.controller';
 import { HsCodeClassificationsModule } from '../hs-code-classifications/hs-code-classifications.module';
+import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { HsCodeClassificationsModule } from '../hs-code-classifications/hs-code-
       GoodsReceiptLine,
     ]),
     HsCodeClassificationsModule,
+    BrandPrefixRulesModule,
   ],
   controllers: [ImportShipmentsController, ImportShipmentPackingDetailsController],
   providers: [ImportShipmentsService, ImportShipmentPackingDetailsService],

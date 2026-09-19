@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getMasterStyles, createMasterStyle, type MasterStyle, type CreateMasterStyle, type FindMasterStylesFilter } from '../api/styles.service';
+import { getBrandPrefixRules } from '../api/brandPrefixRules.service';
 import { getSeasonDateRange, YEAR_OPTIONS, type Season } from '../utils/season';
 import {
   issueContract, getContractsByStyleNo, approveContract, rejectContract, deleteContract,
@@ -101,6 +102,10 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
   const [filterYear, setFilterYear] = useState<number | ''>('');
   const [filterSeason, setFilterSeason] = useState<Season | ''>('');
   const [availableItemTypes, setAvailableItemTypes] = useState<string[]>([]);
+  // PR-111: 브랜드(스타일번호 접두사로 분류) 드롭다운 필터 — 브랜드 마스터에
+  // 등록된 brandName distinct 값으로 동적 구성(하드코딩 안 함).
+  const [filterBrand, setFilterBrand] = useState('');
+  const [availableBrands, setAvailableBrands] = useState<string[]>([]);
 
   const loadStyles = useCallback(async (filter?: FindMasterStylesFilter) => {
     try {
@@ -127,11 +132,22 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
       .catch(() => setAvailableItemTypes([]));
   }, []);
 
+  useEffect(() => {
+    getBrandPrefixRules()
+      .then((res) => {
+        const rules = Array.isArray(res) ? res : [];
+        const names = Array.from(new Set(rules.map((r: any) => r.brandName).filter(Boolean)));
+        setAvailableBrands(names.sort());
+      })
+      .catch(() => setAvailableBrands([]));
+  }, []);
+
   const buildFilter = (): FindMasterStylesFilter => ({
     styleNo: filterStyleNo || undefined,
     itemType: filterItemType || undefined,
     targetRddFrom: filterRddFrom || undefined,
     targetRddTo: filterRddTo || undefined,
+    brand: filterBrand || undefined,
   });
 
   const handleFilterSubmit = (e: React.FormEvent) => {
@@ -146,6 +162,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
     setFilterRddTo('');
     setFilterYear('');
     setFilterSeason('');
+    setFilterBrand('');
     loadStyles();
   };
 
@@ -495,6 +512,19 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
             <option value="FW">FW (7~12월)</option>
           </select>
         </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">브랜드</label>
+          <select
+            className="border border-gray-300 rounded px-3 py-2"
+            value={filterBrand}
+            onChange={(e) => setFilterBrand(e.target.value)}
+          >
+            <option value="">전체</option>
+            {availableBrands.map((b) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
+        </div>
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">검색</button>
         <button type="button" onClick={handleResetFilters} className="bg-gray-200 text-gray-700 px-4 py-2 rounded font-medium hover:bg-gray-300">필터 초기화</button>
       </form>
@@ -515,7 +545,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
             return (
               <tr key={s.styleNo} onClick={() => handleSelectStyle(s)} className="cursor-pointer hover:bg-gray-50">
                 <td>{s.styleNo}</td>
-                <td>{s.overview?.brand ?? '-'}</td>
+                <td>{s.brand ?? '-'}</td>
                 <td>{s.overview?.productionType ?? '-'}</td>
                 <td>{s.overview?.factory ?? '-'}</td>
                 <td>{s.overview?.buyer ?? '-'}</td>
