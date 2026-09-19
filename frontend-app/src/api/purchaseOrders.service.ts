@@ -25,6 +25,8 @@ export interface GetPurchaseOrdersFilter {
   supplierId?: number;
   itemId?: number;
   status?: 'PENDING' | 'RECEIVED' | 'CANCELLED';
+  startDate?: string;
+  endDate?: string;
 }
 
 export const getPurchaseOrders = (filter?: GetPurchaseOrdersFilter): Promise<any> =>

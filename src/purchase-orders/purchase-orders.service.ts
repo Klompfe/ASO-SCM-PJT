@@ -66,7 +66,15 @@ export class PurchaseOrdersService {
       qb.andWhere('po.createdAt >= :startDate', { startDate: filter.startDate });
     }
     if (filter?.endDate) {
-      qb.andWhere('po.createdAt <= :endDate', { endDate: filter.endDate });
+      // PR-116: 날짜만(YYYY-MM-DD) 들어오면 그날 하루 전체를 포함해야 한다 — createdAt은 시각이
+      // 있는 값이라 `<= 'YYYY-MM-DD'`(=자정)로 비교하면 종료일 당일 발주가 전부 빠진다.
+      if (/^\d{4}-\d{2}-\d{2}$/.test(filter.endDate)) {
+        const next = new Date(`${filter.endDate}T00:00:00Z`);
+        next.setUTCDate(next.getUTCDate() + 1);
+        qb.andWhere('po.createdAt < :endExclusive', { endExclusive: next.toISOString().slice(0, 10) });
+      } else {
+        qb.andWhere('po.createdAt <= :endDate', { endDate: filter.endDate });
+      }
     }
 
     return qb.getMany();
