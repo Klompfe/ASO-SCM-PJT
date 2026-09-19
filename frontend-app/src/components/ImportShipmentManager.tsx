@@ -13,6 +13,9 @@ import { getMasterStyles, type MasterStyle } from '../api/styles.service';
 import { getBrandPrefixRules } from '../api/brandPrefixRules.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { GoodsReceiptPanel } from './GoodsReceiptPanel';
+import { PrintableReport } from './PrintableReport';
+import { ImportShipmentReportTable } from './ImportShipmentReportTable';
+import { describeImportFilters, importShipmentColumns, summarizeShipments } from '../utils/importShipmentReport';
 
 const emptyLine: CreateImportShipmentLine = {
   itemType: '',
@@ -22,6 +25,28 @@ const emptyLine: CreateImportShipmentLine = {
   unit: 'EA',
 };
 
+const fmtNum = (n: number) => n.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+
+// PR-114: 상태별 집계 요약 카드(통관대기/통관완료 건수·수량, 금액 합계).
+const ImportSummaryCards: React.FC<{ shipments: ImportShipment[] }> = ({ shipments }) => {
+  const sum = summarizeShipments(shipments);
+  const card = (label: string, value: string, sub: string, color: string) => (
+    <div className="border border-gray-200 rounded-lg p-3 text-center bg-white">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
+      <p className="text-xs text-gray-400 mt-1">{sub}</p>
+    </div>
+  );
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2">
+      {card("전체", `${sum.total}건`, `금액 ${fmtNum(sum.totalAmount)}`, "text-gray-900")}
+      {card("통관대기", `${sum.pending}건`, `수량 ${fmtNum(sum.pendingQty)} · 금액 ${fmtNum(sum.pendingAmount)}`, "text-yellow-600")}
+      {card("통관완료", `${sum.cleared}건`, `수량 ${fmtNum(sum.clearedQty)} · 금액 ${fmtNum(sum.clearedAmount)}`, "text-green-600")}
+      {card("수량 합계", fmtNum(sum.pendingQty + sum.clearedQty), "통관대기+통관완료", "text-blue-600")}
+    </div>
+  );
+};
+
 // PR-082: 완제품 수입통관 추적 화면. 옛 "선적관리 > 수입" 탭에 임시로 얹혀 있던
 // ShipmentsManager(원자재 입고)는 Purchase Orders 쪽으로 옮겼고, 이 화면이 그
 // 자리를 대체한다. 범위는 HS코드 자동조회/기록까지만 — 원부자재단가/선적일
@@ -29,6 +54,8 @@ const emptyLine: CreateImportShipmentLine = {
 export const ImportShipmentManager: React.FC = () => {
   const [shipments, setShipments] = useState<ImportShipment[]>([]);
   const [loading, setLoading] = useState(false);
+  // PR-114: 보고서 부제에 쓰는 "실제로 적용된" 검색조건(입력창 값이 아니라 마지막으로 조회한 조건).
+  const [appliedFilter, setAppliedFilter] = useState<Record<string, string | undefined>>({});
 
   // PR-102: 목록 검색 — 스타일번호/자재명(품목)/선적건번호, 모두 조합 가능. 아래
   // styleQuery(등록 폼에서 스타일 고르는 용도)와는 완전히 별개다 — 혼동을 피하려고
@@ -61,6 +88,7 @@ export const ImportShipmentManager: React.FC = () => {
   const load = useCallback(async (filter?: { styleNo?: string; materialName?: string; sheetNo?: string; brand?: string }) => {
     setLoading(true);
     try {
+      setAppliedFilter(filter ?? {});
       const res = await getImportShipments(filter);
       setShipments(Array.isArray(res) ? res : []);
     } catch (err: any) {
@@ -396,7 +424,16 @@ export const ImportShipmentManager: React.FC = () => {
       {loading ? (
         <div className="text-sm text-gray-500">불러오는 중...</div>
       ) : (
-        <div className="space-y-4">
+        <PrintableReport
+          title="수입/통관 현황표"
+          subtitle={describeImportFilters(appliedFilter)}
+          columns={importShipmentColumns}
+          rows={shipments}
+          fileName="수입_통관_현황표"
+        >
+        <ImportSummaryCards shipments={shipments} />
+        <div className="hidden print:block"><ImportShipmentReportTable shipments={shipments} /></div>
+        <div className="space-y-4 print:hidden mt-4">
           {shipments.map((s) => (
             <div key={s.id} className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -477,6 +514,7 @@ export const ImportShipmentManager: React.FC = () => {
             <div className="text-center text-gray-400 py-8">등록된 수입통관 문서가 없습니다.</div>
           )}
         </div>
+        </PrintableReport>
       )}
     </div>
   );
