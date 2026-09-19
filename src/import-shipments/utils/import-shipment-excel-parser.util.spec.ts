@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as xlsx from 'xlsx';
 import { BadRequestException } from '@nestjs/common';
 import { ImportShipmentExcelParser } from './import-shipment-excel-parser.util';
@@ -39,7 +41,9 @@ const PK_HEADER = row({
   5: 'Volume\r\n(Cbm)',
 });
 
-function buildIvFobRows(styles: StyleFixture[]): Array<Array<string | number>> {
+type PreambleMutator = (preamble: Array<Array<string | number>>) => void;
+
+function buildIvFobRows(styles: StyleFixture[], mutate?: PreambleMutator): Array<Array<string | number>> {
   const preamble: Array<Array<string | number>> = [];
   for (let i = 0; i < 19; i++) preamble.push(row({}));
   preamble[1] = row({ 4: 'Invoice No.', 5: 'TYVN2026-34-TEST' });
@@ -48,8 +52,9 @@ function buildIvFobRows(styles: StyleFixture[]): Array<Array<string | number>> {
   preamble[13] = row({ 0: 'HAIPHONG, VIETNAM', 2: 'INCHEON , KOREA' });
   preamble[14] = row({ 0: 'Carrier' });
   preamble[15] = row({ 0: 'BY SEA' });
-  preamble[16] = row({ 2: 'Departure date' });
-  preamble[17] = row({ 2: '13/09/2026' });
+  preamble[16] = row({ 0: 'Vessel', 2: 'Departure date' });
+  preamble[17] = row({ 0: 'STARSHIP TAURUS 2613N', 2: '13/09/2026' });
+  mutate?.(preamble);
 
   const dataRows = styles.map((s) =>
     row({ 0: s.description, 1: s.styleNo, 2: s.qty, 3: 'PCS', 4: s.unitPrice, 5: s.amount, 6: s.hsCode }),
@@ -83,10 +88,11 @@ function buildPkRows(styles: StyleFixture[]): Array<Array<string | number>> {
 function buildWorkbook(
   ivStyles: StyleFixture[] | null,
   pkStyles: StyleFixture[] | null,
+  mutateIvPreamble?: PreambleMutator,
 ): Buffer {
   const wb = xlsx.utils.book_new();
   if (ivStyles) {
-    xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(buildIvFobRows(ivStyles)), 'IV FOB');
+    xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(buildIvFobRows(ivStyles, mutateIvPreamble)), 'IV FOB');
   }
   if (pkStyles) {
     xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(buildPkRows(pkStyles)), 'PK');
@@ -146,6 +152,7 @@ describe('ImportShipmentExcelParser', () => {
       finalDestination: 'INCHEON , KOREA',
       carrier: 'BY SEA',
       sailingDate: new Date(Date.UTC(2026, 8, 13)),
+      vessel: 'STARSHIP TAURUS 2613N',
     });
   });
 
@@ -205,5 +212,92 @@ describe('ImportShipmentExcelParser', () => {
   it('둘 다 없으면 400 에러를 던진다', () => {
     const buffer = buildWorkbook(null, null);
     expect(() => ImportShipmentExcelParser.parse(buffer)).toThrow(BadRequestException);
+  });
+
+  // PR-124: 선적항(POL)/최종 도착항(POD)/출항일(ETD)/선명은 라벨 "바로 아래" 칸에 값이 있다.
+  describe('선적 정보(POL/POD/ETD/선명) — 라벨 바로 아래 칸', () => {
+    it('실제 파일 TYVN2026-21/22/27의 헤더 값과 정확히 일치한다', () => {
+      const DOCS = path.resolve(__dirname, '../../../docs');
+      const expected: Record<string, [string, string, string, string, string, string]> = {
+        'TYVN2026-21(검토완료).xlsx': ['TYVN2026-21', 'HAIPHONG, VIETNAM', 'INCHEON , KOREA', '2026-07-19', 'STARSHIP TAURUS 2613N', 'BY SEA'],
+        'TYVN2026-22 검토완료.xlsx': ['TYVN2026-22', 'HANOI, VIETNAM', 'INCHEON , KOREA', '2026-07-15', 'KJ374', 'BY AIR'],
+        'TYVN2026-27(검토완료).xlsx': ['TYVN2026-27', 'HANOI, VIETNAM', 'INCHEON , KOREA', '2026-08-06', 'WE272', 'BY AIR'],
+      };
+      for (const [file, [invoiceNo, pol, pod, etd, vessel, carrier]] of Object.entries(expected)) {
+        const { header } = ImportShipmentExcelParser.parse(fs.readFileSync(path.join(DOCS, file)));
+        expect(header.invoiceNo).toBe(invoiceNo);
+        expect(header.portOfLoading).toBe(pol);
+        expect(header.finalDestination).toBe(pod);
+        expect(header.sailingDate?.toISOString().slice(0, 10)).toBe(etd);
+        expect(header.vessel).toBe(vessel);
+        expect(header.carrier).toBe(carrier);
+      }
+    });
+
+    it('ETA(도착예정일)는 어떤 경우에도 파싱 결과에 자동으로 들어오지 않는다(이 문서에는 ETA 라벨이 없다)', () => {
+      const { header } = ImportShipmentExcelParser.parse(buildWorkbook([STYLE_A], [STYLE_A]));
+      expect(header).not.toHaveProperty('eta');
+      // 문서에 "ETA"/"Arrival" 라벨과 날짜가 있어도 파서는 읽지 않는다(자동 캡처 대상이 아님)
+      const withEta = buildWorkbook([STYLE_A], [STYLE_A], (p) => {
+        p[10] = row({ 6: 'ETA' });
+        p[11] = row({ 6: '24/09/2026' });
+      });
+      const parsed = ImportShipmentExcelParser.parse(withEta).header;
+      expect(parsed).not.toHaveProperty('eta');
+      expect(Object.values(parsed).some((v) => v instanceof Date && v.toISOString().slice(0, 10) === '2026-09-24')).toBe(false);
+    });
+
+    it('라벨이 없으면 해당 값은 null이고 나머지 헤더/라인은 정상(에러 아님)', () => {
+      const { header, lines } = ImportShipmentExcelParser.parse(
+        buildWorkbook([STYLE_A], [STYLE_A], (p) => {
+          p[12] = row({ 0: 'Port of Loading' }); // Final Destination 라벨 삭제
+          p[13] = row({ 0: 'HAIPHONG, VIETNAM' });
+          p[16] = row({}); // Vessel/Departure date 라벨 삭제
+          p[17] = row({ 0: 'STARSHIP TAURUS 2613N', 2: '13/09/2026' }); // 값만 남고 라벨이 없다
+        }),
+      );
+      expect(header.portOfLoading).toBe('HAIPHONG, VIETNAM');
+      expect(header.finalDestination).toBeNull();
+      expect(header.sailingDate).toBeNull();
+      expect(header.vessel).toBeNull();
+      expect(lines).toHaveLength(1);
+    });
+
+    it('라벨 바로 아래 칸이 비어 있으면 null(오른쪽 칸 등 다른 곳을 억지로 읽지 않는다)', () => {
+      const { header } = ImportShipmentExcelParser.parse(
+        buildWorkbook([STYLE_A], [STYLE_A], (p) => {
+          p[12] = row({ 0: 'Port of Loading', 1: 'WRONG-RIGHT-CELL', 2: 'Final Destination' });
+          p[13] = row({}); // 아래 칸이 비어 있다
+        }),
+      );
+      expect(header.portOfLoading).toBeNull();
+      expect(header.finalDestination).toBeNull();
+    });
+
+    it('레이아웃이 달라도(라벨 행/열 위치가 다름) 고정 좌표가 아니라 라벨 텍스트로 찾는다', () => {
+      const { header } = ImportShipmentExcelParser.parse(
+        buildWorkbook([STYLE_A], [STYLE_A], (p) => {
+          for (const r of [12, 13, 14, 15, 16, 17]) p[r] = row({}); // 기존 위치 비우기
+          p[5] = row({ 7: 'PORT OF LOADING', 8: 'Final  Destination' }); // 대소문자/공백이 달라도 정규화 일치
+          p[6] = row({ 7: 'BUSAN, KOREA', 8: 'HAIPHONG , VIETNAM' });
+          p[8] = row({ 3: 'Vessel', 8: 'DEPARTURE DATE' });
+          p[9] = row({ 3: 'KJ999', 8: '01/10/2026' });
+        }),
+      );
+      expect(header.portOfLoading).toBe('BUSAN, KOREA');
+      expect(header.finalDestination).toBe('HAIPHONG , VIETNAM');
+      expect(header.vessel).toBe('KJ999');
+      expect(header.sailingDate?.toISOString().slice(0, 10)).toBe('2026-10-01');
+    });
+
+    it('출항일이 엑셀 날짜 시리얼 숫자여도 읽는다', () => {
+      const serial = Math.round(Date.UTC(2026, 9, 5) / 86400000 + 25569); // 2026-10-05
+      const { header } = ImportShipmentExcelParser.parse(
+        buildWorkbook([STYLE_A], [STYLE_A], (p) => {
+          p[17] = row({ 0: 'STARSHIP TAURUS 2613N', 2: serial });
+        }),
+      );
+      expect(header.sailingDate?.toISOString().slice(0, 10)).toBe('2026-10-05');
+    });
   });
 });

@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Put,
   Query,
@@ -19,6 +20,7 @@ import { CreateImportShipmentDto } from './dto/create-import-shipment.dto';
 import { UpdateImportShipmentStatusDto } from './dto/update-import-shipment-status.dto';
 import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.dto';
 import { FindImportShipmentsDto } from './dto/find-import-shipments.dto';
+import { UpdateImportShipmentHeaderDto } from './dto/update-import-shipment-header.dto';
 
 // PR-082: 완제품 수입통관 추적(HS코드 자동조회/기록까지만 — 원부자재단가/선적일
 // 계산은 이 저장소 밖의 수입통관 이메일 에이전트가 담당). export-shipments처럼
@@ -57,6 +59,12 @@ export class ImportShipmentsController {
   @ApiOperation({ summary: '수입통관 문서 상세 조회 (라인 포함)' })
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.importShipmentsService.findOneOrFail(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: '선적 일정/경로(POL/POD/ETD/ETA/선명) 수정 — 보내지 않은 필드는 유지, null은 지움' })
+  updateHeader(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateImportShipmentHeaderDto) {
+    return this.importShipmentsService.updateHeader(id, dto);
   }
 
   @Put(':id/status')
