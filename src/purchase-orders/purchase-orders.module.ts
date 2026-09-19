@@ -10,6 +10,7 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PackingReceiptsService } from './packing-receipts.service';
 import { PackingReceiptsController } from './packing-receipts.controller';
+import { PackingReceiptsReportController } from './packing-receipts-report.controller';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
@@ -18,7 +19,7 @@ import { AuthModule } from '../auth/auth.module';
     PassportModule.register({ defaultStrategy: 'jwt' }),
     AuthModule,
   ],
-  controllers: [PurchaseOrdersController, PackingReceiptsController],
+  controllers: [PurchaseOrdersController, PackingReceiptsController, PackingReceiptsReportController],
   providers: [PurchaseOrdersService, PackingReceiptsService],
 })
 export class PurchaseOrdersModule {}

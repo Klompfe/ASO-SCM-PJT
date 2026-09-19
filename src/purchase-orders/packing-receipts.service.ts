@@ -1,16 +1,25 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Between, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity';
 import { PackingReceipt, PackingMaterialCategory } from './entities/packing-receipt.entity';
 import { PackingReceiptRoll } from './entities/packing-receipt-roll.entity';
 import { PackingReceiptCarton } from './entities/packing-receipt-carton.entity';
 import { CreatePackingReceiptDto } from './dto/create-packing-receipt.dto';
 import { UploadPackingReceiptDto } from './dto/upload-packing-receipt.dto';
+import { FindPackingReceiptsDto } from './dto/find-packing-receipts.dto';
 import { PackingReceiptExcelParser } from './utils/packing-receipt-excel-parser.util';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
   arr.reduce((total, item) => total + (Number(item[key]) || 0), 0);
+
+// receivedDate(date 컬럼)를 문자열 그대로 비교해 sqlite/postgres 결과를 맞춘다(cash-vouchers와 동일).
+function buildDateWhere(from?: string, to?: string) {
+  if (from && to) return Between(from as any, to as any);
+  if (from) return MoreThanOrEqual(from as any);
+  if (to) return LessThanOrEqual(to as any);
+  return undefined;
+}
 
 @Injectable()
 export class PackingReceiptsService {
@@ -119,6 +128,20 @@ export class PackingReceiptsService {
       order: { id: 'DESC', rolls: { id: 'ASC' }, cartons: { id: 'ASC' } } as any,
     });
     return receipts.map((r) => this.attachTotals(r));
+  }
+
+  // PR-118: 집계 보고서용 — 부자재(TRIM, 카톤 단위) 포장내역만. 입고일이 없는 건(null)은 기간 필터를
+  // 걸면 자연스럽게 빠지고, 필터가 없으면 포함된다. 어느 발주/공급업체/품목인지 함께 내려준다.
+  async findAllForReport(filter: FindPackingReceiptsDto = {}): Promise<PackingReceipt[]> {
+    const dateWhere = buildDateWhere(filter.from, filter.to);
+    return this.receiptRepository.find({
+      where: {
+        materialCategory: PackingMaterialCategory.TRIM,
+        ...(dateWhere ? { receivedDate: dateWhere } : {}),
+      },
+      relations: { cartons: true, purchaseOrder: { supplier: true, item: true } },
+      order: { receivedDate: 'DESC', id: 'DESC', cartons: { id: 'ASC' } } as any,
+    });
   }
 
   private async findOneWithTotals(id: number): Promise<any> {
