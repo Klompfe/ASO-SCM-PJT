@@ -66,6 +66,7 @@ export interface ExportPerformanceShipment {
   invoiceDate: string | null;
   styleNos: string[];
   brands: string[];
+  buyers: string[];
   lineCount: number;
   qtyByUnit: Record<string, number>;
   amount: number;
@@ -80,9 +81,18 @@ export interface ExportPerformanceBrand {
   amount: number;
 }
 
+export interface ExportPerformanceBuyer {
+  buyer: string;
+  shipmentCount: number;
+  lineCount: number;
+  qtyByUnit: Record<string, number>;
+  amount: number;
+}
+
 export interface ExportPerformance {
   totals: { shipmentCount: number; lineCount: number; qtyByUnit: Record<string, number>; amount: number; linesWithoutAmount: number };
   byBrand: ExportPerformanceBrand[];
+  byBuyer: ExportPerformanceBuyer[];
   shipments: ExportPerformanceShipment[];
   excludedNotFinalized: number;
 }

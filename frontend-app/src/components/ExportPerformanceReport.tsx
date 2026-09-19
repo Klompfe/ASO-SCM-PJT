@@ -110,6 +110,33 @@ export const ExportPerformanceReport: React.FC = () => {
             </tbody>
           </table>
 
+          <h4 className="text-sm font-semibold text-gray-700 mb-1">
+            거래처별 소계 <span className="font-normal text-xs text-gray-400">(스타일의 거래처(StyleOverview.buyer)로 라인 단위 분류 · 거래처 정보가 없으면 미분류)</span>
+          </h4>
+          <table className="w-full text-sm border-collapse mb-4" data-testid="perf-buyer-table">
+            <thead>
+              <tr>
+                <th className={th}>거래처</th>
+                <th className={`${th} text-right`}>수출 건수</th>
+                <th className={`${th} text-right`}>라인 수</th>
+                <th className={`${th} text-right`}>수량</th>
+                <th className={`${th} text-right`}>금액</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.byBuyer.length === 0 && <tr><td className={`${td} text-gray-400`} colSpan={5}>집계할 확정 문서가 없습니다.</td></tr>}
+              {data.byBuyer.map((b) => (
+                <tr key={b.buyer}>
+                  <td className={td}>{b.buyer}</td>
+                  <td className={`${td} text-right`}>{b.shipmentCount}건</td>
+                  <td className={`${td} text-right`}>{b.lineCount}</td>
+                  <td className={`${td} text-right`}>{formatQtyByUnit(b.qtyByUnit)}</td>
+                  <td className={`${td} text-right`}>{fmt(b.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
           <h4 className="text-sm font-semibold text-gray-700 mb-1">확정 문서 목록 ({shipments.length}건)</h4>
           <table className="w-full text-sm border-collapse" data-testid="perf-list">
             <thead>
@@ -118,18 +145,20 @@ export const ExportPerformanceReport: React.FC = () => {
                 <th className={th}>문서번호</th>
                 <th className={th}>스타일번호</th>
                 <th className={th}>브랜드</th>
+                <th className={th}>거래처</th>
                 <th className={`${th} text-right`}>수량</th>
                 <th className={`${th} text-right`}>금액</th>
               </tr>
             </thead>
             <tbody>
-              {shipments.length === 0 && <tr><td className={`${td} text-gray-400`} colSpan={6}>조건에 맞는 확정 문서가 없습니다.</td></tr>}
+              {shipments.length === 0 && <tr><td className={`${td} text-gray-400`} colSpan={7}>조건에 맞는 확정 문서가 없습니다.</td></tr>}
               {shipments.map((s) => (
                 <tr key={s.id} className="break-inside-avoid">
                   <td className={td}>{s.invoiceDate ?? '-'}</td>
                   <td className={td}>{s.sheetNo ?? '-'}</td>
                   <td className={td}>{s.styleNos.join(', ') || '-'}</td>
                   <td className={td}>{s.brands.join(', ') || '-'}</td>
+                  <td className={td}>{s.buyers.join(', ') || '-'}</td>
                   <td className={`${td} text-right`}>{formatQtyByUnit(s.qtyByUnit)}</td>
                   <td className={`${td} text-right`}>
                     {fmt(s.amount)}

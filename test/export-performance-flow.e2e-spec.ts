@@ -53,6 +53,15 @@ describe('수출 실적표 조회 (PR-119)', () => {
     await auth(request(app.getHttpServer()).post('/brand-prefix-rules')).send({ prefix: 'BF', brandName: '빈폴' }).expect(201);
     await auth(request(app.getHttpServer()).post('/brand-prefix-rules')).send({ prefix: 'LB', brandName: '라베' }).expect(201);
 
+    // PR-121: 거래처는 StyleOverview.buyer. BF1/BF2는 A무역, LB1은 B상사, ZZ9는 스타일 자체가 없다(미분류).
+    const mkStyle = (styleNo: string, buyer: string) =>
+      auth(request(app.getHttpServer()).post('/master-styles'))
+        .send({ styleNo, factory: '베트남', buyer, totalQty: 100, brand: 'x', itemType: 'JK', productionType: 'FOB', targetRdd: '2026-12-01' })
+        .expect(201);
+    await mkStyle('BF1', 'A무역');
+    await mkStyle('BF2', 'A무역');
+    await mkStyle('LB1', 'B상사');
+
     await seed('FINALIZED', '2031-09-10', 'P-A', [['BF1', 100, 'YD', 1000], ['LB1', 10, 'EA', 30]]);
     await seed('FINALIZED', '2031-09-30', 'P-B', [['BF2', 20, 'EA', null], ['ZZ9', 5, 'EA', 15]]);
     await seed('FINALIZED', '2031-10-05', 'P-C', [['BF3', 999, 'YD', 9999]]);
@@ -88,6 +97,17 @@ describe('수출 실적표 조회 (PR-119)', () => {
       { brand: '미분류', shipmentCount: 1, lineCount: 1, qtyByUnit: { EA: 5 }, amount: 15 },
     ]);
     expect(r.shipments[0].brands).toEqual(['라베', '빈폴']);
+  });
+
+  it('거래처별 소계: 라인 단위로 StyleOverview.buyer를 매기고, 오버뷰가 없는 스타일은 미분류 (PR-121)', async () => {
+    const r = await perf('?from=2031-09-01&to=2031-09-30');
+    expect(r.byBuyer).toEqual([
+      { buyer: 'A무역', shipmentCount: 2, lineCount: 2, qtyByUnit: { YD: 100, EA: 20 }, amount: 1000 },
+      { buyer: 'B상사', shipmentCount: 1, lineCount: 1, qtyByUnit: { EA: 10 }, amount: 30 },
+      { buyer: '미분류', shipmentCount: 1, lineCount: 1, qtyByUnit: { EA: 5 }, amount: 15 },
+    ]);
+    expect(r.byBuyer.reduce((a: number, b: any) => a + b.amount, 0)).toBe(r.totals.amount);
+    expect(r.shipments[0].buyers).toEqual(['A무역', 'B상사']);
   });
 
   it('/export-shipments/performance가 :id 라우트로 해석되지 않는다(기존 :id 조회는 그대로)', async () => {

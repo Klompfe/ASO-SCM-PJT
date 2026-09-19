@@ -25,6 +25,7 @@ export const performanceColumns: ExcelColumn<ExportPerformanceShipment>[] = [
   { header: '문서번호', accessor: (s) => s.sheetNo ?? '' },
   { header: '스타일번호', accessor: (s) => s.styleNos.join(', ') },
   { header: '브랜드', accessor: (s) => s.brands.join(', ') },
+  { header: '거래처', accessor: (s) => s.buyers.join(', ') },
   { header: '수량', accessor: (s) => formatQtyByUnit(s.qtyByUnit) },
   { header: '금액', accessor: (s) => s.amount },
   { header: '단가 미정 라인 수', accessor: (s) => s.linesWithoutAmount },
