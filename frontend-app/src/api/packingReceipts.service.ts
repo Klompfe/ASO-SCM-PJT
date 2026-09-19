@@ -90,3 +90,7 @@ export const uploadPackingReceipt = (
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 };
+
+// PR-118: 집계 보고서용 — 발주를 가로질러 부자재(카톤) 포장내역 전체(입고일 기간 필터).
+export const getPackingReceiptsReport = (params?: { from?: string; to?: string }): Promise<any> =>
+  apiClient.get('/packing-receipts', { params });

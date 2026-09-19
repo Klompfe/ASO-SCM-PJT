@@ -11,6 +11,7 @@ import { UsersManager } from './components/UsersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
 import { ProductionContractsManager } from './components/ProductionContractsManager';
 import { PurchaseOrderLedgerReport } from './components/PurchaseOrderLedgerReport';
+import { PackingReceiptSummaryReport } from './components/PackingReceiptSummaryReport';
 import { CashVouchersManager } from './components/CashVouchersManager';
 import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
@@ -83,7 +84,7 @@ function App() {
   // ShipmentsManager, PurchaseOrder와 연결된 별개 개념)는 PR-082에서 "Purchase
   // Orders > 입고관리" 서브탭으로 옮겼다. 기본값은 현재 개발 중인 "수출".
   const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import'>('export');
-  const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger'>('list');
+  const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing'>('list');
 
   const handleOrderItem = (itemId: number) => {
     setPoPrefillItemId(itemId);
@@ -199,11 +200,17 @@ function App() {
                 className={`px-3 py-2 text-sm font-medium ${purchaseOrdersSubTab === 'ledger' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                 onClick={() => setPurchaseOrdersSubTab('ledger')}
               >발주 현황표(원장)</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${purchaseOrdersSubTab === 'packing' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setPurchaseOrdersSubTab('packing')}
+              >포장내역 집계</button>
             </div>
             {purchaseOrdersSubTab === 'list' ? (
               <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />
             ) : purchaseOrdersSubTab === 'ledger' ? (
               <PurchaseOrderLedgerReport />
+            ) : purchaseOrdersSubTab === 'packing' ? (
+              <PackingReceiptSummaryReport />
             ) : (
               <ProductionContractsManager />
             )}
