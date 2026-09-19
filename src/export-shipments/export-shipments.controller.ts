@@ -17,6 +17,7 @@ import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiQuery, ApiTags } from '@ne
 import { ExportShipmentsService } from './export-shipments.service';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
 import { FindExportShipmentsDto } from './dto/find-export-shipments.dto';
+import { FindExportPerformanceDto } from './dto/find-export-performance.dto';
 import { UpdateExportShipmentStatusDto } from './dto/update-export-shipment-status.dto';
 import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.dto';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -63,6 +64,13 @@ export class ExportShipmentsController {
   @ApiOperation({ summary: '수출선적서류 목록 조회 (스타일번호/자재명/선적건번호 검색)' })
   findAll(@Query() query: FindExportShipmentsDto) {
     return this.exportShipmentsService.findAll(query);
+  }
+
+  // 고정 경로라 ':id'보다 먼저 선언해야 "performance"가 id로 해석되지 않는다.
+  @Get('performance')
+  @ApiOperation({ summary: '수출 실적표 — FINALIZED 문서만 집계(총계/브랜드별 소계/문서 목록), INVOICE 일자 기간 필터' })
+  getPerformance(@Query() query: FindExportPerformanceDto) {
+    return this.exportShipmentsService.getPerformance(query);
   }
 
   @Get(':id')

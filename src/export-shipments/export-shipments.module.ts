@@ -8,11 +8,13 @@ import { ExportShipmentLine } from './entities/export-shipment-line.entity';
 import { ExportShipmentsService } from './export-shipments.service';
 import { ExportShipmentsController } from './export-shipments.controller';
 import { ExportShipmentDefaultsModule } from '../export-shipment-defaults/export-shipment-defaults.module';
+import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([PurchaseOrder, PackingReceipt, BomItem, ExportShipment, ExportShipmentLine]),
     ExportShipmentDefaultsModule,
+    BrandPrefixRulesModule,
   ],
   controllers: [ExportShipmentsController],
   providers: [ExportShipmentsService],
