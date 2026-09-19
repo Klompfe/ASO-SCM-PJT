@@ -14,6 +14,8 @@ import { MappingCommitService } from '../mapping/services/mapping-commit.service
 import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
 import { WorkOrderSpecsService } from './work-order-specs.service';
 import { AiUsageLogService } from './ai-usage-log.service';
+import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
+import { calculateMaterialRequirements, pickLatestBom } from './utils/material-requirements.util';
 
 @Injectable()
 export class WorkOrdersService {
@@ -190,6 +192,59 @@ export class WorkOrdersService {
       throw new NotFoundException(`ID가 ${id}인 작업 지시를 찾을 수 없습니다.`);
     }
     return wo;
+  }
+
+  // PR-120: BOM 소요명세서 — 작업지시 물량(targetQuantity)으로 자재별 필요 총수량을 전개하고, 이미 발주한
+  // 수량(취소 제외, PENDING+RECEIVED)과 대조해 부족분을 계산한다. 조회 전용이라 아무것도 바꾸지 않는다.
+  // BOM이 없는 경우는 에러가 아니라 정상적인 보고서 상태(reason)로 돌려준다 — 화면이 안내 문구를 띄운다.
+  async getMaterialRequirements(id: number) {
+    const wo = await this.findOne(id);
+    const styleNo = wo.item?.styleNo ?? null;
+    const empty = { rows: [], totals: { materialCount: 0, shortageMaterialCount: 0 }, bom: null, bomCount: 0 };
+    const base = {
+      workOrder: {
+        id: wo.id,
+        itemId: wo.itemId,
+        itemName: wo.item?.name ?? null,
+        targetQuantity: Number(wo.targetQuantity),
+        status: wo.status,
+      },
+      styleNo,
+    };
+
+    if (!styleNo) return { ...base, reason: 'NO_STYLE_NO' as const, ...empty };
+
+    const manager = this.dataSource.manager;
+    const boms = await manager.find(Bom, { where: { style: { styleNo } }, order: { id: 'DESC' } });
+    const latest = pickLatestBom(boms);
+    if (!latest) return { ...base, reason: 'NO_BOM' as const, ...empty };
+
+    const bom = await manager.findOne(Bom, { where: { id: latest.id }, relations: ['items', 'items.material'] });
+    const items = bom?.items ?? [];
+
+    const itemIds = [...new Set(items.map((i) => i.material?.id).filter((v): v is number => typeof v === 'number'))];
+    const ordered = new Map<number, number>();
+    if (itemIds.length > 0) {
+      const raw = await manager
+        .createQueryBuilder(PurchaseOrder, 'po')
+        .select('po.itemId', 'itemId')
+        .addSelect('SUM(po.quantity)', 'qty')
+        .where('po.itemId IN (:...itemIds)', { itemIds })
+        .andWhere('po.status != :cancelled', { cancelled: PurchaseOrderStatus.CANCELLED })
+        .groupBy('po.itemId')
+        .getRawMany();
+      for (const r of raw) ordered.set(Number(r.itemId), Number(r.qty) || 0);
+    }
+
+    const rows = calculateMaterialRequirements(Number(wo.targetQuantity), items, ordered);
+    return {
+      ...base,
+      reason: null,
+      bom: { id: latest.id, bomNo: latest.bomNo, version: latest.version },
+      bomCount: boms.length,
+      rows,
+      totals: { materialCount: rows.length, shortageMaterialCount: rows.filter((r) => r.shortageQty > 0).length },
+    };
   }
 
   async updateStatus(id: number, statusOrDto: any): Promise<WorkOrder> {

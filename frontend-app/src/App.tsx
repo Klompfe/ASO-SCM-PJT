@@ -15,6 +15,7 @@ import { PackingReceiptSummaryReport } from './components/PackingReceiptSummaryR
 import { CashVouchersManager } from './components/CashVouchersManager';
 import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportPerformanceReport } from './components/ExportPerformanceReport';
+import { BomRequirementReport } from './components/BomRequirementReport';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { HsCodeManager } from './components/HsCodeManager';
 import { ImportShipmentManager } from './components/ImportShipmentManager';
@@ -84,6 +85,7 @@ function App() {
   // 수입통관 추적 화면(ImportShipmentManager, PR-082)이다 — 원자재 입고(옛
   // ShipmentsManager, PurchaseOrder와 연결된 별개 개념)는 PR-082에서 "Purchase
   // Orders > 입고관리" 서브탭으로 옮겼다. 기본값은 현재 개발 중인 "수출".
+  const [workOrdersSubTab, setWorkOrdersSubTab] = useState<'list' | 'requirements'>('list');
   const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import' | 'exportPerformance'>('export');
   const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing'>('list');
 
@@ -142,7 +144,21 @@ function App() {
       switch (activeTab) {
         case 'dashboard': return <Dashboard />;
         case 'items': return <ItemsManager onOrderItem={handleOrderItem} />;
-        case 'workOrders': return <WorkOrdersManager />;
+        case 'workOrders': return (
+          <div>
+            <div className="flex space-x-2 mb-4 border-b border-gray-200">
+              <button
+                className={`px-3 py-2 text-sm font-medium ${workOrdersSubTab === 'list' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setWorkOrdersSubTab('list')}
+              >작업지시 목록</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${workOrdersSubTab === 'requirements' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setWorkOrdersSubTab('requirements')}
+              >BOM 소요명세서</button>
+            </div>
+            {workOrdersSubTab === 'list' ? <WorkOrdersManager /> : <BomRequirementReport />}
+          </div>
+        );
         case 'styles': return (
           <div>
             <div className="flex space-x-2 mb-4 border-b border-gray-200">

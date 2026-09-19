@@ -103,6 +103,13 @@ export class WorkOrdersController {
     return this.woService.findOne(id);
   }
 
+  @Get(':id/material-requirements')
+  @ApiOperation({ summary: 'BOM 소요명세서 — 작업지시 물량 기준 자재별 필요 총수량/이미 발주 수량/부족 수량' })
+  @ApiResponse({ status: 200 })
+  getMaterialRequirements(@Param('id', ParseIntPipe) id: number) {
+    return this.woService.getMaterialRequirements(id);
+  }
+
   @Patch(':id/status')
   @ApiOperation({ summary: '작업 지시 상태 변경' })
   @ApiResponse({ status: 200, type: WorkOrder })

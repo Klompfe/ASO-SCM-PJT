@@ -1,11 +1,12 @@
 import apiClient from './client';
+import type { MaterialRequirements } from '../utils/bomRequirementReport';
 
 export interface WorkOrder {
   id: number;
   status: string;
   itemId: number;
   targetQuantity: number;
-  item?: { id: number; name: string; code: string; type: string };
+  item?: { id: number; name: string; code: string; type: string; styleNo?: string };
   createdAt?: string;
   updatedAt?: string;
 }
@@ -80,6 +81,9 @@ export const uploadWorkOrderImage = (file: File): Promise<any> => {
 };
 export const commitWorkOrderAnalysis = (result: AiWorkOrderResult): Promise<any> =>
   apiClient.post('/work-orders/commit-analysis', result);
+// PR-120: BOM 소요명세서(작업지시 물량 기준 자재 소요량/이미 발주 수량/부족 수량).
+export const getMaterialRequirements = (id: number): Promise<MaterialRequirements> =>
+  apiClient.get(`/work-orders/${id}/material-requirements`);
 export const getWorkOrderSpec = (styleNo: string): Promise<any> =>
   apiClient.get('/work-orders/spec', { params: { styleNo } });
 
