@@ -31,21 +31,21 @@ export function PrintableReport<T>({ title, subtitle, columns, rows, fileName, c
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-3 print:hidden">
+      <div className="flex justify-between items-center gap-3 mb-3 print:hidden">
         <div>
           <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
           {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={handlePrint}
-            className="text-sm px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+            className="text-sm px-3 py-1.5 rounded whitespace-nowrap bg-indigo-600 text-white hover:bg-indigo-700"
           >
             인쇄
           </button>
           <button
             onClick={handleExcel}
-            className="text-sm px-3 py-1.5 rounded bg-green-600 text-white hover:bg-green-700"
+            className="text-sm px-3 py-1.5 rounded whitespace-nowrap bg-green-600 text-white hover:bg-green-700"
           >
             엑셀 다운로드
           </button>
