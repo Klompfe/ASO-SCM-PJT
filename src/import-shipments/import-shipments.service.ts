@@ -9,6 +9,9 @@ import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.d
 import { FindImportShipmentsDto } from './dto/find-import-shipments.dto';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
 import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
+import { ImportShipmentPackingDetailExcelParser, type ParsedPackingDetailRow } from './utils/import-shipment-packing-detail-excel-parser.util';
+import { ImportShipmentPackingDetailsService } from './import-shipment-packing-details.service';
+import { ImportShipmentPackingDetailSource } from './entities/import-shipment-packing-detail.entity';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
 import { classifyBrand, type BrandPrefixRuleLike } from '../common/utils/brand-classifier.util';
 
@@ -54,6 +57,7 @@ export class ImportShipmentsService {
     private readonly masterStyleRepository: Repository<MasterStyle>,
     private readonly hsCodeClassificationsService: HsCodeClassificationsService,
     private readonly brandPrefixRulesService: BrandPrefixRulesService,
+    private readonly packingDetailsService: ImportShipmentPackingDetailsService,
   ) {}
 
   // 3절: 라인 저장 시 (itemType,fabricType(trim),composition)으로 PR-081
@@ -235,6 +239,15 @@ export class ImportShipmentsService {
   async importFromFile(buffer: Buffer): Promise<{ shipments: ImportShipmentWithMatch[]; warnings: string[] }> {
     const parsed = ImportShipmentExcelParser.parse(buffer);
 
+    // PR-112: DPKL 시트(DETAIL PACKING/품번별/적재순/박스)가 있으면 스타일별로 나눠 둔다.
+    // 시트가 없는 파일은 조용히 건너뛴다(에러 아님).
+    const dpkl = ImportShipmentPackingDetailExcelParser.parse(buffer);
+    const dpklByStyle = new Map<string, ParsedPackingDetailRow[]>();
+    for (const row of dpkl?.rows ?? []) {
+      if (!dpklByStyle.has(row.styleNo)) dpklByStyle.set(row.styleNo, []);
+      dpklByStyle.get(row.styleNo)!.push(row);
+    }
+
     const groups = new Map<string, typeof parsed.lines>();
     for (const line of parsed.lines) {
       if (!groups.has(line.styleNo)) groups.set(line.styleNo, []);
@@ -282,7 +295,28 @@ export class ImportShipmentsService {
         );
       }
 
+      // 이 업로드에서 방금 새로 만든 shipment에만 붙이므로(업로드는 항상 새 ImportShipment를
+      // 만든다) 기존 MANUAL 상세내역을 덮어쓸 여지가 구조적으로 없다 — 항상 "추가".
+      const dpklRows = dpklByStyle.get(styleNo);
+      if (dpklRows && dpklRows.length > 0) {
+        await this.packingDetailsService.createMany(
+          shipment.id,
+          { details: dpklRows.map((r) => ({ color: r.color, size: r.size, qty: r.qty })) },
+          ImportShipmentPackingDetailSource.EXCEL,
+        );
+      }
+
       shipments.push(await this.findOneOrFail(shipment.id));
+    }
+
+    if (dpkl) {
+      const created = new Set(shipments.map((s) => s.styleNo));
+      const unmatched = [...dpklByStyle.keys()].filter((s) => !created.has(s));
+      if (unmatched.length > 0) {
+        warnings.push(
+          `상세포장내역(${dpkl.sheetName}) 시트의 스타일 중 이번 업로드로 생성된 수입통관 문서가 없어 반영하지 못했습니다: ${unmatched.join(', ')}`,
+        );
+      }
     }
 
     return { shipments, warnings };
