@@ -72,6 +72,20 @@ export class WorkOrdersController {
     return this.woService.commitAnalysis(dto);
   }
 
+  @Get('style-requirements')
+  @ApiOperation({ summary: '스타일+수량 기준 자재 필요량/이미 발주/부족 계산(작업지시 없이) — 발주 화면용. quantity 생략 시 스타일 총 수량' })
+  @ApiQuery({ name: 'styleNo', required: true, example: 'MB62SLM103Z' })
+  @ApiQuery({ name: 'quantity', required: false, example: 1000 })
+  getStyleRequirements(@Query('styleNo') styleNo: string, @Query('quantity') quantity?: string) {
+    if (!styleNo) {
+      throw new BadRequestException('styleNo는 필수입니다.');
+    }
+    if (quantity !== undefined && quantity !== '' && !(Number(quantity) > 0)) {
+      throw new BadRequestException('quantity는 0보다 큰 숫자여야 합니다.');
+    }
+    return this.woService.getStyleRequirements(styleNo, quantity ? Number(quantity) : undefined);
+  }
+
   @Get('spec')
   @ApiOperation({ summary: '스타일별 작업명세(사이즈 스펙+지시사항) 조회' })
   @ApiQuery({ name: 'styleNo', required: true, example: 'MB62SLM103Z' })
