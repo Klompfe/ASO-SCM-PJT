@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { OrderProcessStage } from './entities/order-process-stage.entity';
 import { MasterStyle } from './entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
+import { pickActiveBom } from '../boms/utils/active-bom.util';
 import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
 import { ExportShipmentLine } from '../export-shipments/entities/export-shipment-line.entity';
 import { UpsertProcessStageDto } from './dto/upsert-process-stage.dto';
@@ -78,11 +79,12 @@ export class OrderProcessStagesService {
   // 자재입고는 별도 입력 없이 BOM + 발주(PO) 데이터에서 자동 파생한다(PR-063 설계).
   // 자재(품목) 단위로 "그 자재의 PO가 하나라도 있고 전부 RECEIVED면 준비완료"로 판단한다.
   async getMaterialReadiness(styleNo: string): Promise<{ totalMaterials: number; readyMaterials: number }> {
-    const bom = await this.bomRepository.findOne({
+    // 같은 style에 Bom이 여러 개면 pickActiveBom 규칙(활성 BOM 중 최신)으로 하나만 쓴다(PR-123).
+    const styleBoms = await this.bomRepository.find({
       where: { style: { styleNo } },
-      order: { id: 'DESC' }, // 같은 style에 Bom이 여러 개면 최신 것만 사용 (work-orders.service.ts와 동일한 관례)
       relations: ['items', 'items.material'],
     });
+    const bom = pickActiveBom(styleBoms);
     if (!bom || !bom.items || bom.items.length === 0) {
       return { totalMaterials: 0, readyMaterials: 0 };
     }
@@ -111,16 +113,18 @@ export class OrderProcessStagesService {
       this.exportShipmentLineRepository.find(),
     ]);
 
-    // 같은 style에 Bom이 여러 개면 getMaterialReadiness와 동일하게 최신(id 최댓값)
-    // 것만 쓴다.
-    const latestBomByStyle = new Map<string, Bom>();
+    // 같은 style에 Bom이 여러 개면 getMaterialReadiness와 동일하게 pickActiveBom 규칙(활성 BOM 중 최신)으로
+    // 하나만 쓴다. 이미 한 번에 전부 읽어 둔 목록을 스타일별로 묶어 메모리에서 고르므로 추가 쿼리는 없다.
+    const bomsByStyle = new Map<string, Bom[]>();
     for (const bom of boms) {
       const styleNo = bom.style?.styleNo;
       if (!styleNo) continue;
-      const current = latestBomByStyle.get(styleNo);
-      if (!current || bom.id > current.id) {
-        latestBomByStyle.set(styleNo, bom);
-      }
+      bomsByStyle.set(styleNo, [...(bomsByStyle.get(styleNo) ?? []), bom]);
+    }
+    const latestBomByStyle = new Map<string, Bom>();
+    for (const [styleNo, styleBoms] of bomsByStyle) {
+      const picked = pickActiveBom(styleBoms);
+      if (picked) latestBomByStyle.set(styleNo, picked);
     }
 
     const posByItemId = new Map<number, PurchaseOrder[]>();

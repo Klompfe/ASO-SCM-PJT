@@ -4,6 +4,7 @@ import { Repository, DataSource } from 'typeorm';
 import { MasterStyle } from '../../styles/entities/master-style.entity';
 import { StyleOverview, StyleOverviewStatus } from '../../styles/entities/style-overview.entity';
 import { Bom } from '../../boms/entities/bom.entity';
+import { pickActiveBom } from '../../boms/utils/active-bom.util';
 import { BomItem } from '../../boms/entities/bom-item.entity';
 import { ImportFile, ImportStatus } from '../../imports/entities/import-file.entity';
 import { Item, ItemType } from '../../items/entities/item.entity';
@@ -97,12 +98,13 @@ export class MappingCommitService {
       }
       await queryRunner.manager.save(style);
 
-      // 4. Bom — 해당 스타일에 이미 Bom이 있으면(가장 최근 것) 재사용하고, 없을 때만 새로 만든다.
-      let bom = await queryRunner.manager.findOne(Bom, {
+      // 4. Bom — 해당 스타일에 이미 Bom이 있으면 pickActiveBom 규칙(활성 BOM 중 최신)으로 골라 재사용하고, 없을 때만
+      // 새로 만든다. 사용자가 "BOM 중복 검토"에서 고른 BOM에 새 항목이 병합되도록 다른 화면과 같은 규칙을 쓴다(PR-123).
+      const existingBoms = await queryRunner.manager.find(Bom, {
         where: { style: { styleNo } },
-        order: { id: 'DESC' },
         relations: ['items', 'items.material'],
       });
+      let bom = pickActiveBom(existingBoms);
       if (!bom) {
         bom = queryRunner.manager.create(Bom, {
           bomNo: `BOM-${styleNo}-001`,

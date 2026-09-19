@@ -15,6 +15,7 @@ describe('MappingCommitService', () => {
 
   const mockQueryRunnerManager = {
     findOne: jest.fn(),
+    find: jest.fn(),
     save: jest.fn((_entity: any, data: any) => Promise.resolve(data)),
     create: jest.fn((_entity: any, data: any) => data),
   };
@@ -52,6 +53,7 @@ describe('MappingCommitService', () => {
     mockQueryRunnerManager.save.mockImplementation((_entity: any, data: any) => Promise.resolve(data));
     mockQueryRunnerManager.create.mockImplementation((_entity: any, data: any) => data);
     mockQueryRunnerManager.findOne.mockResolvedValue(null);
+    mockQueryRunnerManager.find.mockResolvedValue([]); // 기본: 이 스타일에 등록된 BOM 없음
 
     service = new MappingCommitService(mockDataSource as unknown as DataSource);
   });
@@ -234,10 +236,12 @@ describe('MappingCommitService', () => {
     beforeEach(() => {
       mockQueryRunnerManager.findOne.mockImplementation((entity: any, options?: any) => {
         if (entity === MasterStyle) return Promise.resolve({ ...existingStyle, overview: { ...existingOverview } });
-        if (entity === Bom) return Promise.resolve({ ...existingBom, items: [{ ...existingBomItem }] });
         if (entity === Item) return Promise.resolve({ id: 10, name: '원단' });
         return Promise.resolve(null);
       });
+      mockQueryRunnerManager.find.mockImplementation((entity: any) =>
+        Promise.resolve(entity === Bom ? [{ ...existingBom, items: [{ ...existingBomItem }] }] : []),
+      );
     });
 
     it('(a) 기존 BomItem은 그대로 유지되고 수정 저장되지 않는다', async () => {
@@ -277,6 +281,47 @@ describe('MappingCommitService', () => {
         ([arg]: any) => arg && typeof arg === 'object' && 'bomNo' in arg,
       );
       expect(bomCreateOrSave).toBe(false);
+    });
+
+    // PR-123: 재커밋 시 재사용할 BOM도 "BOM 중복 검토"에서 고른 활성 BOM을 쓴다(그 BOM에 신규 항목이 병합된다).
+    // 세 경우 모두 새 BOM을 만들지 않고 기존 BOM 하나에만 CR 항목을 붙여야 한다.
+    const bomWith = (id: number, isActive?: boolean) => ({
+      ...existingBom,
+      id,
+      ...(isActive === undefined ? {} : { isActive }),
+      items: id === 0 ? [] : [{ ...existingBomItem }],
+    });
+    const crSavedTo = () => {
+      const saves = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+      expect(saves).toHaveLength(1);
+      expect(mockQueryRunnerManager.save.mock.calls.some(([arg]: any) => arg && typeof arg === 'object' && 'bomNo' in arg)).toBe(false); // 새 BOM을 만들지 않는다
+      return saves[0][1].bom.id;
+    };
+    const givenBoms = (boms: any[]) =>
+      mockQueryRunnerManager.find.mockImplementation((entity: any) => Promise.resolve(entity === Bom ? boms : []));
+
+    it('(e) id가 더 큰 BOM이 비활성이면 활성(더 오래된) BOM에 병합한다', async () => {
+      givenBoms([bomWith(50, true), bomWith(90, false)]);
+      await service.commit(rebuildPayload());
+      expect(crSavedTo()).toBe(50);
+    });
+
+    it('(f) isActive 정보가 없는 데이터는 이전 규칙과 같이 가장 큰 id의 BOM에 병합한다', async () => {
+      givenBoms([bomWith(50), bomWith(90)]);
+      await service.commit(rebuildPayload());
+      expect(crSavedTo()).toBe(90);
+    });
+
+    it('(g) 활성 BOM이 하나도 없는 비정상 상태도 가장 큰 id의 BOM에 병합한다(새 BOM을 만들지 않는다)', async () => {
+      givenBoms([bomWith(50, false), bomWith(90, false)]);
+      await service.commit(rebuildPayload());
+      expect(crSavedTo()).toBe(90);
+    });
+
+    it('(h) 활성 BOM이 여러 건이면 그중 최신에 병합한다', async () => {
+      givenBoms([bomWith(50, true), bomWith(70, true), bomWith(90, false)]);
+      await service.commit(rebuildPayload());
+      expect(crSavedTo()).toBe(70);
     });
 
     it('기존 BomItem과 요척/소요량이 다르면 자동 반영하지 않고 warnings에 차이를 기록한다', async () => {
