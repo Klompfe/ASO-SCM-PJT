@@ -1,4 +1,5 @@
 import apiClient from './client';
+import { fetchAllPages } from '../utils/fetchAllPages';
 
 export interface HsCodeClassification {
   id: number;
@@ -57,6 +58,12 @@ export interface GetHsCodeClassificationsFilter {
 export const getHsCodeClassifications = (
   filter?: GetHsCodeClassificationsFilter,
 ): Promise<any> => apiClient.get('/hs-code-classifications', { params: filter });
+
+// PR-121: 보고서(인쇄/엑셀)용 — 100건 조회 한도를 넘는 데이터도 빠짐없이 담도록 페이지를 끝까지 따라가 전량을 모은다.
+export const getAllHsCodeClassifications = (
+  filter?: Omit<GetHsCodeClassificationsFilter, 'page' | 'limit'>,
+): Promise<{ items: HsCodeClassification[]; total: number }> =>
+  fetchAllPages<HsCodeClassification>((page) => getHsCodeClassifications({ ...filter, page, limit: 100 }));
 
 export const createHsCodeClassification = (data: CreateHsCodeClassification): Promise<any> =>
   apiClient.post('/hs-code-classifications', data);

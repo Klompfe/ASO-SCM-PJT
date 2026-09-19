@@ -52,3 +52,8 @@ export interface AddLabelSetResult {
 // "null is not valid JSON" 에러가 나는 것을 실제로 확인했다).
 export const addBomLabelSet = (styleNo: string): Promise<any> =>
   apiClient.post('/boms/label-set', undefined, { params: { styleNo } });
+
+// PR-121: BOM 중복 검토 — BOM이 2건 이상인 스타일(확인 필요한 것 먼저)과, 스타일에서 사용할(활성) BOM 선택.
+export const getDuplicateBoms = (): Promise<any> => apiClient.get('/boms/duplicates');
+export const setActiveBom = (styleNo: string, bomId: number): Promise<any> =>
+  apiClient.patch(`/boms/styles/${encodeURIComponent(styleNo)}/active-bom`, { bomId });

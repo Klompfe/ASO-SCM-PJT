@@ -30,15 +30,6 @@ const num = (v: unknown): number => {
 };
 const round4 = (n: number): number => Math.round(n * 10000) / 10000;
 
-// 같은 스타일에 Bom 행이 여러 개일 수 있다(실제 운영 데이터: 54개 스타일 중 39개가 2건 이상, 전부
-// version='V1', bomNo도 동일해 version으로는 구분이 안 된다). 기존 작업지시 완료 시 재고 차감
-// (work-orders.service.ts)과 BOM 재커밋(mapping-commit.service.ts)이 이미 "가장 최근 = id가 가장 큰 것"을
-// 쓰고 있어, 이 보고서도 같은 규칙을 써야 실제 차감되는 BOM과 소요명세서가 일치한다.
-export function pickLatestBom<T extends { id: number }>(boms: T[]): T | null {
-  if (!boms || boms.length === 0) return null;
-  return boms.reduce((latest, b) => (b.id > latest.id ? b : latest));
-}
-
 // BOM 전개: 자재별 필요 총수량 = consumption(제품 1개당) × targetQuantity. 기존 재고 차감 로직
 // (work-orders.service.ts: Number(bomItem.consumption) * wo.targetQuantity)과 같은 식이다.
 // BomItem.requiredQty(저장값)는 BOM 등록 당시 시트의 총 오더수량으로 계산된 스냅샷이라

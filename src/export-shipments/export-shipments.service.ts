@@ -13,7 +13,8 @@ import { UserRole } from '../users/entities/user.entity';
 import { ExportShipmentDefaultsService } from '../export-shipment-defaults/export-shipment-defaults.service';
 import { ExportShipmentImportParser } from './utils/export-shipment-import-parser.util';
 import { FindExportPerformanceDto } from './dto/find-export-performance.dto';
-import { aggregateExportPerformance } from './utils/export-performance.util';
+import { aggregateExportPerformance, type BuyerByStyleNo } from './utils/export-performance.util';
+import { MasterStyle } from '../styles/entities/master-style.entity';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
@@ -302,7 +303,18 @@ export class ExportShipmentsService {
       this.brandPrefixRulesService.findAll(),
     ]);
 
-    return { ...aggregateExportPerformance(finalized, rules, { from, to }), excludedNotFinalized };
+    // PR-121: 거래처는 라인 스타일의 StyleOverview.buyer로 얻는다(ExportShipment에는 거래처 FK가 없다).
+    const styleNos = [...new Set(finalized.flatMap((s) => (s.lines ?? []).map((l) => l.styleNo)))];
+    const buyerByStyleNo: BuyerByStyleNo = {};
+    if (styleNos.length > 0) {
+      const styles = await this.exportShipmentRepository.manager.find(MasterStyle, {
+        where: { styleNo: In(styleNos) },
+        relations: ['overview'],
+      });
+      for (const st of styles) buyerByStyleNo[st.styleNo] = st.overview?.buyer ?? null;
+    }
+
+    return { ...aggregateExportPerformance(finalized, rules, { from, to }, buyerByStyleNo), excludedNotFinalized };
   }
 
   async findOneOrFail(id: number): Promise<ExportShipment> {

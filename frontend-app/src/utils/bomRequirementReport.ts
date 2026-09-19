@@ -19,7 +19,7 @@ export interface MaterialRequirements {
   workOrder: { id: number; itemId: number; itemName: string | null; targetQuantity: number; status: string };
   styleNo: string | null;
   reason: RequirementReason;
-  bom: { id: number; bomNo: string; version: string } | null;
+  bom: { id: number; bomNo: string; version: string; isActive?: boolean } | null;
   bomCount: number;
   rows: MaterialRequirementRow[];
   totals: { materialCount: number; shortageMaterialCount: number };
@@ -46,6 +46,6 @@ export const describeRequirement = (r: MaterialRequirements): string => {
   const parts = [`작업지시 #${r.workOrder.id}`];
   if (r.styleNo) parts.push(`스타일 ${r.styleNo}`);
   parts.push(`물량 ${r.workOrder.targetQuantity.toLocaleString('ko-KR')}`);
-  if (r.bom) parts.push(`BOM ${r.bom.bomNo}${r.bomCount > 1 ? ` (스타일에 BOM ${r.bomCount}건 중 최신)` : ''}`);
+  if (r.bom) parts.push(`BOM #${r.bom.id} ${r.bom.bomNo}${r.bomCount > 1 ? ` (스타일에 BOM ${r.bomCount}건 중 사용 중인 BOM)` : ''}`);
   return parts.join(' · ');
 };

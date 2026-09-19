@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
   getHsCodeClassifications,
+  getAllHsCodeClassifications,
   createHsCodeClassification,
   uploadHsCodeClassifications,
   getHsCodeClassificationByStyle,
@@ -54,13 +55,16 @@ export const HsCodeManager: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await getHsCodeClassifications({
+      const backendFilter = {
         itemType: searchItemType || undefined,
         fabricType: searchFabricType || undefined,
         composition: searchComposition || undefined,
         styleNo: searchStyleNo || undefined,
-        limit: 100,
-      });
+      };
+      // PR-121: 보고서 모드는 100건 한도 없이 조건에 맞는 전량을 불러온다(인쇄/엑셀에 전부 담기도록).
+      const res = reportMode
+        ? await getAllHsCodeClassifications(backendFilter)
+        : await getHsCodeClassifications({ ...backendFilter, limit: 100 });
       let filtered: HsCodeClassification[] = res?.items ?? [];
       // HS코드 검색은 백엔드 필터 파라미터에 없으므로 프론트에서 부분일치로 추가 필터링한다.
       if (searchHsCode) {
@@ -75,7 +79,7 @@ export const HsCodeManager: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchItemType, searchFabricType, searchComposition, searchHsCode, searchStyleNo]);
+  }, [searchItemType, searchFabricType, searchComposition, searchHsCode, searchStyleNo, reportMode]);
 
   useEffect(() => {
     load();

@@ -1,4 +1,4 @@
-import { aggregateExportPerformance, UNCLASSIFIED_BRAND } from './export-performance.util';
+import { aggregateExportPerformance, UNCLASSIFIED_BRAND, UNCLASSIFIED_BUYER } from './export-performance.util';
 
 const rules = [
   { prefix: 'BF', isNumericStart: false, brandName: '빈폴' },
@@ -85,7 +85,73 @@ describe('수출 실적표 집계 (PR-119)', () => {
     expect(aggregateExportPerformance([], rules, period)).toEqual({
       totals: { shipmentCount: 0, lineCount: 0, qtyByUnit: {}, amount: 0, linesWithoutAmount: 0 },
       byBrand: [],
+      byBuyer: [],
       shipments: [],
     });
+  });
+});
+
+describe('수출 실적표 — 거래처(buyer)별 소계 (PR-121)', () => {
+  const period = { from: '2026-09-01', to: '2026-09-30' };
+  // StyleOverview.buyer: BF1/BF2는 A무역, LB1은 B상사(앞뒤 공백 포함), ZZ9는 오버뷰가 없고, BF3는 buyer가 빈 문자열
+  const buyers = { BF1: 'A무역', BF2: 'A무역', LB1: ' B상사 ', ZZ9: undefined, BF3: '' };
+
+  it('거래처도 브랜드처럼 라인 단위로 매겨, 한 문서에 섞인 거래처가 각자 집계된다', () => {
+    const r = aggregateExportPerformance(shipments, rules, period, buyers);
+    expect(r.byBuyer).toEqual([
+      // 문서1: BF1 x2(1500) + 문서2의 BF2(20 EA, 단가 미정 → 0) = A무역
+      { buyer: 'A무역', shipmentCount: 2, lineCount: 3, qtyByUnit: { YD: 150, EA: 20 }, amount: 1500 },
+      { buyer: 'B상사', shipmentCount: 1, lineCount: 1, qtyByUnit: { EA: 10 }, amount: 30 },
+      { buyer: UNCLASSIFIED_BUYER, shipmentCount: 1, lineCount: 1, qtyByUnit: { EA: 5 }, amount: 15 },
+    ]);
+  });
+
+  it('거래처별 금액·수량 합은 전체 합과 일치하고, 건수 합은 섞인 문서 때문에 전체보다 클 수 있다', () => {
+    const r = aggregateExportPerformance(shipments, rules, period, buyers);
+    expect(r.byBuyer.reduce((a, b) => a + b.amount, 0)).toBe(r.totals.amount);
+    expect(r.byBuyer.reduce((a, b) => a + b.lineCount, 0)).toBe(r.totals.lineCount);
+    // 문서2는 A무역(BF2)과 미분류(ZZ9)가 섞여 있고 문서1은 A무역+B상사 → 건수 합 4 > 전체 2
+    expect(r.byBuyer.reduce((a, b) => a + b.shipmentCount, 0)).toBe(4);
+    expect(r.totals.shipmentCount).toBe(2);
+  });
+
+  it('StyleOverview가 없는 스타일(맵에 없음)과 buyer가 빈 스타일은 미분류로 묶고 맨 뒤에 둔다', () => {
+    const r = aggregateExportPerformance(
+      [{ id: 1, status: 'FINALIZED', invoiceDate: '2026-09-01', lines: [line('X1', 1, 'EA', 5), line('X2', 2, 'EA', 7), line('X3', 3, 'EA', 100)] }],
+      rules,
+      {},
+      { X2: '   ', X3: '큰거래처' },
+    );
+    expect(r.byBuyer.map((b) => b.buyer)).toEqual(['큰거래처', UNCLASSIFIED_BUYER]);
+    expect(r.byBuyer[1]).toMatchObject({ lineCount: 2, qtyByUnit: { EA: 3 }, amount: 12 });
+  });
+
+  it('문서 행에도 거래처 목록이 들어간다(정렬됨)', () => {
+    const { shipments: rows } = aggregateExportPerformance(shipments, rules, period, buyers);
+    expect(rows[0].buyers).toEqual(['A무역', 'B상사']);
+    expect(rows[1].buyers).toEqual([UNCLASSIFIED_BUYER, 'A무역'].sort());
+  });
+
+  it('buyer 정보를 안 넘기면(기존 호출) 전부 미분류 하나로 묶인다', () => {
+    const r = aggregateExportPerformance(shipments, rules, period);
+    expect(r.byBuyer).toHaveLength(1);
+    expect(r.byBuyer[0].buyer).toBe(UNCLASSIFIED_BUYER);
+    expect(r.byBuyer[0].amount).toBe(r.totals.amount);
+  });
+
+  it('거래처 표기가 다르면 다른 거래처로 본다(자유입력이라 임의로 합치지 않는다)', () => {
+    const r = aggregateExportPerformance(
+      [{ id: 1, status: 'FINALIZED', invoiceDate: '2026-09-01', lines: [line('A', 1, 'EA', 1), line('B', 1, 'EA', 1)] }],
+      rules,
+      {},
+      { A: 'ABC Co', B: 'ABC Co.' },
+    );
+    expect(r.byBuyer.map((b) => b.buyer).sort()).toEqual(['ABC Co', 'ABC Co.']);
+  });
+
+  it('미확정 문서의 거래처는 집계에 들어가지 않는다', () => {
+    const r = aggregateExportPerformance(shipments, rules, period, { ...buyers, BF4: 'D거래처', LB9999: 'E거래처', BF9999: 'F거래처' });
+    expect(r.byBuyer.map((b) => b.buyer)).not.toContain('D거래처');
+    expect(r.byBuyer.map((b) => b.buyer)).not.toContain('F거래처');
   });
 });
