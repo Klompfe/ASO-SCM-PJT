@@ -10,6 +10,7 @@ import {
   type CreateImportShipmentLine,
 } from '../api/importShipments.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
+import { getBrandPrefixRules } from '../api/brandPrefixRules.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { GoodsReceiptPanel } from './GoodsReceiptPanel';
 
@@ -35,6 +36,9 @@ export const ImportShipmentManager: React.FC = () => {
   const [filterStyleNo, setFilterStyleNo] = useState('');
   const [filterMaterialName, setFilterMaterialName] = useState('');
   const [filterSheetNo, setFilterSheetNo] = useState('');
+  // PR-111: 브랜드(스타일번호 접두사로 분류) 드롭다운 필터.
+  const [filterBrand, setFilterBrand] = useState('');
+  const [availableBrands, setAvailableBrands] = useState<string[]>([]);
   const [styles, setStyles] = useState<MasterStyle[]>([]);
   const [styleQuery, setStyleQuery] = useState('');
 
@@ -54,7 +58,7 @@ export const ImportShipmentManager: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
 
-  const load = useCallback(async (filter?: { styleNo?: string; materialName?: string; sheetNo?: string }) => {
+  const load = useCallback(async (filter?: { styleNo?: string; materialName?: string; sheetNo?: string; brand?: string }) => {
     setLoading(true);
     try {
       const res = await getImportShipments(filter);
@@ -72,6 +76,7 @@ export const ImportShipmentManager: React.FC = () => {
       styleNo: filterStyleNo || undefined,
       materialName: filterMaterialName || undefined,
       sheetNo: filterSheetNo || undefined,
+      brand: filterBrand || undefined,
     });
   };
 
@@ -79,12 +84,23 @@ export const ImportShipmentManager: React.FC = () => {
     setFilterStyleNo('');
     setFilterMaterialName('');
     setFilterSheetNo('');
+    setFilterBrand('');
     load();
   };
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    getBrandPrefixRules()
+      .then((res) => {
+        const rules = Array.isArray(res) ? res : [];
+        const names = Array.from(new Set(rules.map((r: any) => r.brandName).filter(Boolean)));
+        setAvailableBrands(names.sort());
+      })
+      .catch(() => setAvailableBrands([]));
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -344,7 +360,7 @@ export const ImportShipmentManager: React.FC = () => {
 
       {/* PR-102: 목록 검색(위 등록 폼의 스타일 선택과는 별개) — 스타일번호/품목(자재명)/
           선적건번호(INVOICE 번호), 모두 조합 가능. */}
-      <form onSubmit={handleFilterSubmit} className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <form onSubmit={handleFilterSubmit} className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <input
           className="border border-gray-300 rounded px-3 py-2"
           placeholder="스타일번호 검색"
@@ -363,6 +379,16 @@ export const ImportShipmentManager: React.FC = () => {
           value={filterSheetNo}
           onChange={(e) => setFilterSheetNo(e.target.value)}
         />
+        <select
+          className="border border-gray-300 rounded px-3 py-2"
+          value={filterBrand}
+          onChange={(e) => setFilterBrand(e.target.value)}
+        >
+          <option value="">전체 브랜드</option>
+          {availableBrands.map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">검색</button>
         <button type="button" onClick={handleFilterReset} className="bg-gray-200 text-gray-700 px-4 py-2 rounded font-medium hover:bg-gray-300">초기화</button>
       </form>
@@ -376,6 +402,9 @@ export const ImportShipmentManager: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="font-semibold text-gray-800">{s.styleNo}</span>
+                  {s.brand && (
+                    <span className="ml-2 px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">{s.brand}</span>
+                  )}
                   {s.style?.overview?.styleName && (
                     <span className="text-gray-500 text-sm ml-2">{s.style.overview.styleName}</span>
                   )}

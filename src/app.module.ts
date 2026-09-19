@@ -31,6 +31,7 @@ import { ImportShipmentsModule } from './import-shipments/import-shipments.modul
 import { ProductionContractsModule } from './production-contracts/production-contracts.module';
 import { CashVouchersModule } from './cash-vouchers/cash-vouchers.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
+import { BrandPrefixRulesModule } from './brand-prefix-rules/brand-prefix-rules.module';
 import { HealthController } from './health/health.controller';
 import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
@@ -93,6 +94,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     ProductionContractsModule,
     CashVouchersModule,
     GoodsReceiptsModule,
+    BrandPrefixRulesModule,
   ],
   controllers: [HealthController],
   providers: [

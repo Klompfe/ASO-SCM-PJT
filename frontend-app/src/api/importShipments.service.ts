@@ -30,6 +30,8 @@ export interface ImportShipment {
   lines: ImportShipmentLine[];
   createdAt: string;
   updatedAt: string;
+  // PR-111: 스타일번호 접두사로 조회 시점에 계산되는 값(DB 컬럼 아님).
+  brand?: string | null;
 }
 
 export interface CreateImportShipmentLine {
@@ -57,6 +59,8 @@ export interface FindImportShipmentsFilter {
   styleNo?: string;
   materialName?: string;
   sheetNo?: string;
+  // PR-111: 브랜드(스타일번호 접두사로 분류) 정확히 일치 필터.
+  brand?: string;
 }
 
 export const getImportShipments = (filter?: FindImportShipmentsFilter): Promise<any> =>

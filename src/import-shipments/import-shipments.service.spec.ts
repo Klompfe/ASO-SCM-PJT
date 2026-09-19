@@ -8,6 +8,7 @@ import { ImportShipmentLine } from './entities/import-shipment-line.entity';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
 import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
+import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
 
 jest.mock('./utils/import-shipment-excel-parser.util');
 
@@ -17,11 +18,14 @@ describe('ImportShipmentsService', () => {
   let lineRepo: Repository<ImportShipmentLine>;
   let masterStyleRepo: Repository<MasterStyle>;
   let hsCodeService: HsCodeClassificationsService;
+  const mockBrandPrefixRulesService = { findAll: jest.fn().mockResolvedValue([]) };
 
   beforeEach(async () => {
+    mockBrandPrefixRulesService.findAll.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ImportShipmentsService,
+        { provide: BrandPrefixRulesService, useValue: mockBrandPrefixRulesService },
         {
           provide: getRepositoryToken(ImportShipment),
           useValue: {
@@ -384,6 +388,42 @@ describe('ImportShipmentsService', () => {
 
       expect(result).toEqual([]);
       expect(shipmentRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
+  // PR-111: 스타일번호 접두사로 브랜드를 계산해 붙이고, brand 필터가 있으면
+  // 조회 시점(메모리)에서 걸러낸다 — SQL 필터(styleNo/materialName/sheetNo)와
+  // 조합되지 않는 경로(필터 없음)에서도 동일하게 동작해야 한다.
+  describe('findAll — 브랜드 분류/필터 (PR-111)', () => {
+    beforeEach(() => {
+      mockBrandPrefixRulesService.findAll.mockResolvedValue([
+        { prefix: 'BF', isNumericStart: false, brandName: '빈폴' },
+        { prefix: 'MB', isNumericStart: false, brandName: '미센스' },
+      ]);
+    });
+
+    it('필터 없이 조회해도 각 shipment에 접두사로 계산한 brand가 붙는다', async () => {
+      (shipmentRepo.find as jest.Mock).mockResolvedValue([
+        { id: 1, styleNo: 'BF6821C13', lines: [] },
+        { id: 2, styleNo: 'MB6YHMP104Z', lines: [] },
+        { id: 3, styleNo: 'ZZ9999', lines: [] },
+      ]);
+
+      const result = await service.findAll({});
+
+      expect(result.map((r) => r.brand)).toEqual(['빈폴', '미센스', null]);
+    });
+
+    it('brand 필터를 지정하면 해당 브랜드만 반환한다', async () => {
+      (shipmentRepo.find as jest.Mock).mockResolvedValue([
+        { id: 1, styleNo: 'BF6821C13', lines: [] },
+        { id: 2, styleNo: 'MB6YHMP104Z', lines: [] },
+      ]);
+
+      const result = await service.findAll({ brand: '빈폴' });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].styleNo).toBe('BF6821C13');
     });
   });
 });

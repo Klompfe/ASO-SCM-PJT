@@ -9,6 +9,8 @@ import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.d
 import { FindImportShipmentsDto } from './dto/find-import-shipments.dto';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
 import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
+import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
+import { classifyBrand, type BrandPrefixRuleLike } from '../common/utils/brand-classifier.util';
 
 // PENDING_CLEARANCE -> CLEARED만 허용, 역행 불가 — export-shipments.service.ts의
 // ALLOWED_TRANSITIONS와 동일 패턴(완제품 수입통관은 3단계까지는 불필요해 2단계로 단순화).
@@ -25,6 +27,7 @@ export interface ImportShipmentLineWithMatch extends ImportShipmentLine {
 
 export interface ImportShipmentWithMatch extends ImportShipment {
   lines?: ImportShipmentLineWithMatch[];
+  brand: string | null;
 }
 
 // hsCode가 null인 라인은 PR-081 HsCodeClassification에 일치하는 조합이 없었다는
@@ -33,9 +36,11 @@ export interface ImportShipmentWithMatch extends ImportShipment {
 const withUnmatchedFlag = (line: ImportShipmentLine): ImportShipmentLineWithMatch =>
   Object.assign(line, { unmatched: line.hsCode == null });
 
-const decorateShipment = (shipment: ImportShipment): ImportShipmentWithMatch => {
+// PR-111: 브랜드도 unmatched와 동일한 이유(DB 컬럼이 아니라 조회 시점 계산값)로
+// 응답 시점에 붙인다 — 규칙 목록(rules)은 호출 측에서 한 번만 불러와 넘긴다.
+const decorateShipment = (shipment: ImportShipment, rules: BrandPrefixRuleLike[]): ImportShipmentWithMatch => {
   shipment.lines = (shipment.lines ?? []).map(withUnmatchedFlag);
-  return shipment as ImportShipmentWithMatch;
+  return Object.assign(shipment, { brand: classifyBrand(shipment.styleNo, rules) }) as ImportShipmentWithMatch;
 };
 
 @Injectable()
@@ -48,6 +53,7 @@ export class ImportShipmentsService {
     @InjectRepository(MasterStyle)
     private readonly masterStyleRepository: Repository<MasterStyle>,
     private readonly hsCodeClassificationsService: HsCodeClassificationsService,
+    private readonly brandPrefixRulesService: BrandPrefixRulesService,
   ) {}
 
   // 3절: 라인 저장 시 (itemType,fabricType(trim),composition)으로 PR-081
@@ -103,41 +109,48 @@ export class ImportShipmentsService {
   // AND 결합. styleNo는 ImportShipment 헤더 자체에 있어(한 문서=한 스타일) 조인이
   // 필요 없고, materialName만 ImportShipmentLine.itemType을 조인해서 판별한다.
   async findAll(filter?: FindImportShipmentsDto): Promise<ImportShipmentWithMatch[]> {
+    const rules = await this.brandPrefixRulesService.findAll();
     const hasFilter = !!(filter?.styleNo || filter?.materialName || filter?.sheetNo);
+
+    let decorated: ImportShipmentWithMatch[];
     if (!hasFilter) {
       const shipments = await this.importShipmentRepository.find({
         relations: ['lines', 'style', 'style.overview'],
         order: { id: 'DESC', lines: { id: 'ASC' } } as any,
       });
-      return shipments.map(decorateShipment);
+      decorated = shipments.map((s) => decorateShipment(s, rules));
+    } else {
+      const qb = this.importShipmentRepository
+        .createQueryBuilder('shipment')
+        .leftJoin('shipment.lines', 'line')
+        .select('shipment.id', 'id')
+        .distinct(true);
+
+      if (filter?.styleNo) {
+        qb.andWhere('shipment.styleNo LIKE :styleNo', { styleNo: `%${filter.styleNo}%` });
+      }
+      if (filter?.materialName) {
+        qb.andWhere('line.itemType LIKE :materialName', { materialName: `%${filter.materialName}%` });
+      }
+      if (filter?.sheetNo) {
+        qb.andWhere('shipment.invoiceNo LIKE :sheetNo', { sheetNo: `%${filter.sheetNo}%` });
+      }
+
+      const rows = await qb.getRawMany();
+      const ids = rows.map((r) => r.id);
+      if (ids.length === 0) return [];
+
+      const shipments = await this.importShipmentRepository.find({
+        where: { id: In(ids) },
+        relations: ['lines', 'style', 'style.overview'],
+        order: { id: 'DESC', lines: { id: 'ASC' } } as any,
+      });
+      decorated = shipments.map((s) => decorateShipment(s, rules));
     }
 
-    const qb = this.importShipmentRepository
-      .createQueryBuilder('shipment')
-      .leftJoin('shipment.lines', 'line')
-      .select('shipment.id', 'id')
-      .distinct(true);
-
-    if (filter?.styleNo) {
-      qb.andWhere('shipment.styleNo LIKE :styleNo', { styleNo: `%${filter.styleNo}%` });
-    }
-    if (filter?.materialName) {
-      qb.andWhere('line.itemType LIKE :materialName', { materialName: `%${filter.materialName}%` });
-    }
-    if (filter?.sheetNo) {
-      qb.andWhere('shipment.invoiceNo LIKE :sheetNo', { sheetNo: `%${filter.sheetNo}%` });
-    }
-
-    const rows = await qb.getRawMany();
-    const ids = rows.map((r) => r.id);
-    if (ids.length === 0) return [];
-
-    const shipments = await this.importShipmentRepository.find({
-      where: { id: In(ids) },
-      relations: ['lines', 'style', 'style.overview'],
-      order: { id: 'DESC', lines: { id: 'ASC' } } as any,
-    });
-    return shipments.map(decorateShipment);
+    // PR-111: 브랜드는 DB 컬럼이 아니라 조회 시점 계산값이라 SQL WHERE로 거를 수
+    // 없어 여기서 메모리 필터링한다.
+    return filter?.brand ? decorated.filter((s) => s.brand === filter.brand) : decorated;
   }
 
   async findOneOrFail(id: number): Promise<ImportShipmentWithMatch> {
@@ -149,7 +162,8 @@ export class ImportShipmentsService {
     if (!shipment) {
       throw new NotFoundException(`ID가 ${id}인 수입통관 문서를 찾을 수 없습니다.`);
     }
-    return decorateShipment(shipment);
+    const rules = await this.brandPrefixRulesService.findAll();
+    return decorateShipment(shipment, rules);
   }
 
   async updateStatus(id: number, newStatus: ImportShipmentStatus): Promise<ImportShipmentWithMatch> {
