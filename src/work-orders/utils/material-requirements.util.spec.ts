@@ -1,32 +1,9 @@
-import { calculateMaterialRequirements, pickLatestBom } from './material-requirements.util';
+import { calculateMaterialRequirements } from './material-requirements.util';
 
 const mat = (id: number, name: string) => ({ id, code: `M${id}`, name });
 const bi = (id: number, material: any, consumption: unknown, category = '겉감', colorCode = 'BK') => ({ id, material, consumption, category, colorCode });
 
 describe('BOM 소요량 계산 (PR-120)', () => {
-  describe('pickLatestBom — 여러 BOM 중 최신 선택', () => {
-    it('id가 가장 큰 것을 고른다(version/bomNo가 전부 같아도)', () => {
-      const boms = [
-        { id: 12, version: 'V1', bomNo: 'BOM-X-001' },
-        { id: 51, version: 'V1', bomNo: 'BOM-X-001' },
-        { id: 30, version: 'V1', bomNo: 'BOM-X-001' },
-      ];
-      expect(pickLatestBom(boms)!.id).toBe(51);
-    });
-
-    it('한 건이면 그대로, 없으면 null(원본 배열은 변하지 않는다)', () => {
-      expect(pickLatestBom([{ id: 7 }])!.id).toBe(7);
-      expect(pickLatestBom([])).toBeNull();
-      const arr = [{ id: 2 }, { id: 1 }];
-      pickLatestBom(arr);
-      expect(arr.map((b) => b.id)).toEqual([2, 1]);
-    });
-
-    it('version 문자열이 더 커 보여도 id를 기준으로 한다(기존 재고 차감 로직과 같은 규칙)', () => {
-      expect(pickLatestBom([{ id: 5, version: 'V9' }, { id: 6, version: 'V1' }])!.id).toBe(6);
-    });
-  });
-
   describe('calculateMaterialRequirements', () => {
     it('필요 총수량 = 제품 1개당 소요량 × 작업지시 물량', () => {
       const rows = calculateMaterialRequirements(1000, [bi(1, mat(10, '원단A'), 1.25), bi(2, mat(11, '단추'), '8')], new Map());

@@ -16,6 +16,7 @@ import { CashVouchersManager } from './components/CashVouchersManager';
 import { ExportShipmentManager } from './components/ExportShipmentManager';
 import { ExportPerformanceReport } from './components/ExportPerformanceReport';
 import { BomRequirementReport } from './components/BomRequirementReport';
+import { BomDuplicateReview } from './components/BomDuplicateReview';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { HsCodeManager } from './components/HsCodeManager';
 import { ImportShipmentManager } from './components/ImportShipmentManager';
@@ -85,6 +86,7 @@ function App() {
   // 수입통관 추적 화면(ImportShipmentManager, PR-082)이다 — 원자재 입고(옛
   // ShipmentsManager, PurchaseOrder와 연결된 별개 개념)는 PR-082에서 "Purchase
   // Orders > 입고관리" 서브탭으로 옮겼다. 기본값은 현재 개발 중인 "수출".
+  const [itemsSubTab, setItemsSubTab] = useState<'items' | 'bomDuplicates'>('items');
   const [workOrdersSubTab, setWorkOrdersSubTab] = useState<'list' | 'requirements'>('list');
   const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import' | 'exportPerformance'>('export');
   const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing'>('list');
@@ -143,7 +145,21 @@ function App() {
       // Safe rendering switch
       switch (activeTab) {
         case 'dashboard': return <Dashboard />;
-        case 'items': return <ItemsManager onOrderItem={handleOrderItem} />;
+        case 'items': return (
+          <div>
+            <div className="flex space-x-2 mb-4 border-b border-gray-200">
+              <button
+                className={`px-3 py-2 text-sm font-medium ${itemsSubTab === 'items' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setItemsSubTab('items')}
+              >자재 · BOM 조회</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${itemsSubTab === 'bomDuplicates' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setItemsSubTab('bomDuplicates')}
+              >BOM 중복 검토</button>
+            </div>
+            {itemsSubTab === 'items' ? <ItemsManager onOrderItem={handleOrderItem} /> : <BomDuplicateReview />}
+          </div>
+        );
         case 'workOrders': return (
           <div>
             <div className="flex space-x-2 mb-4 border-b border-gray-200">

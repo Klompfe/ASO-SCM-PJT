@@ -15,7 +15,8 @@ import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
 import { WorkOrderSpecsService } from './work-order-specs.service';
 import { AiUsageLogService } from './ai-usage-log.service';
 import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
-import { calculateMaterialRequirements, pickLatestBom } from './utils/material-requirements.util';
+import { calculateMaterialRequirements } from './utils/material-requirements.util';
+import { pickActiveBom } from '../boms/utils/active-bom.util';
 
 @Injectable()
 export class WorkOrdersService {
@@ -216,7 +217,8 @@ export class WorkOrdersService {
 
     const manager = this.dataSource.manager;
     const boms = await manager.find(Bom, { where: { style: { styleNo } }, order: { id: 'DESC' } });
-    const latest = pickLatestBom(boms);
+    // PR-121: 최신 id가 아니라 활성(isActive) BOM 중 최신을 쓴다("BOM 중복 검토" 화면에서 선택한 것).
+    const latest = pickActiveBom(boms);
     if (!latest) return { ...base, reason: 'NO_BOM' as const, ...empty };
 
     const bom = await manager.findOne(Bom, { where: { id: latest.id }, relations: ['items', 'items.material'] });
@@ -240,7 +242,7 @@ export class WorkOrdersService {
     return {
       ...base,
       reason: null,
-      bom: { id: latest.id, bomNo: latest.bomNo, version: latest.version },
+      bom: { id: latest.id, bomNo: latest.bomNo, version: latest.version, isActive: latest.isActive !== false },
       bomCount: boms.length,
       rows,
       totals: { materialCount: rows.length, shortageMaterialCount: rows.filter((r) => r.shortageQty > 0).length },

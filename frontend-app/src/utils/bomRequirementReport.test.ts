@@ -25,9 +25,9 @@ describe('BOM 소요명세서 화면 유틸 (PR-120)', () => {
     expect(requirementEmptyMessage(null)).toBeNull();
   });
 
-  it('부제: 작업지시/스타일/물량/BOM, 중복 BOM이면 "최신" 안내', () => {
-    expect(describeRequirement(report())).toBe('작업지시 #7 · 스타일 BF1 · 물량 1,000 · BOM BOM-BF1-001');
-    expect(describeRequirement(report({ bomCount: 2 }))).toContain('스타일에 BOM 2건 중 최신');
+  it('부제: 작업지시/스타일/물량/BOM, 중복 BOM이면 "사용 중인 BOM" 안내', () => {
+    expect(describeRequirement(report())).toBe('작업지시 #7 · 스타일 BF1 · 물량 1,000 · BOM #51 BOM-BF1-001');
+    expect(describeRequirement(report({ bomCount: 2 }))).toContain('스타일에 BOM 2건 중 사용 중인 BOM');
   });
 
   it('엑셀은 화면 계산 결과와 그대로 일치한다(재파싱)', async () => {

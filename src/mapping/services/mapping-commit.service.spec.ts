@@ -192,6 +192,7 @@ describe('MappingCommitService', () => {
       id: 77,
       bomNo: 'BOM-LB6YSLM107Z-001',
       version: 'V1',
+      isActive: true,
       style: undefined as any,
       items: [existingBomItem],
     };
