@@ -284,6 +284,7 @@ export class WorkOrdersService {
       const styleBoms = await queryRunner.manager.find(Bom, {
         where: { style: { styleNo: style.styleNo } },
         relations: ['items', 'items.material'],
+        order: { items: { id: 'ASC' } } as any, // 항목 순서 고정(부족 자재 메시지 순서가 물리적 행 순서에 따라 바뀌지 않게)
       });
       const bom = pickActiveBom(styleBoms);
 

@@ -62,9 +62,12 @@ export class BomsService {
   // 같은 style에 Bom이 여러 개 생성될 수 있는 알려진 이슈가 있어(CHARTER.md 5.2절), 화면/재고 차감/소요명세서가
   // 모두 같은 규칙(pickActiveBom: 활성 BOM 중 최신)으로 사용할 BOM을 고른다(PR-121에서 도입, PR-123에서 전 구간 통일).
   async findActiveByStyleNo(styleNo: string): Promise<Bom | null> {
+    // 항목은 id 순으로 고정한다: ORDER BY가 없으면 PostgreSQL이 물리적 행 순서(UPDATE된 행은 뒤로 밀림)로 돌려줘서
+    // 자재 마스터 병합 같은 UPDATE 이후 화면의 항목 순서가 바뀐다.
     const boms = await this.bomRepository.find({
       where: { style: { styleNo } },
       relations: ['items', 'items.material', 'style'],
+      order: { items: { id: 'ASC' } } as any,
     });
     return pickActiveBom(boms);
   }

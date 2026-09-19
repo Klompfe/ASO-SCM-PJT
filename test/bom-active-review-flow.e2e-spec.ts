@@ -187,6 +187,8 @@ describe('BOM 중복 검토 + 활성 BOM 선택 (PR-121)', () => {
     const latest = (await get('/boms?styleNo=BA-DIFF').expect(200)).body.data;
     expect(latest.id).toBe(bom.diffNew);
     expect(latest.items).toHaveLength(2);
+    const itemIds = latest.items.map((i: any) => i.id);
+    expect(itemIds).toEqual([...itemIds].sort((x: number, y: number) => x - y)); // 항목은 항상 id 순(물리적 행 순서에 의존하지 않는다)
 
     // 중복이 없는 스타일은 그대로, BOM이 없는 스타일은 404
     expect((await get('/boms?styleNo=BA-ONE').expect(200)).body.data.items).toHaveLength(1);

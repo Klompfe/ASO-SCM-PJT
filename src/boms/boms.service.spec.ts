@@ -149,7 +149,7 @@ describe('BomsService.findActiveByStyleNo (PR-123)', () => {
   it('BOM 자재/스타일 관계를 함께 조회한다(화면이 그대로 쓰는 응답 형태 유지)', async () => {
     given([bom(1, true)]);
     await service.findActiveByStyleNo('STYLE-A');
-    expect(bomRepository.find).toHaveBeenCalledWith({ where: { style: { styleNo: 'STYLE-A' } }, relations: ['items', 'items.material', 'style'] });
+    expect(bomRepository.find).toHaveBeenCalledWith({ where: { style: { styleNo: 'STYLE-A' } }, relations: ['items', 'items.material', 'style'], order: { items: { id: 'ASC' } } });
   });
 
   it('라벨 세트 추가는 활성 BOM에 붙는다(화면에 보이는 BOM과 같은 BOM)', async () => {
