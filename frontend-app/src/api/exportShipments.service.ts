@@ -59,6 +59,37 @@ export interface FindExportShipmentsFilter {
 export const getExportShipments = (filter?: FindExportShipmentsFilter): Promise<any> =>
   apiClient.get('/export-shipments', { params: filter });
 
+// PR-119: 수출 실적표(FINALIZED만 집계, INVOICE 일자 기간, 라인 단위 브랜드 분류).
+export interface ExportPerformanceShipment {
+  id: number;
+  sheetNo: string | null;
+  invoiceDate: string | null;
+  styleNos: string[];
+  brands: string[];
+  lineCount: number;
+  qtyByUnit: Record<string, number>;
+  amount: number;
+  linesWithoutAmount: number;
+}
+
+export interface ExportPerformanceBrand {
+  brand: string;
+  shipmentCount: number;
+  lineCount: number;
+  qtyByUnit: Record<string, number>;
+  amount: number;
+}
+
+export interface ExportPerformance {
+  totals: { shipmentCount: number; lineCount: number; qtyByUnit: Record<string, number>; amount: number; linesWithoutAmount: number };
+  byBrand: ExportPerformanceBrand[];
+  shipments: ExportPerformanceShipment[];
+  excludedNotFinalized: number;
+}
+
+export const getExportPerformance = (params?: { from?: string; to?: string }): Promise<ExportPerformance> =>
+  apiClient.get('/export-shipments/performance', { params });
+
 export const getExportShipment = (id: number): Promise<any> => apiClient.get(`/export-shipments/${id}`);
 
 export const generateExportShipment = (

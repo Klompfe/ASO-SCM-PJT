@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Between, In, LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { PackingReceipt, PackingMaterialCategory } from '../purchase-orders/entities/packing-receipt.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
@@ -12,6 +12,9 @@ import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.d
 import { UserRole } from '../users/entities/user.entity';
 import { ExportShipmentDefaultsService } from '../export-shipment-defaults/export-shipment-defaults.service';
 import { ExportShipmentImportParser } from './utils/export-shipment-import-parser.util';
+import { FindExportPerformanceDto } from './dto/find-export-performance.dto';
+import { aggregateExportPerformance } from './utils/export-performance.util';
+import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
   arr.reduce((total, item) => total + (Number(item[key]) || 0), 0);
@@ -37,6 +40,7 @@ export class ExportShipmentsService {
     @InjectRepository(ExportShipmentLine)
     private readonly exportShipmentLineRepository: Repository<ExportShipmentLine>,
     private readonly exportShipmentDefaultsService: ExportShipmentDefaultsService,
+    private readonly brandPrefixRulesService: BrandPrefixRulesService,
   ) {}
 
   // PR-075: purchaseOrderIds(들)의 PackingReceipt를 styleNo+자재 기준으로 집계해
@@ -278,6 +282,27 @@ export class ExportShipmentsService {
       relations: ['lines'],
       order: { id: 'DESC', lines: { id: 'ASC' } } as any,
     });
+  }
+
+  // PR-119: 수출 실적표. FINALIZED 문서만 집계하고(DB 조건 + 집계 함수에서 한 번 더 확인), 같은 기간의
+  // 미확정(DRAFT/REVIEWED) 문서 수는 "제외된 건수"로 따로 알려준다. 기간은 invoiceDate 기준(양끝 포함,
+  // date 컬럼을 문자열 그대로 비교해 sqlite/postgres 결과를 맞춘다).
+  async getPerformance(filter: FindExportPerformanceDto = {}) {
+    const { from, to } = filter;
+    const dateWhere = from && to ? Between(from as any, to as any) : from ? MoreThanOrEqual(from as any) : to ? LessThanOrEqual(to as any) : undefined;
+    const periodWhere = dateWhere ? { invoiceDate: dateWhere } : {};
+
+    const [finalized, excludedNotFinalized, rules] = await Promise.all([
+      this.exportShipmentRepository.find({
+        where: { status: ExportShipmentStatus.FINALIZED, ...periodWhere },
+        relations: ['lines'],
+        order: { id: 'ASC', lines: { id: 'ASC' } } as any,
+      }),
+      this.exportShipmentRepository.count({ where: { status: Not(ExportShipmentStatus.FINALIZED), ...periodWhere } }),
+      this.brandPrefixRulesService.findAll(),
+    ]);
+
+    return { ...aggregateExportPerformance(finalized, rules, { from, to }), excludedNotFinalized };
   }
 
   async findOneOrFail(id: number): Promise<ExportShipment> {

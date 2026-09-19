@@ -14,6 +14,7 @@ import { PurchaseOrderLedgerReport } from './components/PurchaseOrderLedgerRepor
 import { PackingReceiptSummaryReport } from './components/PackingReceiptSummaryReport';
 import { CashVouchersManager } from './components/CashVouchersManager';
 import { ExportShipmentManager } from './components/ExportShipmentManager';
+import { ExportPerformanceReport } from './components/ExportPerformanceReport';
 import { ExportShipmentDefaultsManager } from './components/ExportShipmentDefaultsManager';
 import { HsCodeManager } from './components/HsCodeManager';
 import { ImportShipmentManager } from './components/ImportShipmentManager';
@@ -83,7 +84,7 @@ function App() {
   // 수입통관 추적 화면(ImportShipmentManager, PR-082)이다 — 원자재 입고(옛
   // ShipmentsManager, PurchaseOrder와 연결된 별개 개념)는 PR-082에서 "Purchase
   // Orders > 입고관리" 서브탭으로 옮겼다. 기본값은 현재 개발 중인 "수출".
-  const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import'>('export');
+  const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import' | 'exportPerformance'>('export');
   const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing'>('list');
 
   const handleOrderItem = (itemId: number) => {
@@ -178,8 +179,12 @@ function App() {
                 className={`px-3 py-2 text-sm font-medium ${shipmentsSubTab === 'import' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                 onClick={() => setShipmentsSubTab('import')}
               >수입</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${shipmentsSubTab === 'exportPerformance' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setShipmentsSubTab('exportPerformance')}
+              >수출 실적표</button>
             </div>
-            {shipmentsSubTab === 'export' ? <ExportShipmentManager /> : <ImportShipmentManager />}
+            {shipmentsSubTab === 'export' ? <ExportShipmentManager /> : shipmentsSubTab === 'exportPerformance' ? <ExportPerformanceReport /> : <ImportShipmentManager />}
           </div>
         );
         case 'suppliers': return <SuppliersManager />;
