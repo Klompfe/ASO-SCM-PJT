@@ -35,9 +35,12 @@ export class ImportShipmentPackingDetailsService {
 
   // 여러 색상/사이즈 줄을 한 번에 등록(엑셀 자동연동이 아직 없어 전부 MANUAL로
   // 저장 — DETAIL PACKING 시트 실제 구조를 확보하면 후속 PR에서 EXCEL 값도 쓰게 된다).
+  // PR-112: 엑셀(DPKL 시트) 자동 파싱 경로는 source=EXCEL로 넘긴다. 항상 "추가"만
+  // 하고 기존 행을 지우거나 덮어쓰지 않는다(MANUAL과 공존).
   async createMany(
     importShipmentId: number,
     dto: CreateImportShipmentPackingDetailsDto,
+    source: ImportShipmentPackingDetailSource = ImportShipmentPackingDetailSource.MANUAL,
   ): Promise<ImportShipmentPackingDetail[]> {
     const shipment = await this.findShipmentOrFail(importShipmentId);
 
@@ -49,7 +52,7 @@ export class ImportShipmentPackingDetailsService {
           color: row.color,
           size: row.size,
           qty: row.qty,
-          source: ImportShipmentPackingDetailSource.MANUAL,
+          source,
         }),
       ),
     );

@@ -175,7 +175,11 @@ export class ImportShipmentExcelParser {
     const sheets = readAllSheets(buffer);
 
     const IV_FOB_SIGNATURE = ['DESCRIPTION', 'STYLENO', 'QUANTITYPCS', 'UNIT', 'FOBPRICE', 'AMOUNT', 'HSCODE'];
-    const PK_SIGNATURE = ['DESCRIPTION', 'STYLENO', 'QUANTITYPCS', 'PACKAGES', 'GROSSWEIGHTKGS'];
+    // PR-112: 항공/카톤 건(TYVN2026-22/27)은 PK 헤더가 "Packages\r\n(CTNS)"라 정규화하면
+    // PACKAGESCTNS가 되어 기존 'PACKAGES' 정확 일치 조건에 걸려 업로드 자체가 400이었다.
+    // Packages 컬럼은 이 파서가 쓰지 않으므로(packageCount는 항상 null) 서명에서 뺀다 —
+    // GROSSWEIGHTKGS가 IV FOB와 PK를 구분해 준다.
+    const PK_SIGNATURE = ['DESCRIPTION', 'STYLENO', 'QUANTITYPCS', 'GROSSWEIGHTKGS'];
 
     const ivFobSheet = sheets.find((s) => findHeaderRow(s.rows, IV_FOB_SIGNATURE) !== -1);
     const pkSheet = sheets.find((s) => findHeaderRow(s.rows, PK_SIGNATURE) !== -1);

@@ -12,6 +12,15 @@ import { getGoodsReceipts, createGoodsReceipt, type GoodsReceipt } from '../api/
 import { getErrorMessage } from '../utils/errorMessage';
 import { GoodsReceiptPrintView } from './GoodsReceiptPrintView';
 
+// PR-112: 엑셀(DPKL 시트)에서 자동으로 들어온 행과 수기입력 행을 구분해 보여준다.
+const SourceBadge: React.FC<{ source: string }> = ({ source }) => (
+  <span
+    className={`px-2 py-0.5 rounded text-xs font-medium ${source === 'EXCEL' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}
+  >
+    {source === 'EXCEL' ? 'EXCEL' : 'MANUAL'}
+  </span>
+);
+
 interface GoodsReceiptPanelProps {
   importShipmentId: number;
 }
@@ -25,8 +34,8 @@ interface ReviewLine {
 }
 
 // PR-107: 색상·사이즈별 상세내역 관리 + 완제품입고증 작성. ImportShipmentManager의
-// shipment 행을 펼치면 이 패널이 나온다 — 엑셀 자동연동(DETAIL PACKING 시트)이
-// 아직 없어 상세내역은 전부 화면에서 직접 입력한다.
+// shipment 행을 펼치면 이 패널이 나온다 — 상세내역은 엑셀 업로드(PR-112, DPKL 시트
+// 자동 파싱, source=EXCEL)로 들어오거나 화면에서 직접 입력(source=MANUAL)한다.
 export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShipmentId }) => {
   const [details, setDetails] = useState<ImportShipmentPackingDetail[]>([]);
   const [receipts, setReceipts] = useState<GoodsReceipt[]>([]);
@@ -221,7 +230,7 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
                       <td className="py-1 pr-2">
                         <input type="number" className="border rounded px-1 py-0.5 text-sm w-20" value={editDraft.qty} onChange={(e) => setEditDraft({ ...editDraft, qty: Number(e.target.value) })} />
                       </td>
-                      <td className="py-1 pr-2 text-xs text-gray-400">{d.source}</td>
+                      <td className="py-1 pr-2"><SourceBadge source={d.source} /></td>
                       <td className="py-1 pr-2"></td>
                       <td className="py-1 pr-2 space-x-1 whitespace-nowrap">
                         <button className="text-blue-600 text-xs" onClick={() => saveEdit(d.id)}>저장</button>
@@ -233,7 +242,7 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
                       <td className="py-1 pr-2">{d.color}</td>
                       <td className="py-1 pr-2">{d.size}</td>
                       <td className="py-1 pr-2">{d.qty}</td>
-                      <td className="py-1 pr-2 text-xs text-gray-400">{d.source}</td>
+                      <td className="py-1 pr-2"><SourceBadge source={d.source} /></td>
                       <td className="py-1 pr-2">
                         {d.hasReceipt ? (
                           <span className="px-2 py-0.5 rounded bg-green-100 text-green-800 text-xs font-medium">작성완료</span>

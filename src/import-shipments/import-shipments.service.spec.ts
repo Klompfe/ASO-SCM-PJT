@@ -9,8 +9,12 @@ import { MasterStyle } from '../styles/entities/master-style.entity';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
 import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
+import { ImportShipmentPackingDetailsService } from './import-shipment-packing-details.service';
+import { ImportShipmentPackingDetailExcelParser } from './utils/import-shipment-packing-detail-excel-parser.util';
+import { ImportShipmentPackingDetailSource } from './entities/import-shipment-packing-detail.entity';
 
 jest.mock('./utils/import-shipment-excel-parser.util');
+jest.mock('./utils/import-shipment-packing-detail-excel-parser.util');
 
 describe('ImportShipmentsService', () => {
   let service: ImportShipmentsService;
@@ -19,13 +23,17 @@ describe('ImportShipmentsService', () => {
   let masterStyleRepo: Repository<MasterStyle>;
   let hsCodeService: HsCodeClassificationsService;
   const mockBrandPrefixRulesService = { findAll: jest.fn().mockResolvedValue([]) };
+  const mockPackingDetailsService = { createMany: jest.fn().mockResolvedValue([]) };
 
   beforeEach(async () => {
     mockBrandPrefixRulesService.findAll.mockResolvedValue([]);
+    mockPackingDetailsService.createMany.mockClear();
+    (ImportShipmentPackingDetailExcelParser.parse as jest.Mock).mockReturnValue(null);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ImportShipmentsService,
         { provide: BrandPrefixRulesService, useValue: mockBrandPrefixRulesService },
+        { provide: ImportShipmentPackingDetailsService, useValue: mockPackingDetailsService },
         {
           provide: getRepositoryToken(ImportShipment),
           useValue: {
@@ -424,6 +432,73 @@ describe('ImportShipmentsService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].styleNo).toBe('BF6821C13');
+    });
+  });
+
+  // PR-112: DPKL 시트 파싱 결과를 같은 업로드에서 만든 여러 ImportShipment에 styleNo
+  // 기준으로 나눠 source=EXCEL로 저장한다.
+  describe('importFromFile — DPKL 상세포장내역 배분 (PR-112)', () => {
+    const line = (styleNo: string) => ({
+      styleNo, description: 'D', qty: 1, unit: 'PCS', unitPrice: 1, amount: 1,
+      invoiceHsCode: null, netWeight: null, grossWeight: null, packageCount: null,
+    });
+    const header = { invoiceNo: 'T', invoiceDate: null, portOfLoading: null, finalDestination: null, carrier: null, sailingDate: null };
+
+    beforeEach(() => {
+      (masterStyleRepo.findOne as jest.Mock).mockResolvedValue({ styleNo: 'exists' });
+      (shipmentRepo.findOne as jest.Mock).mockImplementation(() => Promise.resolve({ id: 1, styleNo: 'A', lines: [] }));
+      (hsCodeService.findByStyle as jest.Mock).mockRejectedValue(new NotFoundException('none'));
+      (ImportShipmentExcelParser.parse as jest.Mock).mockReturnValue({
+        header,
+        lines: [line('A'), line('B')],
+        warnings: [],
+      });
+    });
+
+    it('스타일별 상세내역을 각 shipment에 source=EXCEL로 배분한다', async () => {
+      (ImportShipmentPackingDetailExcelParser.parse as jest.Mock).mockReturnValue({
+        sheetName: '적재순',
+        rows: [
+          { styleNo: 'A', color: 'BK', size: 'S', qty: 3 },
+          { styleNo: 'B', color: 'RD', size: 'M', qty: 5 },
+          { styleNo: 'A', color: 'BK', size: 'M', qty: 4 },
+        ],
+      });
+
+      await service.importFromFile(Buffer.from(''));
+
+      expect(mockPackingDetailsService.createMany).toHaveBeenCalledTimes(2);
+      expect(mockPackingDetailsService.createMany).toHaveBeenNthCalledWith(
+        1, 1,
+        { details: [{ color: 'BK', size: 'S', qty: 3 }, { color: 'BK', size: 'M', qty: 4 }] },
+        ImportShipmentPackingDetailSource.EXCEL,
+      );
+      expect(mockPackingDetailsService.createMany).toHaveBeenNthCalledWith(
+        2, 1,
+        { details: [{ color: 'RD', size: 'M', qty: 5 }] },
+        ImportShipmentPackingDetailSource.EXCEL,
+      );
+    });
+
+    it('DPKL 시트가 없으면 에러 없이 건너뛴다', async () => {
+      (ImportShipmentPackingDetailExcelParser.parse as jest.Mock).mockReturnValue(null);
+
+      const result = await service.importFromFile(Buffer.from(''));
+
+      expect(mockPackingDetailsService.createMany).not.toHaveBeenCalled();
+      expect(result.warnings.some((w) => w.includes('상세포장내역'))).toBe(false);
+    });
+
+    it('DPKL에만 있고 이번 업로드로 shipment가 만들어지지 않은 스타일은 warnings로 알린다', async () => {
+      (ImportShipmentPackingDetailExcelParser.parse as jest.Mock).mockReturnValue({
+        sheetName: '품번별',
+        rows: [{ styleNo: 'ZZ', color: 'BK', size: 'S', qty: 1 }],
+      });
+
+      const result = await service.importFromFile(Buffer.from(''));
+
+      expect(mockPackingDetailsService.createMany).not.toHaveBeenCalled();
+      expect(result.warnings.some((w) => w.includes('ZZ'))).toBe(true);
     });
   });
 });
