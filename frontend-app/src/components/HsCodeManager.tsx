@@ -10,6 +10,7 @@ import {
   type CreateHsCodeClassification,
 } from '../api/hsCodeClassifications.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { HsCodeMappingReport } from './HsCodeMappingReport';
 
 const emptyForm: CreateHsCodeClassification = {
   itemType: '',
@@ -47,6 +48,8 @@ export const HsCodeManager: React.FC = () => {
   // 품종/재직/혼용률 문구를 몰라도 스타일번호만으로 수정할 수 있게 하는 용도.
   const [lookupStyleNo, setLookupStyleNo] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
+  // PR-113: 목록 대신 인쇄/엑셀 가능한 "매핑 현황 보고서"로 보기.
+  const [reportMode, setReportMode] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -161,7 +164,13 @@ export const HsCodeManager: React.FC = () => {
             갱신되는 공식 엑셀을 업로드하면 아래 목록에 반영됩니다.
           </p>
         </div>
-        <div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setReportMode((v) => !v)}
+            className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-emerald-700"
+          >
+            {reportMode ? "목록으로 돌아가기" : "보고서 보기"}
+          </button>
           <input
             ref={fileInputRef}
             type="file"
@@ -327,6 +336,12 @@ export const HsCodeManager: React.FC = () => {
 
       {loading ? (
         <div className="text-sm text-gray-500">불러오는 중...</div>
+      ) : reportMode ? (
+        <HsCodeMappingReport
+          items={items}
+          total={total}
+          filters={{ itemType: searchItemType, fabricType: searchFabricType, composition: searchComposition, hsCode: searchHsCode, styleNo: searchStyleNo }}
+        />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
