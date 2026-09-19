@@ -6,7 +6,7 @@ import { BomItem } from './entities/bom-item.entity';
 import { UpdateBomItemDto } from './dto/update-bom-item.dto';
 import { Item, ItemType } from '../items/entities/item.entity';
 import { LABEL_SET } from './label-set.constants';
-import { areBomContentsIdentical, normalizeMaterialName } from './utils/active-bom.util';
+import { areBomContentsIdentical, normalizeMaterialName, pickActiveBom } from './utils/active-bom.util';
 
 export interface DuplicateBomItemView {
   id: number;
@@ -59,14 +59,14 @@ export class BomsService {
     private readonly itemRepository: Repository<Item>,
   ) {}
 
-  // 같은 style에 Bom이 여러 개 생성될 수 있는 알려진 이슈가 있어(CHARTER.md 5.2절),
-  // 재고 차감 로직(work-orders.service.ts)과 동일하게 id DESC로 최신 것만 반환한다.
-  async findLatestByStyleNo(styleNo: string): Promise<Bom | null> {
-    return this.bomRepository.findOne({
+  // 같은 style에 Bom이 여러 개 생성될 수 있는 알려진 이슈가 있어(CHARTER.md 5.2절), 화면/재고 차감/소요명세서가
+  // 모두 같은 규칙(pickActiveBom: 활성 BOM 중 최신)으로 사용할 BOM을 고른다(PR-121에서 도입, PR-123에서 전 구간 통일).
+  async findActiveByStyleNo(styleNo: string): Promise<Bom | null> {
+    const boms = await this.bomRepository.find({
       where: { style: { styleNo } },
       relations: ['items', 'items.material', 'style'],
-      order: { id: 'DESC' },
     });
+    return pickActiveBom(boms);
   }
 
   // PR-073: 자재명세(BOM) 상세 화면에서 혼용율/HS코드를 인라인으로 수정한다.
@@ -90,7 +90,7 @@ export class BomsService {
   // itemName이 그 스타일 BOM에 있으면 중복 추가하지 않고 건너뛴다(PR-098의 병합
   // 로직과 동일한 사상 — 기존 값을 실수로 갈아엎지 않는다).
   async addLabelSet(styleNo: string): Promise<AddLabelSetResult> {
-    const bom = await this.findLatestByStyleNo(styleNo);
+    const bom = await this.findActiveByStyleNo(styleNo);
     if (!bom) {
       throw new NotFoundException(`등록된 자재명세가 없습니다: ${styleNo}`);
     }
@@ -132,7 +132,7 @@ export class BomsService {
       added.push(label.itemName);
     }
 
-    const updatedBom = await this.findLatestByStyleNo(styleNo);
+    const updatedBom = await this.findActiveByStyleNo(styleNo);
     return { bom: updatedBom!, added, skipped };
   }
 

@@ -33,6 +33,7 @@ describe('WorkOrdersService', () => {
 
   const mockQueryRunnerManager = {
     findOne: jest.fn(),
+    find: jest.fn(),
     save: jest.fn((_entity, data) => Promise.resolve(data)),
     create: jest.fn((_entity, data) => data),
   };
@@ -170,11 +171,11 @@ describe('WorkOrdersService', () => {
       const style = { styleNo: 'STY-01' };
       const rawMaterial = { id: 200, name: '원자재A' };
       const bom = { id: 5, items: [{ material: rawMaterial, consumption: 2 }] };
+      mockQueryRunnerManager.find.mockResolvedValue([bom]);
 
       mockWoRepository.findOne.mockResolvedValue(wo);
       mockQueryRunnerManager.findOne.mockImplementation((entity: any, options: any) => {
         if (entity === MasterStyle) return Promise.resolve(style);
-        if (entity === Bom) return Promise.resolve(bom);
         if (entity === Inventory) {
           if (options.where.itemId === 200) return Promise.resolve({ id: 1, itemId: 200, quantity: 100 });
           if (options.where.itemId === 100) return Promise.resolve(null);
@@ -207,11 +208,11 @@ describe('WorkOrdersService', () => {
       const style = { styleNo: 'STY-01' };
       const rawMaterial = { id: 200, name: '원자재A' };
       const bom = { id: 5, items: [{ material: rawMaterial, consumption: 2 }] };
+      mockQueryRunnerManager.find.mockResolvedValue([bom]);
 
       mockWoRepository.findOne.mockResolvedValue(wo);
       mockQueryRunnerManager.findOne.mockImplementation((entity: any, options: any) => {
         if (entity === MasterStyle) return Promise.resolve(style);
-        if (entity === Bom) return Promise.resolve(bom);
         if (entity === Inventory && options.where.itemId === 200) {
           return Promise.resolve({ id: 1, itemId: 200, quantity: 80 }); // 필요량 2000 > 보유 80
         }
@@ -250,9 +251,9 @@ describe('WorkOrdersService', () => {
       };
       mockWoRepository.findOne.mockResolvedValueOnce(woNoBom);
       mockQueryRunnerManager.findOne.mockReset();
+      mockQueryRunnerManager.find.mockResolvedValue([]);
       mockQueryRunnerManager.findOne.mockImplementation((entity: any) => {
         if (entity === MasterStyle) return Promise.resolve({ styleNo: 'STY-NO-BOM' });
-        if (entity === Bom) return Promise.resolve(null);
         return Promise.resolve(null);
       });
 
@@ -289,19 +290,12 @@ describe('WorkOrdersService', () => {
   // 임시 스크립트(verify-completion-flow.ts)로 실제 sqlite DB에 대해 검증했던 시나리오를
   // 영구 mock 기반 유닛 테스트로 이관한다. 스크립트 자체는 검증 후 삭제되었다.
   describe('updateStatus - BOM 기반 재고 차감 시나리오 (실제 검증 스크립트 이관)', () => {
-    // TypeORM의 `findOne(Bom, { order: { id: 'DESC' } })`을 실제 쿼리처럼 흉내낸다.
-    // order 옵션을 무시하거나 잘못 바꾸면 삽입 순서(오래된 Bom)가 그대로 반환되어
-    // 아래 시나리오 A가 실패하도록 만들어, "최신 Bom 사용" 회귀를 테스트가 잡아낼 수 있게 한다.
-    function fakeBomFindOne(boms: any[], options: any) {
-      const sorted = [...boms].sort((a, b) => {
-        if (options?.order?.id === 'DESC') return b.id - a.id;
-        if (options?.order?.id === 'ASC') return a.id - b.id;
-        return 0; // order 미지정 시 삽입 순서(가장 오래된 것이 먼저) 그대로 반환
-      });
-      return Promise.resolve(sorted[0] ?? null);
-    }
+    // TypeORM의 find(Bom, { where })처럼 해당 스타일의 모든 Bom을 삽입 순서(오래된 것 먼저) 그대로 돌려준다.
+    // 서비스가 목록의 첫 번째(가장 오래된 것)를 그냥 쓰면 아래 시나리오가 실패하도록 해서, "활성 BOM 중 최신을 고른다"는
+    // 규칙(pickActiveBom)의 회귀를 테스트가 잡아낼 수 있게 한다.
+    const givenBoms = (boms: any[]) => mockQueryRunnerManager.find.mockResolvedValue([...boms]);
 
-    it('시나리오 A: 재고가 충분하면 정확히 차감하고, 같은 style에 Bom이 여러 개 있어도 최신(id DESC) 것을 사용해야 한다', async () => {
+    it('시나리오 A: 재고가 충분하면 정확히 차감하고, 같은 style에 Bom이 여러 개 있어도 활성 BOM 중 최신(id 최대)을 사용해야 한다', async () => {
       const wo = {
         id: 10,
         targetQuantity: 10,
@@ -316,10 +310,11 @@ describe('WorkOrdersService', () => {
       const bomOld = { id: 5, bomNo: 'BOM-OLD', items: [{ material: rawMaterial, consumption: 999 }] };
       const bomNew = { id: 6, bomNo: 'BOM-NEW', items: [{ material: rawMaterial, consumption: 2 }] };
 
+      givenBoms([bomNew]);
+      givenBoms([bomOld, bomNew]);
       mockWoRepository.findOne.mockResolvedValue(wo);
       mockQueryRunnerManager.findOne.mockImplementation((entity: any, options: any) => {
         if (entity === MasterStyle) return Promise.resolve(style);
-        if (entity === Bom) return fakeBomFindOne([bomOld, bomNew], options);
         if (entity === Inventory) {
           if (options.where.itemId === 200) return Promise.resolve({ id: 1, itemId: 200, quantity: 100 });
           if (options.where.itemId === 100) return Promise.resolve(null);
@@ -355,7 +350,6 @@ describe('WorkOrdersService', () => {
       mockWoRepository.findOne.mockResolvedValue(wo);
       mockQueryRunnerManager.findOne.mockImplementation((entity: any, options: any) => {
         if (entity === MasterStyle) return Promise.resolve(style);
-        if (entity === Bom) return fakeBomFindOne([bomNew], options);
         if (entity === Inventory && options.where.itemId === 200) {
           return Promise.resolve({ id: 1, itemId: 200, quantity: 80 }); // 필요량 2*1000=2000 > 보유 80
         }
@@ -367,6 +361,58 @@ describe('WorkOrdersService', () => {
       expect(mockQueryRunnerManager.save).not.toHaveBeenCalled(); // 재고 저장 자체가 없어야 함(불변)
       expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
       expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    // PR-123: 재고 차감도 "BOM 중복 검토"에서 고른 활성 BOM을 쓴다. 활성 BOM은 소요량 2, 비활성은 999로 넣어
+    // 잘못 고르면 반드시 재고부족으로 실패하게 한다. 세 경우 모두 "이전 규칙(최고 id)과 같은 결과"가 나오는 상황을 포함한다.
+    const runDeduction = async (id: number, boms: any[]) => {
+      const rawMaterial = { id: 200, name: '검증용 원단' };
+      const wo = { id, targetQuantity: 10, status: WorkOrderStatus.IN_PROGRESS, item: { id: 100, name: '완제품', styleNo: 'STY-ACTIVE' } };
+      givenBoms(boms.map((b) => ({ ...b, items: [{ material: rawMaterial, consumption: b.consumption }] })));
+      mockWoRepository.findOne.mockResolvedValue(wo);
+      mockQueryRunnerManager.findOne.mockImplementation((entity: any, options: any) => {
+        if (entity === MasterStyle) return Promise.resolve({ styleNo: 'STY-ACTIVE' });
+        if (entity === Inventory) {
+          if (options.where.itemId === 200) return Promise.resolve({ id: 1, itemId: 200, quantity: 100 });
+          return Promise.resolve(null);
+        }
+        return Promise.resolve(null);
+      });
+      return service.updateStatus(id, WorkOrderStatus.COMPLETED);
+    };
+    const rawQtyAfter = () => mockQueryRunnerManager.save.mock.calls.filter(([e]: any) => e === Inventory).find(([, d]: any) => d.itemId === 200)![1].quantity;
+
+    it('시나리오 D: id가 더 큰 BOM이 비활성이면 활성(더 오래된) BOM으로 차감한다', async () => {
+      const result = await runDeduction(20, [
+        { id: 5, isActive: true, consumption: 2 },
+        { id: 6, isActive: false, consumption: 999 },
+      ]);
+      expect(result.status).toBe(WorkOrderStatus.COMPLETED);
+      expect(rawQtyAfter()).toBe(80); // 100 - 2*10
+    });
+
+    it('시나리오 E: isActive 정보가 없으면(이전 데이터) 이전 규칙과 같이 가장 큰 id의 BOM을 쓴다', async () => {
+      await runDeduction(21, [
+        { id: 5, consumption: 999 },
+        { id: 6, consumption: 2 },
+      ]);
+      expect(rawQtyAfter()).toBe(80);
+    });
+
+    it('시나리오 F: 활성 BOM이 하나도 없는 비정상 상태도 가장 큰 id의 BOM으로 차감한다(차감 없이 넘어가지 않는다)', async () => {
+      await runDeduction(22, [
+        { id: 5, isActive: false, consumption: 999 },
+        { id: 6, isActive: false, consumption: 2 },
+      ]);
+      expect(rawQtyAfter()).toBe(80);
+    });
+
+    it('시나리오 G: 활성 BOM이 여러 건이면 그중 최신을 쓴다(마이그레이션 직후 상태와 같은 결과)', async () => {
+      await runDeduction(23, [
+        { id: 5, isActive: true, consumption: 999 },
+        { id: 6, isActive: true, consumption: 2 },
+      ]);
+      expect(rawQtyAfter()).toBe(80);
     });
 
     it('시나리오 C: styleNo가 없으면 에러 없이 status만 COMPLETED로 바뀌고 재고 로직은 실행되지 않아야 한다', async () => {

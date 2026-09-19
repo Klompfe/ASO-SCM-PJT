@@ -19,7 +19,7 @@ export class BomsController {
     if (!styleNo) {
       throw new BadRequestException('styleNo는 필수입니다.');
     }
-    const bom = await this.bomsService.findLatestByStyleNo(styleNo);
+    const bom = await this.bomsService.findActiveByStyleNo(styleNo);
     if (!bom) {
       throw new NotFoundException(`등록된 자재명세가 없습니다: ${styleNo}`);
     }

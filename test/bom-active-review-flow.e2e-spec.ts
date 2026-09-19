@@ -175,4 +175,21 @@ describe('BOM 중복 검토 + 활성 BOM 선택 (PR-121)', () => {
     const same = ((await get('/boms/duplicates').expect(200)).body.data as any[]).find((s) => s.styleNo === 'BA-SAME');
     expect(same.boms.map((b: any) => [b.id, b.isActive])).toEqual([[bom.sameOld, true], [bom.sameNew, false]]);
   });
+
+  // PR-123: BOM 조회 화면(GET /boms?styleNo=)도 "최고 id"가 아니라 활성 BOM을 돌려준다.
+  it('GET /boms?styleNo=: 활성 BOM을 돌려주고, 활성을 바꾸면 조회 결과도 따라 바뀐다(PR-123)', async () => {
+    await patch('/boms/styles/BA-DIFF/active-bom', managerToken).send({ bomId: bom.diffOld }).expect(200);
+    const old = (await get('/boms?styleNo=BA-DIFF').expect(200)).body.data;
+    expect(old.id).toBe(bom.diffOld);
+    expect(old.items).toHaveLength(1);
+
+    await patch('/boms/styles/BA-DIFF/active-bom', managerToken).send({ bomId: bom.diffNew }).expect(200);
+    const latest = (await get('/boms?styleNo=BA-DIFF').expect(200)).body.data;
+    expect(latest.id).toBe(bom.diffNew);
+    expect(latest.items).toHaveLength(2);
+
+    // 중복이 없는 스타일은 그대로, BOM이 없는 스타일은 404
+    expect((await get('/boms?styleNo=BA-ONE').expect(200)).body.data.items).toHaveLength(1);
+    await get('/boms?styleNo=NO-SUCH-STYLE').expect(404);
+  });
 });

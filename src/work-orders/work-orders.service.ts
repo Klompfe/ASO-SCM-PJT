@@ -279,12 +279,13 @@ export class WorkOrdersService {
         return await this.finalizeWithoutInventory(queryRunner, wo);
       }
 
-      // 알려진 이슈: 같은 style에 Bom이 중복 생성될 수 있음. 지금은 가장 최근(id DESC) 것만 사용한다.
-      const bom = await queryRunner.manager.findOne(Bom, {
+      // 같은 style에 Bom이 중복될 수 있어(운영 데이터) 사용할 BOM은 pickActiveBom 규칙(활성 BOM 중 최신)으로 고른다
+      // — "BOM 중복 검토" 화면에서 선택한 BOM과 재고 차감이 항상 같은 BOM을 쓰도록 PR-123에서 통일했다.
+      const styleBoms = await queryRunner.manager.find(Bom, {
         where: { style: { styleNo: style.styleNo } },
-        order: { id: 'DESC' },
         relations: ['items', 'items.material'],
       });
+      const bom = pickActiveBom(styleBoms);
 
       if (!bom) {
         this.logger.warn(
