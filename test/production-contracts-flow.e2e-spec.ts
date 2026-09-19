@@ -156,4 +156,33 @@ describe('생산계약(ProductionContract) 흐름 (PR-093)', () => {
       .expect(200);
     expect(getRes.body.data.styleNo).toBe('PC-E2E-GET');
   });
+
+  // PR-115: 계약일 기간(from/to) 필터 — 양끝 포함, 한쪽만 줘도 동작, 잘못된 형식은 400.
+  it('계약일 from/to 필터: 양끝 포함, 한쪽만 지정 가능, 형식 오류는 400', async () => {
+    const mk = (styleNo: string, contractDate: string, pending: boolean) =>
+      request(app.getHttpServer())
+        .post('/production-contracts')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          styleNo, manufacturerId, quantity: 10, contractDate,
+          ...(pending ? { priceSource: 'CMT_INVOICE' } : { priceSource: 'PRE_AGREED', cmtPrice: 1 }),
+        })
+        .expect(201);
+    await mk('PC-RNG-A', '2031-03-01', false);
+    await mk('PC-RNG-B', '2031-03-15', true);
+    await mk('PC-RNG-C', '2031-03-31', false);
+    await mk('PC-RNG-D', '2031-04-01', true);
+
+    const list = async (q: string) =>
+      (await request(app.getHttpServer()).get(`/production-contracts${q}`).set('Authorization', `Bearer ${token}`).expect(200))
+        .body.data.map((c: any) => c.styleNo).filter((n: string) => n.startsWith('PC-RNG-')).sort();
+
+    expect(await list('?from=2031-03-01&to=2031-03-31')).toEqual(['PC-RNG-A', 'PC-RNG-B', 'PC-RNG-C']);
+    expect(await list('?from=2031-03-15&to=2031-03-15')).toEqual(['PC-RNG-B']);
+    expect(await list('?from=2031-03-16')).toEqual(['PC-RNG-C', 'PC-RNG-D']);
+    expect(await list('?to=2031-03-14')).toEqual(['PC-RNG-A']);
+    expect(await list('')).toEqual(['PC-RNG-A', 'PC-RNG-B', 'PC-RNG-C', 'PC-RNG-D']);
+    expect(await list('?from=2032-01-01&to=2032-12-31')).toEqual([]);
+    await request(app.getHttpServer()).get('/production-contracts?from=notadate').set('Authorization', `Bearer ${token}`).expect(400);
+  });
 });

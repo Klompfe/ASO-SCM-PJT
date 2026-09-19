@@ -9,16 +9,16 @@ import {
 } from '../api/productionContracts.service';
 import { getSuppliers, type Supplier } from '../api/suppliers.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { PrintableReport } from './PrintableReport';
+import {
+  PRICE_STATUS_LABELS,
+  describeContractFilters,
+  priceTextOf,
+  productionContractColumns,
+  summarizeContracts,
+} from '../utils/productionContractReport';
 
-const PRICE_SOURCE_LABELS: Record<ProductionContractPriceSource, string> = {
-  PRE_AGREED: '사전확정',
-  CMT_INVOICE: 'CMT연동대기',
-};
-
-const PRICE_SOURCE_BADGE_STYLES: Record<ProductionContractPriceSource, string> = {
-  PRE_AGREED: 'bg-blue-100 text-blue-800',
-  CMT_INVOICE: 'bg-yellow-100 text-yellow-800',
-};
+const fmtNum = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
 
 const emptyForm = {
   styleNo: '',
@@ -36,11 +36,16 @@ export const ProductionContractsManager: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  // PR-115: 계약일 기간 필터. 보고서 부제에는 입력창 값이 아니라 마지막으로 조회한 조건을 쓴다.
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
+  const [applied, setApplied] = useState<{ from?: string; to?: string }>({});
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (filter: { from?: string; to?: string } = {}) => {
     setLoading(true);
     try {
-      const [contractsRes, suppliersRes] = await Promise.all([getProductionContracts(), getSuppliers()]);
+      setApplied(filter);
+      const [contractsRes, suppliersRes] = await Promise.all([getProductionContracts(filter), getSuppliers()]);
       setContracts(Array.isArray(contractsRes) ? contractsRes : []);
       setSuppliers(Array.isArray(suppliersRes) ? suppliersRes : []);
     } catch (err: any) {
@@ -53,6 +58,23 @@ export const ProductionContractsManager: React.FC = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  const reload = () => load(applied);
+
+  const handleFilterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (filterFrom && filterTo && filterFrom > filterTo) {
+      toast.error('시작일이 종료일보다 늦을 수 없습니다.');
+      return;
+    }
+    load({ from: filterFrom || undefined, to: filterTo || undefined });
+  };
+
+  const handleFilterReset = () => {
+    setFilterFrom('');
+    setFilterTo('');
+    load();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,7 +100,7 @@ export const ProductionContractsManager: React.FC = () => {
       });
       toast.success('생산계약이 등록되었습니다.');
       setForm(emptyForm);
-      await load();
+      await reload();
     } catch (err: any) {
       toast.error(getErrorMessage(err, '생산계약 등록에 실패했습니다.'));
     } finally {
@@ -91,11 +113,13 @@ export const ProductionContractsManager: React.FC = () => {
     try {
       await deleteProductionContract(id);
       toast.success('삭제되었습니다.');
-      await load();
+      await reload();
     } catch (err: any) {
       toast.error(getErrorMessage(err, '삭제에 실패했습니다.'));
     }
   };
+
+  const summary = summarizeContracts(contracts);
 
   return (
     <div>
@@ -198,55 +222,84 @@ export const ProductionContractsManager: React.FC = () => {
         </form>
       </div>
 
-      <div className="flex justify-between items-center mb-3">
-        <h3 className="text-lg font-semibold text-gray-800">생산계약 목록 ({contracts.length}건)</h3>
-        <button onClick={load} className="text-sm text-blue-600 hover:underline">새로고침</button>
-      </div>
+      <form onSubmit={handleFilterSubmit} className="flex flex-wrap items-end gap-3 mb-4">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">계약일 From</label>
+          <input type="date" aria-label="계약일 From" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">계약일 To</label>
+          <input type="date" aria-label="계약일 To" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+        </div>
+        <button type="submit" className="px-4 py-1.5 rounded bg-blue-600 text-white text-sm hover:bg-blue-700">검색</button>
+        <button type="button" onClick={handleFilterReset} className="px-4 py-1.5 rounded bg-gray-200 text-gray-700 text-sm hover:bg-gray-300">초기화</button>
+      </form>
+
       {loading ? (
         <div className="p-4 text-gray-500">불러오는 중...</div>
-      ) : contracts.length === 0 ? (
-        <p className="text-sm text-gray-500">등록된 생산계약이 없습니다.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="bg-gray-100 text-left">
-                <th className="p-2">Style No</th>
-                <th className="p-2">제조사</th>
-                <th className="p-2">단가원천</th>
-                <th className="p-2">단가</th>
-                <th className="p-2">수량</th>
-                <th className="p-2">계약일자</th>
-                <th className="p-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {contracts.map((c) => (
-                <tr key={c.id} className="border-t hover:bg-gray-50">
-                  <td className="p-2 font-medium">{c.styleNo}</td>
-                  <td className="p-2">{c.manufacturer?.name ?? `#${c.manufacturerId}`}</td>
-                  <td className="p-2">
-                    <span className={`px-2 py-1 rounded text-xs font-semibold ${PRICE_SOURCE_BADGE_STYLES[c.priceSource]}`}>
-                      {PRICE_SOURCE_LABELS[c.priceSource]}
-                    </span>
-                  </td>
-                  <td className="p-2">
-                    {c.priceStatus === 'PENDING_CMT_INVOICE' ? (
-                      <span className="text-yellow-700">CMT 인보이스 대기중</span>
-                    ) : (
-                      c.cmtPrice
-                    )}
-                  </td>
-                  <td className="p-2">{c.quantity}</td>
-                  <td className="p-2">{c.contractDate}</td>
-                  <td className="p-2">
-                    <button onClick={() => handleDelete(c.id)} className="text-red-600 hover:underline text-xs">삭제</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <PrintableReport
+          title="생산계약 현황 보고서"
+          subtitle={describeContractFilters(applied)}
+          columns={productionContractColumns}
+          rows={contracts}
+          fileName="생산계약_현황"
+        >
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            {[
+              ['전체', `${summary.total}건`, `수량 ${fmtNum(summary.confirmedQty + summary.pendingQty)}`, 'text-gray-900'],
+              ['단가 확정', `${summary.confirmed}건`, `수량 ${fmtNum(summary.confirmedQty)}`, 'text-green-600'],
+              ['단가 미확정', `${summary.pending}건`, 'IV CMT 시트 확정 대기', 'text-yellow-600'],
+              ['미확정 총 수량', fmtNum(summary.pendingQty), '추후 정산 대상 물량', 'text-red-600'],
+            ].map(([label, value, sub, color]) => (
+              <div key={label} className="border border-gray-200 rounded-lg p-3 text-center bg-white">
+                <p className="text-xs text-gray-500">{label}</p>
+                <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
+                <p className="text-xs text-gray-400 mt-1">{sub}</p>
+              </div>
+            ))}
+          </div>
+          {contracts.length === 0 ? (
+            <p className="text-sm text-gray-500">등록된 생산계약이 없습니다.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-100 text-left">
+                    <th className="p-2">스타일번호</th>
+                    <th className="p-2">제조사</th>
+                    <th className="p-2">계약일</th>
+                    <th className="p-2 text-right">수량</th>
+                    <th className="p-2">단가</th>
+                    <th className="p-2">단가 상태</th>
+                    <th className="p-2 print:hidden"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {contracts.map((c) => (
+                    <tr key={c.id} className="border-t hover:bg-gray-50">
+                      <td className="p-2 font-medium">{c.styleNo}</td>
+                      <td className="p-2">{c.manufacturer?.name ?? `#${c.manufacturerId}`}</td>
+                      <td className="p-2">{String(c.contractDate).slice(0, 10)}</td>
+                      <td className="p-2 text-right">{fmtNum(Number(c.quantity))}</td>
+                      <td className="p-2">
+                        {c.priceStatus === 'PENDING_CMT_INVOICE' ? <span className="text-yellow-700">{priceTextOf(c)}</span> : priceTextOf(c)}
+                      </td>
+                      <td className="p-2">
+                        <span className={`px-2 py-1 rounded text-xs font-semibold ${c.priceStatus === 'CONFIRMED' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                          {PRICE_STATUS_LABELS[c.priceStatus] ?? c.priceStatus}
+                        </span>
+                      </td>
+                      <td className="p-2 print:hidden">
+                        <button onClick={() => handleDelete(c.id)} className="text-red-600 hover:underline text-xs">삭제</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </PrintableReport>
       )}
     </div>
   );

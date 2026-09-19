@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Between, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import {
   ProductionContract,
   ProductionContractPriceSource,
@@ -8,6 +8,15 @@ import {
 } from './entities/production-contract.entity';
 import { CreateProductionContractDto } from './dto/create-production-contract.dto';
 import { UpdateProductionContractDto } from './dto/update-production-contract.dto';
+import { FindProductionContractsDto } from './dto/find-production-contracts.dto';
+
+// PR-115: 계약일(date 컬럼) 기간 필터 — 문자열 그대로 비교해 sqlite/postgres 결과를 맞춘다(cash-vouchers와 동일).
+function buildDateWhere(from?: string, to?: string) {
+  if (from && to) return Between(from as any, to as any);
+  if (from) return MoreThanOrEqual(from as any);
+  if (to) return LessThanOrEqual(to as any);
+  return undefined;
+}
 
 @Injectable()
 export class ProductionContractsService {
@@ -51,8 +60,10 @@ export class ProductionContractsService {
     return this.productionContractRepository.save(contract);
   }
 
-  async findAll(): Promise<ProductionContract[]> {
+  async findAll(filter: FindProductionContractsDto = {}): Promise<ProductionContract[]> {
+    const dateWhere = buildDateWhere(filter.from, filter.to);
     return this.productionContractRepository.find({
+      where: dateWhere ? { contractDate: dateWhere } : {},
       relations: ['manufacturer'],
       order: { id: 'DESC' },
     });
