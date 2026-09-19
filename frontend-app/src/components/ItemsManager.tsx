@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
+import { getItems, getAllItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
 import { getBomByStyleNo, updateBomItem, addBomLabelSet, type BomDetail, type BomItemRow } from '../api/boms.service';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
 import { getErrorMessage } from '../utils/errorMessage';
+import { ItemCatalogReport } from './ItemCatalogReport';
 
 interface ItemsManagerProps {
   onOrderItem?: (itemId: number) => void;
@@ -42,6 +43,10 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   // CreateItemDto에는 이미 있었지만 화면에 입력란이 없어 죽어있던 필드들).
   const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '' });
   const [loading, setLoading] = useState<boolean>(false);
+  // PR-117: 카탈로그 보고서 — 열려 있는 동안 현재 검색조건(filter.type/keyword)에 맞는 전체 품목을 불러온다.
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogItems, setCatalogItems] = useState<Item[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
   // PR-073: 품목 마스터 테이블의 영문명 인라인 수정 (Suppliers/Buyers와 동일한 패턴).
   // PR-104: spec/description/styleNo도 함께 수정 가능하게 확장.
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
@@ -111,6 +116,17 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   useEffect(() => {
     loadItems();
   }, [loadItems]);
+
+  useEffect(() => {
+    if (!catalogOpen) return;
+    let cancelled = false;
+    setCatalogLoading(true);
+    getAllItems({ type: filter.type, keyword: filter.keyword })
+      .then((all) => { if (!cancelled) setCatalogItems(all); })
+      .catch((error) => { if (!cancelled) { toast.error(getErrorMessage(error, '카탈로그 품목을 불러오는 데 실패했습니다.')); setCatalogItems([]); } })
+      .finally(() => { if (!cancelled) setCatalogLoading(false); });
+    return () => { cancelled = true; };
+  }, [catalogOpen, filter.type, filter.keyword]);
 
   // PR-103: 구분(type)/키워드(이름·코드) 검색 — 검색 시 page를 1로 리셋한다.
   const handleItemSearchSubmit = (e: React.FormEvent) => {
@@ -716,6 +732,23 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
             </tbody>
           </table>
           </div>
+
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setCatalogOpen((v) => !v)}
+              className="bg-indigo-600 text-white px-4 py-2 rounded font-medium hover:bg-indigo-700"
+            >
+              {catalogOpen ? '카탈로그 보고서 닫기' : '카탈로그 보고서 (인쇄/엑셀)'}
+            </button>
+          </div>
+          {catalogOpen && (
+            catalogLoading ? (
+              <div className="text-sm text-gray-500">카탈로그 불러오는 중...</div>
+            ) : (
+              <ItemCatalogReport items={catalogItems} filter={{ type: filter.type, keyword: filter.keyword }} />
+            )
+          )}
         </div>
       </details>
     </div>

@@ -36,6 +36,19 @@ export interface CreateItem {
 export type UpdateItem = Partial<CreateItem>;
 
 export const getItems = (filter: GetItemsFilter): Promise<any> => apiClient.get('/items', { params: filter });
+// PR-117: 카탈로그 보고서용 — 페이지네이션(최대 100건/페이지)을 끝까지 따라가 조건에 맞는 전체 품목을 모은다.
+export const getAllItems = async (filter: { type?: string; keyword?: string }): Promise<Item[]> => {
+  const all: Item[] = [];
+  let page = 1;
+  let totalPages = 1;
+  do {
+    const res = await getItems({ ...filter, page, limit: 100 });
+    all.push(...(Array.isArray(res?.items) ? res.items : []));
+    totalPages = Number(res?.meta?.totalPages) || 1;
+    page += 1;
+  } while (page <= totalPages);
+  return all;
+};
 export const createItem = (data: CreateItem): Promise<any> => apiClient.post('/items', data);
 export const updateItem = (id: number, data: UpdateItem): Promise<any> => apiClient.patch(`/items/${id}`, data);
 export const uploadPreview = (file: File): Promise<any> => {
