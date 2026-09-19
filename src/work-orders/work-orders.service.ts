@@ -18,6 +18,13 @@ import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/
 import { calculateMaterialRequirements } from './utils/material-requirements.util';
 import { pickActiveBom } from '../boms/utils/active-bom.util';
 
+const EMPTY_REQUIREMENTS = {
+  rows: [] as ReturnType<typeof calculateMaterialRequirements>,
+  totals: { materialCount: 0, shortageMaterialCount: 0 },
+  bom: null as { id: number; bomNo: string; version: string; isActive: boolean } | null,
+  bomCount: 0,
+};
+
 @Injectable()
 export class WorkOrdersService {
   private readonly logger = new Logger(WorkOrdersService.name);
@@ -201,7 +208,6 @@ export class WorkOrdersService {
   async getMaterialRequirements(id: number) {
     const wo = await this.findOne(id);
     const styleNo = wo.item?.styleNo ?? null;
-    const empty = { rows: [], totals: { materialCount: 0, shortageMaterialCount: 0 }, bom: null, bomCount: 0 };
     const base = {
       workOrder: {
         id: wo.id,
@@ -212,14 +218,40 @@ export class WorkOrdersService {
       },
       styleNo,
     };
+    if (!styleNo) {
+      return { ...base, reason: 'NO_STYLE_NO' as const, ...EMPTY_REQUIREMENTS };
+    }
+    return { ...base, ...(await this.expandStyleRequirements(styleNo, Number(wo.targetQuantity))) };
+  }
 
-    if (!styleNo) return { ...base, reason: 'NO_STYLE_NO' as const, ...empty };
+  // PR-126: 작업지시 없이 "스타일 + 수량"만으로 같은 계산을 한다(발주 화면의 "스타일번호로 필요 자재 찾기"). 계산은
+  // getMaterialRequirements와 완전히 같은 경로(expandStyleRequirements → calculateMaterialRequirements)를 쓴다.
+  // 수량을 안 주면 스타일 오더개요의 총 수량(StyleOverview.totalQty)을 쓰고, 그것도 없으면 0(화면에서 수량을 입력받는다).
+  async getStyleRequirements(styleNo: string, quantity?: number) {
+    const style = await this.dataSource.manager.findOne(MasterStyle, { where: { styleNo }, relations: ['overview'] });
+    const styleTotalQty = Number(style?.overview?.totalQty) || 0;
+    const requested = Number(quantity);
+    const useRequested = Number.isFinite(requested) && requested > 0;
+    const target = useRequested ? requested : styleTotalQty;
+    const expanded = await this.expandStyleRequirements(styleNo, target);
+    return {
+      styleNo,
+      styleExists: !!style,
+      quantity: target,
+      quantitySource: useRequested ? ('REQUESTED' as const) : styleTotalQty > 0 ? ('STYLE_TOTAL_QTY' as const) : ('NONE' as const),
+      styleTotalQty,
+      ...expanded,
+    };
+  }
 
+  // BOM 전개 공용 로직: 스타일의 활성 BOM(pickActiveBom) → 자재별 필요 총수량(consumption × targetQuantity) →
+  // 이미 발주한 수량(취소 제외 PENDING+RECEIVED)과 대조한 부족분.
+  private async expandStyleRequirements(styleNo: string, targetQuantity: number) {
     const manager = this.dataSource.manager;
     const boms = await manager.find(Bom, { where: { style: { styleNo } }, order: { id: 'DESC' } });
     // PR-121: 최신 id가 아니라 활성(isActive) BOM 중 최신을 쓴다("BOM 중복 검토" 화면에서 선택한 것).
     const latest = pickActiveBom(boms);
-    if (!latest) return { ...base, reason: 'NO_BOM' as const, ...empty };
+    if (!latest) return { reason: 'NO_BOM' as const, ...EMPTY_REQUIREMENTS };
 
     const bom = await manager.findOne(Bom, { where: { id: latest.id }, relations: ['items', 'items.material'] });
     const items = bom?.items ?? [];
@@ -238,9 +270,8 @@ export class WorkOrdersService {
       for (const r of raw) ordered.set(Number(r.itemId), Number(r.qty) || 0);
     }
 
-    const rows = calculateMaterialRequirements(Number(wo.targetQuantity), items, ordered);
+    const rows = calculateMaterialRequirements(targetQuantity, items, ordered);
     return {
-      ...base,
       reason: null,
       bom: { id: latest.id, bomNo: latest.bomNo, version: latest.version, isActive: latest.isActive !== false },
       bomCount: boms.length,

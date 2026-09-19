@@ -49,6 +49,7 @@ export const getAllItems = async (filter: { type?: string; keyword?: string }): 
   } while (page <= totalPages);
   return all;
 };
+export const getItem = (id: number): Promise<Item> => apiClient.get(`/items/${id}`);
 export const createItem = (data: CreateItem): Promise<any> => apiClient.post('/items', data);
 export const updateItem = (id: number, data: UpdateItem): Promise<any> => apiClient.patch(`/items/${id}`, data);
 export const uploadPreview = (file: File): Promise<any> => {

@@ -24,7 +24,9 @@ export interface CreateSupplier {
 
 export type UpdateSupplier = Partial<CreateSupplier>;
 
-export const getSuppliers = (): Promise<any> => apiClient.get('/suppliers');
+// PR-126: keyword(업체명/코드/약칭 부분일치, 대소문자 무시)를 주면 서버에서 검색한다. 생략하면 전체 목록(기존 동작).
+export const getSuppliers = (params?: { keyword?: string }): Promise<any> =>
+  apiClient.get('/suppliers', params?.keyword ? { params } : undefined);
 export const createSupplier = (data: CreateSupplier): Promise<any> => apiClient.post('/suppliers', data);
 export const updateSupplier = (id: number, data: UpdateSupplier): Promise<any> =>
   apiClient.patch(`/suppliers/${id}`, data);

@@ -7,11 +7,13 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
+import { GetSuppliersFilterDto } from './dto/get-suppliers-filter.dto';
 import { Supplier } from './entities/supplier.entity';
 
 @ApiTags('Suppliers (공급업체 관리)')
@@ -29,10 +31,10 @@ export class SuppliersController {
   }
 
   @Get()
-  @ApiOperation({ summary: '공급업체 전체 목록 조회' })
+  @ApiOperation({ summary: '공급업체 목록 조회 (keyword: 업체명/코드/약칭 부분일치, 대소문자 무시)' })
   @ApiResponse({ status: 200, description: '조회 성공', type: [Supplier] })
-  findAll(): Promise<Supplier[]> {
-    return this.suppliersService.findAll();
+  findAll(@Query() filter: GetSuppliersFilterDto): Promise<Supplier[]> {
+    return this.suppliersService.findAll(filter);
   }
 
   @Get(':id')

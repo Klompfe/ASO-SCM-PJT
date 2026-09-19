@@ -84,6 +84,16 @@ export const commitWorkOrderAnalysis = (result: AiWorkOrderResult): Promise<any>
 // PR-120: BOM 소요명세서(작업지시 물량 기준 자재 소요량/이미 발주 수량/부족 수량).
 export const getMaterialRequirements = (id: number): Promise<MaterialRequirements> =>
   apiClient.get(`/work-orders/${id}/material-requirements`);
+// PR-126: 작업지시 없이 스타일+수량으로 같은 계산(발주 화면의 "스타일번호로 필요 자재 찾기"). quantity 생략 시 스타일 총 수량.
+export interface StyleRequirements extends Omit<MaterialRequirements, 'workOrder' | 'styleNo'> {
+  styleNo: string;
+  styleExists: boolean;
+  quantity: number;
+  quantitySource: 'REQUESTED' | 'STYLE_TOTAL_QTY' | 'NONE';
+  styleTotalQty: number;
+}
+export const getStyleRequirements = (styleNo: string, quantity?: number): Promise<StyleRequirements> =>
+  apiClient.get('/work-orders/style-requirements', { params: { styleNo, ...(quantity ? { quantity } : {}) } });
 export const getWorkOrderSpec = (styleNo: string): Promise<any> =>
   apiClient.get('/work-orders/spec', { params: { styleNo } });
 

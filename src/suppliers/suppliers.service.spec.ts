@@ -19,6 +19,7 @@ describe('SuppliersService', () => {
           provide: getRepositoryToken(Supplier),
           useValue: {
             find: jest.fn(),
+            createQueryBuilder: jest.fn(),
             create: jest.fn((v) => v),
             save: jest.fn((v) => Promise.resolve({ id: 1, ...v })),
             findOne: jest.fn(),
@@ -155,6 +156,41 @@ describe('SuppliersService', () => {
       await expect(service.create({ name: 'Global Materials', abbrCode: 'GM' } as any)).rejects.toThrow(
         'some other db error',
       );
+    });
+  });
+
+  // PR-126: 발주 화면 공급업체 "검색 선택" — keyword 부분일치(대소문자 무시).
+  describe('findAll — keyword 검색 (PR-126)', () => {
+    const buildQb = (result: any[]) => {
+      const qb: any = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(result),
+      };
+      (repo.createQueryBuilder as jest.Mock).mockReturnValue(qb);
+      return qb;
+    };
+
+    it('keyword가 없으면(또는 공백이면) 기존과 같이 전체를 id 내림차순으로 조회한다(쿼리빌더 안 씀)', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([{ id: 2 }, { id: 1 }]);
+      expect(await service.findAll()).toEqual([{ id: 2 }, { id: 1 }]);
+      await service.findAll({ keyword: '   ' });
+      await service.findAll({});
+      expect(repo.find).toHaveBeenCalledWith({ order: { id: 'DESC' } });
+      expect(repo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('keyword가 있으면 업체명/코드/약칭에 LOWER() LIKE LOWER() 부분일치 조건을 건다(양쪽 DB에서 대소문자 무시)', async () => {
+      const qb = buildQb([{ id: 3, name: 'Alpha Textile' }]);
+      const result = await service.findAll({ keyword: ' Alpha ' });
+      expect(result).toEqual([{ id: 3, name: 'Alpha Textile' }]);
+      const [clause, params] = qb.where.mock.calls[0];
+      expect(clause).toContain('LOWER(s.name) LIKE LOWER(:kw)');
+      expect(clause).toContain('LOWER(s.code) LIKE LOWER(:kw)');
+      expect(clause).toContain('LOWER(s.abbrCode) LIKE LOWER(:kw)');
+      expect(params).toEqual({ kw: '%Alpha%' }); // 앞뒤 공백은 제거
+      expect(qb.orderBy).toHaveBeenCalledWith('s.id', 'DESC');
+      expect(repo.find).not.toHaveBeenCalled();
     });
   });
 });

@@ -4,6 +4,7 @@ import { Like, Repository } from 'typeorm';
 import { Supplier } from './entities/supplier.entity';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
+import { GetSuppliersFilterDto } from './dto/get-suppliers-filter.dto';
 
 // PR-088: 회사 고정 접두사(상수) — "TY-{업체약칭}-{YY}{일련번호4자리}" 형식의
 // 자동채번(예: TY-GM-260001)에 쓴다(Buyer, PR-085와 동일 패턴).
@@ -88,10 +89,19 @@ export class SuppliersService {
     throw new ConflictException('공급업체 코드 자동채번에 반복적으로 실패했습니다. 잠시 후 다시 시도해 주세요.');
   }
 
-  async findAll(): Promise<Supplier[]> {
-    return await this.supplierRepository.find({
-      order: { id: 'DESC' },
-    });
+  // PR-126: keyword가 있으면 업체명/코드/약칭 부분일치(LOWER() LIKE LOWER()라 SQLite/PostgreSQL에서 똑같이 동작).
+  async findAll(filter?: GetSuppliersFilterDto): Promise<Supplier[]> {
+    const keyword = filter?.keyword?.trim();
+    if (!keyword) {
+      return await this.supplierRepository.find({
+        order: { id: 'DESC' },
+      });
+    }
+    return await this.supplierRepository
+      .createQueryBuilder('s')
+      .where('(LOWER(s.name) LIKE LOWER(:kw) OR LOWER(s.code) LIKE LOWER(:kw) OR LOWER(s.abbrCode) LIKE LOWER(:kw))', { kw: `%${keyword}%` })
+      .orderBy('s.id', 'DESC')
+      .getMany();
   }
 
   async findOne(id: number): Promise<Supplier> {
