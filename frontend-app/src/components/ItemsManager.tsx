@@ -9,6 +9,7 @@ import { StyleReviewList } from './StyleReviewList';
 import { getErrorMessage } from '../utils/errorMessage';
 import { ItemCatalogReport } from './ItemCatalogReport';
 import { Pagination } from './Pagination';
+import { selectBulkApproveTargets } from '../utils/mappingApproval';
 import { fetchItemPage } from '../utils/listQueries';
 import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
 
@@ -293,13 +294,11 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
     setModalOpen(true);
   };
 
-  // 파싱 실패했거나 이미 등록된(existsMap[styleNo]===true) 스타일은 제외한다 — 이미 등록된
-  // 스타일을 다시 커밋하면 BOM/BOM Item이 중복으로 쌓인다(MappingPreviewModal의 개별 승인과
-  // 동일한 제약, mapping-commit.service.ts가 덮어쓰기를 지원하지 않기 때문).
+  // 파싱 실패했거나 이미 등록된(existsMap[styleNo]===true) 스타일은 제외한다. 재승인은 자재를 중복으로 쌓지 않는 "병합"이지만
+  // (mapping-commit.service.ts, PR-098), 여러 스타일을 개별 확인 없이 한 번에 승인하면 이미 등록된 스타일의 스타일 정보가 잘못된
+  // 파일의 값으로 갱신될 수 있다. 그래서 이미 등록된 스타일은 일괄승인 대상이 아니고, 한 줄씩 열어 확인한 뒤 개별로 재승인한다.
   const handleBulkApprove = async () => {
-    const targets = parsedStyles.filter(
-      (s): s is ParsedStyleResult & { styleNo: string } => !!s.styleNo && !s.parseError && !existsMap[s.styleNo],
-    );
+    const targets = selectBulkApproveTargets(parsedStyles, existsMap);
     if (targets.length === 0) {
       toast.error('일괄 승인할 대상이 없습니다(파싱 실패했거나 이미 등록된 스타일은 제외됩니다).');
       return;
