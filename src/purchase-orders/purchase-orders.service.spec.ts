@@ -223,4 +223,64 @@ describe('PurchaseOrdersService', () => {
       }
     });
   });
+
+  // PR-127: 발주 목록의 keyword 검색 + page/limit skip/take 실제 적용(예전엔 DTO에 필드만 있고 쿼리에 안 걸려 항상 전량 반환).
+  describe('findAll — keyword 검색 / skip·take (PR-127)', () => {
+    const buildQb = (result: any[] = []) => {
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(result),
+        getManyAndCount: jest.fn().mockResolvedValue([result, result.length]),
+      };
+      (mockPoRepository as any).createQueryBuilder = jest.fn().mockReturnValue(qb);
+      return qb;
+    };
+
+    it('page/limit를 모두 생략하면 skip/take를 걸지 않는다(원장/리포트 등 전량을 기대하는 기존 호출부 호환)', async () => {
+      const qb = buildQb([{ id: 1 }]);
+      await service.findAll({});
+      await service.findAll();
+      expect(qb.skip).not.toHaveBeenCalled();
+      expect(qb.take).not.toHaveBeenCalled();
+    });
+
+    it('page/limit를 주면 실제로 skip/take가 적용된다(회귀 방지 — page=3, limit=20 → skip 40, take 20)', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ page: 3, limit: 20 });
+      expect(qb.skip).toHaveBeenCalledWith(40);
+      expect(qb.take).toHaveBeenCalledWith(20);
+    });
+
+    it('limit만 주면 첫 페이지, page만 주면 기본 10건 단위로 적용된다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ limit: 5 });
+      expect(qb.skip).toHaveBeenLastCalledWith(0);
+      expect(qb.take).toHaveBeenLastCalledWith(5);
+      await service.findAll({ page: 2 });
+      expect(qb.skip).toHaveBeenLastCalledWith(10);
+      expect(qb.take).toHaveBeenLastCalledWith(10);
+    });
+
+    it('keyword가 있으면 품목명/코드/공급업체명에 LOWER() LIKE LOWER() 부분일치를 걸고 앞뒤 공백은 제거한다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ keyword: ' Denim ' });
+      const call = qb.andWhere.mock.calls.find(([clause]: [string]) => clause.includes(':kw'));
+      expect(call).toBeDefined();
+      expect(call[0]).toContain('LOWER(item.name) LIKE LOWER(:kw)');
+      expect(call[0]).toContain('LOWER(item.code) LIKE LOWER(:kw)');
+      expect(call[0]).toContain('LOWER(supplier.name) LIKE LOWER(:kw)');
+      expect(call[1]).toEqual({ kw: '%Denim%' });
+    });
+
+    it('keyword가 없거나 공백이면 검색 조건을 걸지 않는다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ keyword: '   ' });
+      expect(qb.andWhere.mock.calls.some(([clause]: [string]) => clause.includes(':kw'))).toBe(false);
+    });
+  });
 });

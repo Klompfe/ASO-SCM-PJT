@@ -11,10 +11,21 @@ import {
 } from '../api/cashVouchers.service';
 import { getBuyers, type Buyer } from '../api/buyers.service';
 import { getSuppliers, type Supplier } from '../api/suppliers.service';
-import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
-import { getProductionContracts, type ProductionContract } from '../api/productionContracts.service';
+import { type PurchaseOrder } from '../api/purchaseOrders.service';
+import { type ProductionContract } from '../api/productionContracts.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { CashVoucherStatementView } from './CashVoucherStatementView';
+import { SearchSelectField } from './SearchSelectField';
+import {
+  masterLabel,
+  productionContractLabel,
+  purchaseOrderLabel,
+  searchBuyers,
+  searchProductionContracts,
+  searchPurchaseOrders,
+  searchSuppliers,
+} from '../utils/searchFetchers';
+import { voucherLinkIds } from '../utils/cashVoucherLinks';
 
 const VOUCHER_TYPE_LABELS: Record<CashVoucherType, string> = {
   DEPOSIT: '입금',
@@ -26,14 +37,19 @@ const emptyForm = {
   voucherDate: '',
   amount: '',
   counterpartyName: '',
-  counterpartyBuyerId: '',
-  counterpartySupplierId: '',
   account: '',
   category: '',
-  relatedPurchaseOrderId: '',
-  relatedProductionContractId: '',
   note: '',
 };
+
+interface VoucherLinks {
+  buyer: Buyer | null;
+  supplier: Supplier | null;
+  purchaseOrder: PurchaseOrder | null;
+  productionContract: ProductionContract | null;
+}
+
+const emptyLinks: VoucherLinks = { buyer: null, supplier: null, purchaseOrder: null, productionContract: null };
 
 const formatAmount = (v: number) => Number(v).toLocaleString('ko-KR');
 
@@ -46,27 +62,20 @@ export const CashVouchersManager: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<CashVoucherType | ''>('');
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  // PR-127: 연결할 거래처/발주/생산계약은 <select>에 전량을 불러오지 않고(발주·생산계약은 무제한 반환이었다) 검색 선택으로 고른다.
+  const [links, setLinks] = useState<VoucherLinks>(emptyLinks);
+  // 전표 목록의 "연결" 열에서 연결된 고객사/공급업체 이름을 보여주기 위한 조회용 목록(선택 UI가 아니다 — 거래처 마스터는 소규모).
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [productionContracts, setProductionContracts] = useState<ProductionContract[]>([]);
   const [showStatement, setShowStatement] = useState(false);
 
   const loadOptions = useCallback(async () => {
     try {
-      const [buyersRes, suppliersRes, poRes, pcRes] = await Promise.all([
-        getBuyers(),
-        getSuppliers(),
-        getPurchaseOrders(),
-        getProductionContracts(),
-      ]);
+      const [buyersRes, suppliersRes] = await Promise.all([getBuyers(), getSuppliers()]);
       setBuyers(Array.isArray(buyersRes) ? buyersRes : []);
       setSuppliers(Array.isArray(suppliersRes) ? suppliersRes : []);
-      const poData = Array.isArray(poRes) ? poRes : (poRes && Array.isArray(poRes.data) ? poRes.data : []);
-      setPurchaseOrders(poData);
-      setProductionContracts(Array.isArray(pcRes) ? pcRes : []);
     } catch (err: any) {
-      toast.error(getErrorMessage(err, '거래처/발주/생산계약 목록을 불러오는 데 실패했습니다.'));
+      toast.error(getErrorMessage(err, '거래처 목록을 불러오는 데 실패했습니다.'));
     }
   }, []);
 
@@ -114,14 +123,12 @@ export const CashVouchersManager: React.FC = () => {
         counterpartyName: form.counterpartyName,
         account: form.account,
         category: form.category,
-        ...(form.counterpartyBuyerId ? { counterpartyBuyerId: Number(form.counterpartyBuyerId) } : {}),
-        ...(form.counterpartySupplierId ? { counterpartySupplierId: Number(form.counterpartySupplierId) } : {}),
-        ...(form.relatedPurchaseOrderId ? { relatedPurchaseOrderId: Number(form.relatedPurchaseOrderId) } : {}),
-        ...(form.relatedProductionContractId ? { relatedProductionContractId: Number(form.relatedProductionContractId) } : {}),
+        ...voucherLinkIds(links),
         ...(form.note ? { note: form.note } : {}),
       });
       toast.success('입출금전표가 등록되었습니다.');
       setForm(emptyForm);
+      setLinks(emptyLinks);
       await load();
     } catch (err: any) {
       toast.error(getErrorMessage(err, '등록에 실패했습니다.'));
@@ -242,55 +249,71 @@ export const CashVouchersManager: React.FC = () => {
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">거래처(고객사) 연결</label>
-            <select
-              value={form.counterpartyBuyerId}
-              onChange={(e) => setForm({ ...form, counterpartyBuyerId: e.target.value })}
-              className="border rounded px-2 py-1 w-full text-sm"
-            >
-              <option value="">연결 안 함</option>
-              {buyers.map((b) => (
-                <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
-              ))}
-            </select>
+            <SearchSelectField<Buyer>
+              value={links.buyer}
+              onChange={(picked) => setLinks({ ...links, buyer: picked })}
+              search={searchBuyers}
+              getKey={(b) => b.id}
+              getLabel={masterLabel}
+              renderRow={(b) => (<span>{b.name} <span className="text-gray-400 text-xs">{b.code}</span></span>)}
+              ariaLabel="거래처(고객사) 연결"
+              placeholder="연결 안 함"
+              title="거래처(고객사) 검색"
+              allowClear
+              className="w-full"
+            />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">거래처(공급업체) 연결</label>
-            <select
-              value={form.counterpartySupplierId}
-              onChange={(e) => setForm({ ...form, counterpartySupplierId: e.target.value })}
-              className="border rounded px-2 py-1 w-full text-sm"
-            >
-              <option value="">연결 안 함</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-              ))}
-            </select>
+            <SearchSelectField<Supplier>
+              value={links.supplier}
+              onChange={(picked) => setLinks({ ...links, supplier: picked })}
+              search={searchSuppliers}
+              getKey={(s) => s.id}
+              getLabel={masterLabel}
+              renderRow={(s) => (<span>{s.name} <span className="text-gray-400 text-xs">{s.code}</span></span>)}
+              ariaLabel="거래처(공급업체) 연결"
+              placeholder="연결 안 함"
+              title="거래처(공급업체) 검색"
+              allowClear
+              className="w-full"
+            />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">관련 발주 연결</label>
-            <select
-              value={form.relatedPurchaseOrderId}
-              onChange={(e) => setForm({ ...form, relatedPurchaseOrderId: e.target.value })}
-              className="border rounded px-2 py-1 w-full text-sm"
-            >
-              <option value="">연결 안 함</option>
-              {purchaseOrders.map((po) => (
-                <option key={po.id} value={po.id}>발주 #{po.id} ({po.item?.name ?? `#${po.itemId}`})</option>
-              ))}
-            </select>
+            <SearchSelectField<PurchaseOrder>
+              value={links.purchaseOrder}
+              onChange={(picked) => setLinks({ ...links, purchaseOrder: picked })}
+              search={searchPurchaseOrders}
+              getKey={(po) => po.id}
+              getLabel={purchaseOrderLabel}
+              renderRow={(po) => (
+                <span>
+                  {purchaseOrderLabel(po)}
+                  <span className="text-gray-400 text-xs"> · {po.supplier?.name ?? '-'} · {po.status}</span>
+                </span>
+              )}
+              ariaLabel="관련 발주 연결"
+              placeholder="연결 안 함"
+              title="관련 발주 검색 (품목명/코드/공급업체)"
+              allowClear
+              className="w-full"
+            />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">관련 생산계약 연결</label>
-            <select
-              value={form.relatedProductionContractId}
-              onChange={(e) => setForm({ ...form, relatedProductionContractId: e.target.value })}
-              className="border rounded px-2 py-1 w-full text-sm"
-            >
-              <option value="">연결 안 함</option>
-              {productionContracts.map((pc) => (
-                <option key={pc.id} value={pc.id}>{pc.styleNo} ({pc.manufacturer?.name ?? `#${pc.manufacturerId}`})</option>
-              ))}
-            </select>
+            <SearchSelectField<ProductionContract>
+              value={links.productionContract}
+              onChange={(picked) => setLinks({ ...links, productionContract: picked })}
+              search={searchProductionContracts}
+              getKey={(pc) => pc.id}
+              getLabel={productionContractLabel}
+              ariaLabel="관련 생산계약 연결"
+              placeholder="연결 안 함"
+              title="관련 생산계약 검색 (스타일번호/제조사)"
+              allowClear
+              className="w-full"
+            />
           </div>
           <div className="col-span-2">
             <label className="block text-xs text-gray-500 mb-1">메모</label>
@@ -396,7 +419,7 @@ export const CashVouchersManager: React.FC = () => {
       </div>
 
       {showStatement && (
-        <CashVoucherStatementView buyers={buyers} suppliers={suppliers} onClose={() => setShowStatement(false)} />
+        <CashVoucherStatementView onClose={() => setShowStatement(false)} />
       )}
     </div>
   );

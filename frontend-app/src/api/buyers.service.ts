@@ -27,7 +27,9 @@ export interface CreateBuyer {
 
 export type UpdateBuyer = Partial<CreateBuyer>;
 
-export const getBuyers = (): Promise<any> => apiClient.get('/buyers');
+// PR-127: keyword(고객사명/코드/브랜드약칭 부분일치, 대소문자 무시)를 주면 서버에서 검색한다. 생략하면 전체 목록(기존 동작).
+export const getBuyers = (params?: { keyword?: string }): Promise<any> =>
+  apiClient.get('/buyers', params?.keyword ? { params } : undefined);
 export const createBuyer = (data: CreateBuyer): Promise<any> => apiClient.post('/buyers', data);
 export const updateBuyer = (id: number, data: UpdateBuyer): Promise<any> =>
   apiClient.patch(`/buyers/${id}`, data);

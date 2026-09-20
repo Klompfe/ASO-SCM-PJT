@@ -89,4 +89,49 @@ describe('ProductionContractsService (PR-093)', () => {
       expect(result.priceStatus).toBe(ProductionContractPriceStatus.PENDING_CMT_INVOICE);
     });
   });
+
+  // PR-127: 입출금전표 "관련 생산계약 연결"의 검색 선택 — keyword(스타일번호/제조사명) + 선택적 page/limit.
+  describe('findAll — keyword/페이지네이션 (PR-127)', () => {
+    const buildQb = (result: any[] = []) => {
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(result),
+      };
+      (repo as any).createQueryBuilder = jest.fn().mockReturnValue(qb);
+      return qb;
+    };
+
+    it('keyword/page/limit가 없으면 기존과 같이 find()로 전량을 id 내림차순 조회한다(skip/take 없음, 배열 그대로)', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([{ id: 2 }, { id: 1 }]);
+      const result = await service.findAll({});
+      expect(result).toEqual([{ id: 2 }, { id: 1 }]);
+      expect(repo.find).toHaveBeenCalledWith({ where: {}, relations: ['manufacturer'], order: { id: 'DESC' } });
+    });
+
+    it('page/limit만 주면 find()에 skip/take가 실제로 붙는다', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([]);
+      await service.findAll({ page: 2, limit: 5 });
+      expect(repo.find).toHaveBeenCalledWith(expect.objectContaining({ skip: 5, take: 5 }));
+    });
+
+    it('keyword가 있으면 스타일번호/제조사명 LOWER() LIKE LOWER() 부분일치 쿼리로 조회하고 기간 조건도 함께 건다', async () => {
+      const qb = buildQb([{ id: 4 }]);
+      const result = await service.findAll({ keyword: ' Alpha ', from: '2026-09-01', to: '2026-09-30', page: 1, limit: 20 });
+      expect(result).toEqual([{ id: 4 }]);
+      const [clause, params] = qb.where.mock.calls[0];
+      expect(clause).toContain('LOWER(pc.styleNo) LIKE LOWER(:kw)');
+      expect(clause).toContain('LOWER(manufacturer.name) LIKE LOWER(:kw)');
+      expect(params).toEqual({ kw: '%Alpha%' });
+      expect(qb.andWhere).toHaveBeenCalledWith('pc.contractDate >= :from', { from: '2026-09-01' });
+      expect(qb.andWhere).toHaveBeenCalledWith('pc.contractDate <= :to', { to: '2026-09-30' });
+      expect(qb.skip).toHaveBeenCalledWith(0);
+      expect(qb.take).toHaveBeenCalledWith(20);
+      expect(repo.find).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { getPurchaseOrders, type GetPurchaseOrdersFilter, type PurchaseOrder } from '../api/purchaseOrders.service';
-import { getSuppliers, type Supplier } from '../api/suppliers.service';
+import { type Supplier } from '../api/suppliers.service';
+import { SearchSelectField } from './SearchSelectField';
+import { searchSuppliers } from '../utils/searchFetchers';
 import { getErrorMessage } from '../utils/errorMessage';
 import { PrintableReport } from './PrintableReport';
 import {
@@ -22,9 +24,9 @@ interface Applied { supplierId?: number; supplierName?: string; status?: string;
 // (ProcurementStatusReport, 스타일/공정 단계 추적)과는 별개 화면이다.
 export const PurchaseOrderLedgerReport: React.FC = () => {
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(false);
-  const [supplierId, setSupplierId] = useState('');
+  // PR-127: 공급업체 필터는 <select>(공급업체 전량 로드)가 아니라 서버 검색 선택이다. 선택 해제 = 전체.
+  const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [status, setStatus] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -51,7 +53,6 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
 
   useEffect(() => {
     load();
-    getSuppliers().then((r) => setSuppliers(Array.isArray(r) ? r : [])).catch(() => setSuppliers([]));
   }, [load]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -61,8 +62,8 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
       return;
     }
     load({
-      supplierId: supplierId ? Number(supplierId) : undefined,
-      supplierName: suppliers.find((s) => String(s.id) === supplierId)?.name,
+      supplierId: supplier?.id,
+      supplierName: supplier?.name,
       status: status || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
@@ -70,7 +71,7 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
   };
 
   const handleReset = () => {
-    setSupplierId(''); setStatus(''); setStartDate(''); setEndDate('');
+    setSupplier(null); setStatus(''); setStartDate(''); setEndDate('');
     load();
   };
 
@@ -93,10 +94,19 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">공급업체</label>
-          <select aria-label="공급업체 필터" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="border rounded px-2 py-1 text-sm">
-            <option value="">전체</option>
-            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchSelectField<Supplier>
+            value={supplier}
+            onChange={setSupplier}
+            search={searchSuppliers}
+            getKey={(s) => s.id}
+            getLabel={(s) => s.name}
+            renderRow={(s) => (<span>{s.name} <span className="text-gray-400 text-xs">{s.code}</span></span>)}
+            ariaLabel="공급업체 필터"
+            placeholder="전체 업체"
+            title="공급업체 검색"
+            allowClear
+            className="w-56"
+          />
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">상태</label>

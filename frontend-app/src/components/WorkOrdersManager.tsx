@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getWorkOrders, createWorkOrder, updateWorkOrderStatus, type GetWorkOrdersFilter, type WorkOrder, type CreateWorkOrder } from '../api/workOrders.service';
-import { getItems, type Item } from '../api/items.service';
+import type { Item } from '../api/items.service';
+import { SearchSelectField } from './SearchSelectField';
+import { masterLabel, searchItems } from '../utils/searchFetchers';
 import { WorkOrderUploadModal } from './WorkOrderUploadModal';
 import { useNavigate } from 'react-router-dom'; // Assumed react-router usage
 import { getErrorMessage } from '../utils/errorMessage';
@@ -12,7 +14,8 @@ export const WorkOrdersManager: React.FC = () => {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [filter, setFilter] = useState<GetWorkOrdersFilter>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [items, setItems] = useState<Item[]>([]);
+  // PR-127: 품목은 <select>(getItems limit 100 — 100개 넘는 품목은 선택 불가)가 아니라 서버 검색 선택이다.
+  const [item, setItem] = useState<Item | null>(null);
   const [newWorkOrder, setNewWorkOrder] = useState<CreateWorkOrder>(emptyCreateForm);
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate(); // For redirecting on auth error
@@ -56,20 +59,6 @@ export const WorkOrdersManager: React.FC = () => {
     loadWorkOrders();
   }, [loadWorkOrders]);
 
-  const loadItems = useCallback(async () => {
-    try {
-      const res = await getItems({ limit: 100 });
-      const data = Array.isArray(res) ? res : (res && Array.isArray(res.items) ? res.items : []);
-      setItems(data);
-    } catch (error) {
-      handleAuthError(error);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadItems();
-  }, [loadItems]);
-
   const handleCreateWorkOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWorkOrder.itemId || newWorkOrder.itemId <= 0) {
@@ -86,6 +75,7 @@ export const WorkOrdersManager: React.FC = () => {
       await createWorkOrder(newWorkOrder);
       toast.success('작업 지시가 등록되었습니다.');
       setNewWorkOrder(emptyCreateForm);
+      setItem(null);
       loadWorkOrders();
     } catch (error) {
       handleAuthError(error);
@@ -117,16 +107,21 @@ export const WorkOrdersManager: React.FC = () => {
         <form onSubmit={handleCreateWorkOrder} className="flex flex-wrap gap-4 items-end">
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">품목</label>
-            <select
-              className="border border-gray-300 rounded px-3 py-2 w-64"
-              value={newWorkOrder.itemId}
-              onChange={(e) => setNewWorkOrder({ ...newWorkOrder, itemId: Number(e.target.value) })}
-            >
-              <option value={0}>선택하세요</option>
-              {items.map((i) => (
-                <option key={i.id} value={i.id}>{i.name} ({i.code})</option>
-              ))}
-            </select>
+            <SearchSelectField<Item>
+              value={item}
+              onChange={(picked) => {
+                setItem(picked);
+                setNewWorkOrder({ ...newWorkOrder, itemId: picked?.id ?? 0 });
+              }}
+              search={searchItems}
+              getKey={(i) => i.id}
+              getLabel={masterLabel}
+              renderRow={(i) => (<span>{i.name} <span className="text-gray-400 text-xs">{i.code}</span></span>)}
+              ariaLabel="품목"
+              placeholder="품목 검색"
+              title="품목 검색"
+              className="w-64"
+            />
           </div>
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">목표 수량</label>

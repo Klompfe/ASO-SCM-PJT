@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { getWorkOrders, getMaterialRequirements } from '../api/workOrders.service';
+import { getMaterialRequirements } from '../api/workOrders.service';
+import { SearchSelectField } from './SearchSelectField';
+import { searchWorkOrders } from '../utils/searchFetchers';
 import { getErrorMessage } from '../utils/errorMessage';
 import { PrintableReport } from './PrintableReport';
 import {
@@ -12,6 +14,10 @@ import {
 
 interface WoOption { id: number; targetQuantity: number; status: string; item?: { name: string; styleNo?: string } }
 
+// 기존 <option> 문구 그대로: #ID · 스타일번호 · 품목명 · 물량
+const workOrderLabel = (w: WoOption) =>
+  `#${w.id} · ${w.item?.styleNo ?? '스타일번호 없음'} · ${w.item?.name ?? ''} · ${fmt(Number(w.targetQuantity))}`;
+
 const fmt = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 const th = 'border border-gray-300 px-2 py-1 bg-gray-100 text-left';
 const td = 'border border-gray-300 px-2 py-1';
@@ -19,16 +25,11 @@ const td = 'border border-gray-300 px-2 py-1';
 // PR-120: BOM 소요명세서 — 작업지시를 고르면 그 물량으로 BOM을 전개해 자재별 필요 총수량과, 이미 발주한
 // 수량 대비 부족 수량을 보여준다(구매 계획용). 계산은 서버(GET /work-orders/:id/material-requirements).
 export const BomRequirementReport: React.FC = () => {
-  const [workOrders, setWorkOrders] = useState<WoOption[]>([]);
-  const [selectedId, setSelectedId] = useState('');
+  // PR-127: 작업지시는 <select>(최신 100건만 불러와 그 밖의 작업지시는 선택 불가)가 아니라 서버 검색 선택이다.
+  const [workOrder, setWorkOrder] = useState<WoOption | null>(null);
+  const selectedId = workOrder ? String(workOrder.id) : '';
   const [data, setData] = useState<MaterialRequirements | null>(null);
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    getWorkOrders({ page: 1, limit: 100 })
-      .then((res) => setWorkOrders(Array.isArray(res) ? res : (res?.items ?? [])))
-      .catch((err) => toast.error(getErrorMessage(err, '작업지시 목록을 불러오는 데 실패했습니다.')));
-  }, []);
 
   useEffect(() => {
     if (!selectedId) { setData(null); return; }
@@ -48,14 +49,17 @@ export const BomRequirementReport: React.FC = () => {
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div>
           <label className="block text-xs text-gray-500 mb-1">작업지시 선택</label>
-          <select aria-label="작업지시 선택" value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="border rounded px-2 py-1 text-sm min-w-[320px]">
-            <option value="">작업지시를 선택하세요</option>
-            {workOrders.map((w) => (
-              <option key={w.id} value={w.id}>
-                #{w.id} · {w.item?.styleNo ?? '스타일번호 없음'} · {w.item?.name ?? ''} · {fmt(Number(w.targetQuantity))}
-              </option>
-            ))}
-          </select>
+          <SearchSelectField<WoOption>
+            value={workOrder}
+            onChange={setWorkOrder}
+            search={searchWorkOrders}
+            getKey={(w) => w.id}
+            getLabel={workOrderLabel}
+            ariaLabel="작업지시 선택"
+            placeholder="작업지시 검색 (스타일번호/품목명)"
+            title="작업지시 검색"
+            className="min-w-[320px]"
+          />
         </div>
       </div>
 

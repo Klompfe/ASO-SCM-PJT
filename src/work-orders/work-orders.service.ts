@@ -162,6 +162,15 @@ export class WorkOrdersService {
       queryBuilder.andWhere('wo.itemId = :itemId', { itemId: filter.itemId });
     }
 
+    // PR-127: 작업지시 검색 선택(BOM 소요명세서 등)용 — 완제품 Item의 이름/코드/스타일번호 부분일치.
+    const keyword = filter?.keyword?.trim();
+    if (keyword) {
+      queryBuilder.andWhere(
+        '(LOWER(item.name) LIKE LOWER(:kw) OR LOWER(item.code) LIKE LOWER(:kw) OR LOWER(item.styleNo) LIKE LOWER(:kw))',
+        { kw: `%${keyword}%` },
+      );
+    }
+
     if (filter?.startDate) {
       queryBuilder.andWhere('wo.createdAt >= :startDate', { startDate: filter.startDate });
     }

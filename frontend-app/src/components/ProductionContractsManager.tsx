@@ -7,7 +7,9 @@ import {
   type ProductionContract,
   type ProductionContractPriceSource,
 } from '../api/productionContracts.service';
-import { getSuppliers, type Supplier } from '../api/suppliers.service';
+import { type Supplier } from '../api/suppliers.service';
+import { SearchSelectField } from './SearchSelectField';
+import { searchSuppliers } from '../utils/searchFetchers';
 import { getErrorMessage } from '../utils/errorMessage';
 import { PrintableReport } from './PrintableReport';
 import {
@@ -22,7 +24,6 @@ const fmtNum = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits:
 
 const emptyForm = {
   styleNo: '',
-  manufacturerId: '',
   priceSource: 'PRE_AGREED' as ProductionContractPriceSource,
   cmtPrice: '',
   quantity: '',
@@ -32,7 +33,8 @@ const emptyForm = {
 
 export const ProductionContractsManager: React.FC = () => {
   const [contracts, setContracts] = useState<ProductionContract[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  // PR-127: 제조사는 <select>(공급업체 전량 로드)가 아니라 서버 검색 선택이다.
+  const [manufacturer, setManufacturer] = useState<Supplier | null>(null);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
@@ -45,9 +47,8 @@ export const ProductionContractsManager: React.FC = () => {
     setLoading(true);
     try {
       setApplied(filter);
-      const [contractsRes, suppliersRes] = await Promise.all([getProductionContracts(filter), getSuppliers()]);
+      const contractsRes = await getProductionContracts(filter);
       setContracts(Array.isArray(contractsRes) ? contractsRes : []);
-      setSuppliers(Array.isArray(suppliersRes) ? suppliersRes : []);
     } catch (err: any) {
       toast.error(getErrorMessage(err, '생산계약 목록을 불러오는 데 실패했습니다.'));
     } finally {
@@ -78,7 +79,7 @@ export const ProductionContractsManager: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.styleNo || !form.manufacturerId || !form.quantity || !form.contractDate) {
+    if (!form.styleNo || !manufacturer || !form.quantity || !form.contractDate) {
       toast.error('스타일번호/제조사/수량/계약일자는 필수입니다.');
       return;
     }
@@ -91,7 +92,7 @@ export const ProductionContractsManager: React.FC = () => {
     try {
       await createProductionContract({
         styleNo: form.styleNo,
-        manufacturerId: Number(form.manufacturerId),
+        manufacturerId: manufacturer.id,
         priceSource: form.priceSource,
         ...(form.priceSource === 'PRE_AGREED' ? { cmtPrice: Number(form.cmtPrice) } : {}),
         quantity: Number(form.quantity),
@@ -100,6 +101,7 @@ export const ProductionContractsManager: React.FC = () => {
       });
       toast.success('생산계약이 등록되었습니다.');
       setForm(emptyForm);
+      setManufacturer(null);
       await reload();
     } catch (err: any) {
       toast.error(getErrorMessage(err, '생산계약 등록에 실패했습니다.'));
@@ -137,16 +139,18 @@ export const ProductionContractsManager: React.FC = () => {
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">제조사</label>
-            <select
-              value={form.manufacturerId}
-              onChange={(e) => setForm({ ...form, manufacturerId: e.target.value })}
-              className="border rounded px-2 py-1 w-full text-sm"
-            >
-              <option value="">선택</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <SearchSelectField<Supplier>
+              value={manufacturer}
+              onChange={setManufacturer}
+              search={searchSuppliers}
+              getKey={(s) => s.id}
+              getLabel={(s) => s.name}
+              renderRow={(s) => (<span>{s.name} <span className="text-gray-400 text-xs">{s.code}</span></span>)}
+              ariaLabel="제조사"
+              placeholder="제조사 검색"
+              title="제조사(공급업체) 검색"
+              className="w-full"
+            />
           </div>
           <div className="col-span-2">
             <label className="block text-xs text-gray-500 mb-1">단가원천</label>

@@ -3,6 +3,8 @@ import toast from 'react-hot-toast';
 import { getCashVouchers, getCashVoucherSummary, type CashVoucher, type CashVoucherSummary } from '../api/cashVouchers.service';
 import { type Buyer } from '../api/buyers.service';
 import { type Supplier } from '../api/suppliers.service';
+import { SearchSelectField } from './SearchSelectField';
+import { masterLabel, searchBuyers, searchSuppliers } from '../utils/searchFetchers';
 import { getErrorMessage } from '../utils/errorMessage';
 import { exportTableToExcel, type ExcelColumn } from '../utils/excelExport';
 
@@ -14,28 +16,22 @@ const COMPANY_INFO = {
 const formatAmount = (v: number) => Number(v).toLocaleString('ko-KR');
 
 interface CashVoucherStatementViewProps {
-  buyers: Buyer[];
-  suppliers: Supplier[];
   onClose: () => void;
 }
 
 // PR-108: 거래내역서 발급 — 고객사/공급업체 중 하나를 골라 기간을 지정하면 그
-// 거래처의 CashVoucher만 필터링해 인쇄 전용으로 보여준다. 화면에 이미 로드되어
-// 있는 buyers/suppliers 목록을 그대로 props로 받아 재사용하고, 조회는 이 화면에서
+// 거래처의 CashVoucher만 필터링해 인쇄 전용으로 보여준다. 거래처는 목록을 통째로 받아
+// <select>에 뿌리지 않고(PR-127) 검색 선택으로 고른다. 조회는 이 화면에서
 // 새로 눌렀을 때만 실행한다(진입 즉시 자동 조회하지 않음 — 거래처 미선택 상태로
 // 전체 조회가 나가는 것을 막기 위함).
-export const CashVoucherStatementView: React.FC<CashVoucherStatementViewProps> = ({ buyers, suppliers, onClose }) => {
+export const CashVoucherStatementView: React.FC<CashVoucherStatementViewProps> = ({ onClose }) => {
   const [partyType, setPartyType] = useState<'buyer' | 'supplier'>('buyer');
-  const [partyId, setPartyId] = useState('');
+  const [selectedParty, setSelectedParty] = useState<Buyer | Supplier | null>(null);
+  const partyId = selectedParty ? String(selectedParty.id) : '';
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ vouchers: CashVoucher[]; summary: CashVoucherSummary } | null>(null);
-
-  const selectedParty =
-    partyType === 'buyer'
-      ? buyers.find((b) => String(b.id) === partyId)
-      : suppliers.find((s) => String(s.id) === partyId);
 
   const handleSearch = async () => {
     if (!partyId) {
@@ -78,7 +74,7 @@ export const CashVoucherStatementView: React.FC<CashVoucherStatementViewProps> =
                 value={partyType}
                 onChange={(e) => {
                   setPartyType(e.target.value as 'buyer' | 'supplier');
-                  setPartyId('');
+                  setSelectedParty(null);
                 }}
               >
                 <option value="buyer">고객사</option>
@@ -87,12 +83,20 @@ export const CashVoucherStatementView: React.FC<CashVoucherStatementViewProps> =
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">거래처</label>
-              <select className="border rounded px-2 py-1 text-sm w-48" value={partyId} onChange={(e) => setPartyId(e.target.value)}>
-                <option value="">선택하세요</option>
-                {(partyType === 'buyer' ? buyers : suppliers).map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
-                ))}
-              </select>
+              <SearchSelectField<Buyer | Supplier>
+                // 구분(고객사/공급업체)이 바뀌면 검색 대상 API가 달라지므로 컴포넌트를 새로 만든다.
+                key={partyType}
+                value={selectedParty}
+                onChange={setSelectedParty}
+                search={partyType === 'buyer' ? searchBuyers : searchSuppliers}
+                getKey={(p) => p.id}
+                getLabel={masterLabel}
+                renderRow={(p) => (<span>{p.name} <span className="text-gray-400 text-xs">{p.code}</span></span>)}
+                ariaLabel="거래처"
+                placeholder="거래처 검색"
+                title={partyType === 'buyer' ? '고객사 검색' : '공급업체 검색'}
+                className="w-56"
+              />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">기간</label>

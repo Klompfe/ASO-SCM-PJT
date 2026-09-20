@@ -9,6 +9,7 @@ import {
 import { CreateProductionContractDto } from './dto/create-production-contract.dto';
 import { UpdateProductionContractDto } from './dto/update-production-contract.dto';
 import { FindProductionContractsDto } from './dto/find-production-contracts.dto';
+import { resolveOptionalPagination } from '../common/dto/optional-pagination-query.dto';
 
 // PR-115: 계약일(date 컬럼) 기간 필터 — 문자열 그대로 비교해 sqlite/postgres 결과를 맞춘다(cash-vouchers와 동일).
 function buildDateWhere(from?: string, to?: string) {
@@ -61,11 +62,29 @@ export class ProductionContractsService {
   }
 
   async findAll(filter: FindProductionContractsDto = {}): Promise<ProductionContract[]> {
+    // PR-127: 응답은 계속 배열이다(page/limit를 주지 않으면 전량 — 기존 호출부 호환). keyword/page/limit는 검색 선택 화면용 선택 기능.
+    const paging = resolveOptionalPagination(filter);
+    const keyword = filter.keyword?.trim();
+
+    if (keyword) {
+      // 스타일번호/제조사명 부분일치(LOWER() LIKE LOWER()라 SQLite/PostgreSQL 동일). 계약일 범위는 문자열 그대로 비교(buildDateWhere와 같은 방식).
+      const qb = this.productionContractRepository
+        .createQueryBuilder('pc')
+        .leftJoinAndSelect('pc.manufacturer', 'manufacturer')
+        .where('(LOWER(pc.styleNo) LIKE LOWER(:kw) OR LOWER(manufacturer.name) LIKE LOWER(:kw))', { kw: `%${keyword}%` })
+        .orderBy('pc.id', 'DESC');
+      if (filter.from) qb.andWhere('pc.contractDate >= :from', { from: filter.from });
+      if (filter.to) qb.andWhere('pc.contractDate <= :to', { to: filter.to });
+      if (paging) qb.skip(paging.skip).take(paging.take);
+      return qb.getMany();
+    }
+
     const dateWhere = buildDateWhere(filter.from, filter.to);
     return this.productionContractRepository.find({
       where: dateWhere ? { contractDate: dateWhere } : {},
       relations: ['manufacturer'],
       order: { id: 'DESC' },
+      ...(paging ?? {}),
     });
   }
 
