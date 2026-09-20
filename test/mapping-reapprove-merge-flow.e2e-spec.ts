@@ -141,4 +141,42 @@ describe('이미 등록된 스타일 재승인 = 병합 (PR-130)', () => {
       expect(items.filter((i) => i.material.name === 'MRG-원단').map((i) => i.colorCode).sort()).toEqual(['BK', 'NV']);
     });
   });
+
+  // PR-132: 화면이 유형별로 구분해 보여주는 구조화 알림(notices). warnings(문자열)는 같은 내용을 그대로 유지한다.
+  describe('구조화된 알림 notices (PR-132)', () => {
+    const NS = 'MRG-NOTICE-1';
+    const commitNs = async (styleNo: string, factory: string, items: any[]) =>
+      (await commit({ styleNo, overviewData: { styleNo, factory, totalQty: 100, buyer: '바이어A' }, bomItems: items })).data;
+
+    it('신규 승인 + 혼용률 없는 안감: AUTO_APPLIED/LINING_COMPOSITION_DEFAULT만 나오고 확인 필요 항목은 없다', async () => {
+      const r = await commitNs(NS, '베트남', [line('MRG-N-원단', 1, 100), { category: '안감', itemName: 'MRG-N-안감', colorCode: 'BK', spec: 'S', consumption: 0.5, requiredQty: 50 }]);
+      expect(r.notices.map((n: any) => [n.type, n.code])).toEqual([['AUTO_APPLIED', 'LINING_COMPOSITION_DEFAULT']]);
+      expect(r.warnings).toEqual(r.notices.map((n: any) => n.message)); // 문자열 배열은 그대로(기존 호출부 호환)
+    });
+
+    it('재승인 + 공장 변경 + 요척/필요량 변경 + 새 안감: NEEDS_REVIEW 2건(FACTORY_MISMATCH, BOM_ITEM_VALUE_DIFF)과 AUTO_APPLIED 1건', async () => {
+      const r = await commitNs(NS, '인도네시아', [
+        line('MRG-N-원단', 1.6, 160), // 기존 1 / 100 → 차이
+        { category: '안감', itemName: 'MRG-N-안감2', colorCode: 'BK', spec: 'S', consumption: 0.5, requiredQty: 50 }, // 새 안감 → 기본 혼용률
+      ]);
+      const by = (type: string) => r.notices.filter((n: any) => n.type === type).map((n: any) => n.code).sort();
+      expect(by('NEEDS_REVIEW')).toEqual(['BOM_ITEM_VALUE_DIFF', 'FACTORY_MISMATCH']);
+      expect(by('AUTO_APPLIED')).toEqual(['LINING_COMPOSITION_DEFAULT']);
+      expect(r.notices.find((n: any) => n.code === 'BOM_ITEM_VALUE_DIFF').message).toContain('MRG-N-원단(BK/S) 기존 값(요척 1, 소요량 100) → 새 값(요척 1.6, 소요량 160)');
+    });
+
+    it('완전히 같은 내용으로 재승인하면 notices/warnings가 비어 있다(안감 기본값은 이미 채워져 있어 다시 나오지 않는다)', async () => {
+      const r = await commitNs(NS, '베트남', [line('MRG-N-원단', 1, 100), { category: '안감', itemName: 'MRG-N-안감', colorCode: 'BK', spec: 'S', consumption: 0.5, requiredQty: 50 }]);
+      expect(r.notices).toEqual([]);
+      expect(r.warnings).toEqual([]);
+    });
+
+    it('신규 스타일이라도 같은 파일에 같은 자재(자재명·색상·규격)가 값이 다르게 두 번 나오면 NEEDS_REVIEW가 나온다(첫 행만 저장)', async () => {
+      const dup = 'MRG-NOTICE-DUP';
+      const r = await commitNs(dup, '베트남', [line('MRG-D-원단', 1, 100), line('MRG-D-원단', 2, 200)]);
+      expect(r.notices.map((n: any) => [n.type, n.code])).toEqual([['NEEDS_REVIEW', 'BOM_ITEM_VALUE_DIFF']]);
+      const boms = await dataSource.getRepository(Bom).find({ where: { style: { styleNo: dup } }, relations: ['items'] });
+      expect(boms.flatMap((b) => b.items)).toHaveLength(1);
+    });
+  });
 });

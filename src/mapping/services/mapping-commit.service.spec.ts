@@ -62,7 +62,8 @@ describe('MappingCommitService', () => {
     it('overviewData.shipDate를 StyleOverview.firstShipDate로 매핑하고 status 기본값을 채워 저장해야 한다', async () => {
       const result = await service.commit(validPayload);
 
-      expect(result).toEqual({ success: true, styleNo: 'MB62SLM103Z', warnings: [] });
+      // PR-132: notices(구조화) 추가 — warnings(문자열 배열)는 기존 호출부 호환을 위해 그대로 유지된다.
+      expect(result).toEqual({ success: true, styleNo: 'MB62SLM103Z', notices: [], warnings: [] });
 
       // MasterStyle은 queryRunner.manager.save(style)처럼 단일 엔티티 인스턴스로 저장되므로
       // (엔티티 클래스, data) 2-인자 형태가 아니라 overview 속성을 가진 인자로 찾는다.
@@ -274,6 +275,48 @@ describe('MappingCommitService', () => {
       );
     });
 
+    // PR-132: 화면이 문자열 패턴이 아니라 type/code로 "자동 반영 안 됨(확인 필요)"과 "자동 적용됨(정보)"을 구분한다.
+    it('(c2) factory 충돌은 NEEDS_REVIEW/FACTORY_MISMATCH 알림이고, warnings는 그 message와 같다', async () => {
+      const result = await service.commit(rebuildPayload());
+
+      expect(result.notices).toEqual([
+        {
+          type: 'NEEDS_REVIEW',
+          code: 'FACTORY_MISMATCH',
+          message: "기존 factory 값 '베트남' → 새 값 '삼정' — 자동 반영하지 않음, 확인 후 수동 변경 필요",
+        },
+      ]);
+      expect(result.warnings).toEqual(result.notices.map((n) => n.message));
+    });
+
+    it('(c3) 같은 (자재명, 색상, 규격)인데 요척/필요량이 다르면 NEEDS_REVIEW/BOM_ITEM_VALUE_DIFF 알림이고 기존 값은 그대로다', async () => {
+      const payload = rebuildPayload();
+      payload.overviewData.factory = '베트남'; // factory 충돌 없음
+      payload.bomItems = [{ itemName: '원단', category: 'FABRIC', colorCode: 'BK', spec: '', consumption: 1.6, requiredQty: 344 }];
+
+      const result = await service.commit(payload);
+
+      expect(result.notices).toEqual([
+        {
+          type: 'NEEDS_REVIEW',
+          code: 'BOM_ITEM_VALUE_DIFF',
+          message: '원단(BK/N/A) 기존 값(요척 1, 소요량 215) → 새 값(요척 1.6, 소요량 344) — 자동 반영하지 않음, 확인 후 수동 변경 필요',
+        },
+      ]);
+      expect(mockQueryRunnerManager.save.mock.calls.some(([entity]: any) => entity === BomItem)).toBe(false); // 기존 자재를 다시 저장하지 않는다
+    });
+
+    it('(c4) 차이가 전혀 없으면 notices/warnings 모두 비어 있다', async () => {
+      const payload = rebuildPayload();
+      payload.overviewData.factory = '베트남';
+      payload.bomItems = [{ itemName: '원단', category: 'FABRIC', colorCode: 'BK', spec: '', consumption: 1, requiredQty: 215 }];
+
+      const result = await service.commit(payload);
+
+      expect(result.notices).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    });
+
     it('(d) Bom이 이미 있으면 재사용하고 새로 생성하지 않는다', async () => {
       await service.commit(rebuildPayload());
 
@@ -379,6 +422,23 @@ describe('MappingCommitService', () => {
       expect(result.warnings).toEqual(
         expect.arrayContaining([expect.stringContaining("안감 항목 '안감원단' 혼용률 미기재 — 기본값 POLYESTER 100% 자동 적용")]),
       );
+    });
+
+    it('안감 혼용률 기본값 적용은 AUTO_APPLIED/LINING_COMPOSITION_DEFAULT 알림이다 — 확인 필요(NEEDS_REVIEW)가 아니라 정보성 (PR-132)', async () => {
+      const result = await service.commit({
+        ...basePayload,
+        bomItems: [{ itemName: '안감원단', category: '안감', consumption: 1, requiredQty: 100 }],
+      });
+
+      expect(result.notices).toEqual([
+        {
+          type: 'AUTO_APPLIED',
+          code: 'LINING_COMPOSITION_DEFAULT',
+          message: "안감 항목 '안감원단' 혼용률 미기재 — 기본값 POLYESTER 100% 자동 적용",
+        },
+      ]);
+      expect(result.warnings).toEqual(result.notices.map((n) => n.message));
+      expect(result.notices.some((n) => n.type === 'NEEDS_REVIEW')).toBe(false);
     });
 
     it('itemName에 "조바"가 포함되면(category는 다른 값이어도) 기본값이 채워진다', async () => {
