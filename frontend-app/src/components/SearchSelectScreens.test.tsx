@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 // 화면 컴포넌트가 끌어오는 API 모듈은 axios 클라이언트(브라우저 전용)를 import하므로 통째로 가짜로 바꾼다.
 // renderToStaticMarkup은 effect를 실행하지 않으므로 여기서는 "첫 화면에 무엇이 그려지는가"만 본다.
+vi.mock('../api/styles.service', () => ({ getMasterStyles: vi.fn() }));
 vi.mock('../api/buyers.service', () => ({ getBuyers: vi.fn() }));
 vi.mock('../api/suppliers.service', () => ({ getSuppliers: vi.fn() }));
 vi.mock('../api/items.service', () => ({ getItems: vi.fn() }));
@@ -19,6 +20,7 @@ vi.mock('../api/workOrders.service', () => ({
   createWorkOrder: vi.fn(),
   updateWorkOrderStatus: vi.fn(),
   getMaterialRequirements: vi.fn(),
+  getStyleRequirements: vi.fn(),
   uploadWorkOrderImage: vi.fn(),
   commitWorkOrderAnalysis: vi.fn(),
   getAiUsageSummary: vi.fn(),
@@ -52,11 +54,16 @@ describe('조회 UI 감사 후속: 검색 선택 적용 화면 (PR-127)', () => 
     expect(html).toContain('Filter by Status');
   });
 
-  it('BOM 소요명세서: 작업지시가 검색 선택이다', () => {
+  it('BOM 소요명세서(PR-129): 기본은 스타일번호 검색 선택 + 계획수량이고, 작업지시는 보조 토글로 남는다', () => {
     const html = render(createElement(BomRequirementReport));
-    expect(hasSearchField(html, '작업지시 선택')).toBe(true);
-    expect(html).not.toContain('작업지시를 선택하세요'); // 기존 <select>의 안내 옵션
-    expect(html).toContain('작업지시를 선택하면 물량 기준 자재 소요량이 계산됩니다.');
+    expect(hasSearchField(html, '스타일번호 선택')).toBe(true);
+    expect(html).toContain('aria-label="계획수량"');
+    expect(html).toContain('스타일번호를 선택하면 계획수량 기준 자재 소요량이 계산됩니다. 작업지시가 없어도 볼 수 있습니다.');
+    // 기본 화면에는 작업지시 선택이 없고(작업지시 0건이어도 동작), 보조 토글로만 전환한다
+    expect(html).not.toContain('aria-label="작업지시 선택"');
+    expect(html).toContain('스타일(자재명세) 기준');
+    expect(html).toContain('특정 작업지시 기준');
+    expect(html).not.toContain('작업지시를 선택하세요'); // 예전 <select>의 안내 옵션
   });
 
   it('입출금전표: 거래처(고객사)/거래처(공급업체)/관련 발주/관련 생산계약이 모두 검색 선택이고, 구분 필터만 <select>로 남는다', () => {
