@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getItems, getAllItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
+import { getAllItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
 import { getBomByStyleNo, updateBomItem, addBomLabelSet, type BomDetail, type BomItemRow } from '../api/boms.service';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
@@ -8,6 +8,9 @@ import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
 import { getErrorMessage } from '../utils/errorMessage';
 import { ItemCatalogReport } from './ItemCatalogReport';
+import { Pagination } from './Pagination';
+import { fetchItemPage } from '../utils/listQueries';
+import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
 
 interface ItemsManagerProps {
   onOrderItem?: (itemId: number) => void;
@@ -33,7 +36,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
   // 품목 마스터 (보조 기능)
   const [items, setItems] = useState<Item[]>([]);
+  // PR-128: 페이지 이동 UI(Pagination)가 이 filter.page를 바꾼다(예전엔 page:1 고정이라 11번째 이후 품목은 검색 없이는 볼 수 없었다).
   const [filter, setFilter] = useState<GetItemsFilter>({ page: 1, limit: 10 });
+  const [itemsMeta, setItemsMeta] = useState<PageMeta>(EMPTY_PAGE_META);
   // PR-103: 검색 바 입력값(초안) — "검색" 버튼을 눌러야 filter에 반영된다(입력 중에는
   // API를 다시 부르지 않음). 백엔드 keyword는 이름/코드 LIKE 검색이다(items.service.ts).
   const [searchType, setSearchType] = useState('');
@@ -102,12 +107,19 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   const loadItems = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await getItems(filter);
-      const data = Array.isArray(res) ? res : (res && Array.isArray(res.items) ? res.items : []);
-      setItems(data);
+      const res = await fetchItemPage({ page: filter.page ?? 1, type: filter.type, keyword: filter.keyword });
+      // 마지막 페이지의 품목이 사라지는 등으로 요청 페이지가 전체 페이지를 넘으면 마지막 페이지로 되돌아가 다시 조회한다.
+      const recover = pageToRecoverTo(res.meta, filter.page ?? 1);
+      if (recover !== null) {
+        setFilter((f) => ({ ...f, page: recover }));
+        return;
+      }
+      setItems(res.items);
+      setItemsMeta(res.meta);
     } catch (error) {
       toast.error(getErrorMessage(error, '품목 목록을 불러오는 데 실패했습니다.'));
       setItems([]);
+      setItemsMeta(EMPTY_PAGE_META);
     } finally {
       setLoading(false);
     }
@@ -732,6 +744,16 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
             </tbody>
           </table>
           </div>
+          {items.length === 0 && !loading && (
+            <p className="text-center text-sm text-gray-500 py-4" data-testid="items-empty">조회된 품목이 없습니다.</p>
+          )}
+          <Pagination
+            page={itemsMeta.page}
+            totalPages={itemsMeta.totalPages}
+            total={itemsMeta.total}
+            disabled={loading}
+            onPageChange={(page) => setFilter((f) => ({ ...f, page }))}
+          />
 
           <div className="pt-2">
             <button
