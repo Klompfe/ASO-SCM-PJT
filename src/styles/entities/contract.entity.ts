@@ -10,7 +10,7 @@ export enum ContractStatus {
   SUPERSEDED = 'SUPERSEDED',
 }
 
-// 계약서 발행 상태/이력을 기록한다(PR-049). PR-066부터는 작업지시서 등록 시 자동으로
+// 계약서 발행 상태/이력을 기록한다(PR-049). PR-066부터는 수주 등록(작업지시서 업로드) 시 자동으로
 // PENDING_APPROVAL 브랜치가 생성되고(work-orders.service.ts commitAnalysis), MANAGER
 // 이상만 승인/거절할 수 있다 — 실제 문서(PDF 등) 생성은 여전히 이번 범위 밖.
 @Entity()

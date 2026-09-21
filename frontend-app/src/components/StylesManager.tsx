@@ -14,6 +14,7 @@ import {
 } from '../api/orderProgress.service';
 import { getCurrentUser, type CurrentUser } from '../api/auth.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { SalesOrderUploadModal } from './SalesOrderUploadModal';
 
 // PR-066: 상태별 배지 색상 — 승인대기(노랑)/승인(초록)/거절(빨강)/대체됨(회색).
 const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
@@ -95,6 +96,8 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
   // PR-101: 스타일번호/품목/기간/시즌 검색·필터. 시즌(연도+SS/FW)을 선택하면
   // Dashboard.tsx와 동일한 규칙(utils/season.ts)으로 기간이 자동 채워지고, 사용자가
   // 기간을 직접 수정하면 시즌 선택은 해제된다.
+  // PR-134: 수주 등록(작업지시서 업로드 → AI 분석 → 저장) — 저장 결과(스타일/계약)가 바로 이 목록에 나타난다.
+  const [salesOrderModalOpen, setSalesOrderModalOpen] = useState(false);
   const [filterStyleNo, setFilterStyleNo] = useState('');
   const [filterItemType, setFilterItemType] = useState('');
   const [filterRddFrom, setFilterRddFrom] = useState('');
@@ -423,7 +426,19 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
 
   return (
     <div className="p-6">
-      <h2 className="text-2xl font-bold mb-4">오더관리 (Order Management)</h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-2xl font-bold">오더관리 (Order Management)</h2>
+        <button
+          type="button"
+          onClick={() => setSalesOrderModalOpen(true)}
+          className="bg-purple-600 text-white px-4 py-2 rounded font-medium hover:bg-purple-700"
+        >수주 등록</button>
+      </div>
+      <SalesOrderUploadModal
+        isOpen={salesOrderModalOpen}
+        onClose={() => setSalesOrderModalOpen(false)}
+        onSuccess={() => loadStyles(buildFilter())}
+      />
       <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow mb-6">
         <div className="grid grid-cols-4 gap-4 mb-4">
           <input className="border p-2" placeholder="Style No" value={formData.styleNo} onChange={e => setFormData({...formData, styleNo: e.target.value})} required />

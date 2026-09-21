@@ -6,7 +6,6 @@ import { MemoryRouter } from 'react-router-dom';
 // API 모듈(axios 클라이언트는 브라우저 전용)은 가짜로 바꾸고, 첫 화면에 페이지 이동 UI와 검색 수단이 그려지는지만 본다.
 vi.mock('../api/workOrders.service', () => ({
   getWorkOrders: vi.fn(), createWorkOrder: vi.fn(), updateWorkOrderStatus: vi.fn(),
-  uploadWorkOrderImage: vi.fn(), commitWorkOrderAnalysis: vi.fn(), getAiUsageSummary: vi.fn(),
 }));
 vi.mock('../api/items.service', () => ({ getItems: vi.fn(), getAllItems: vi.fn(), createItem: vi.fn(), updateItem: vi.fn() }));
 vi.mock('../api/styles.service', () => ({ getMasterStyles: vi.fn() }));

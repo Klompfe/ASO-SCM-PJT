@@ -66,15 +66,15 @@
 ## sales-orders (수주 — PR-133)
 
 고객사로부터 받은 주문을 등록하는 흐름(작업지시서 문서 업로드 → AI 분석 → 저장). 예전에는 `/work-orders/*` 아래에 있었고 경로만 옮겼다(동작 동일).
-내부 생산 실행 지시(작업지시, `WorkOrder`)와는 서로 무관하다. 프론트 함수 이름과 화면 배치 정리는 PR-134에서 한다.
+내부 생산 실행 지시(작업지시, `WorkOrder`)와는 서로 무관하다. 화면은 PR-134에서 "작업지시" 탭에서 "오더관리" 탭(오더 목록의 "수주 등록" 버튼)으로 옮겼다.
 
 | 메서드/경로 | 프론트 함수 | 호출 컴포넌트 |
 |---|---|---|
-| POST /sales-orders/upload-image | `workOrders.service.ts:uploadWorkOrderImage` | `WorkOrderUploadModal.tsx` |
-| POST /sales-orders/commit-analysis | `workOrders.service.ts:commitWorkOrderAnalysis` | `WorkOrderUploadModal.tsx` |
-| GET /sales-orders/spec | `workOrders.service.ts:getWorkOrderSpec` | - |
-| GET /sales-orders/ai-usage | `workOrders.service.ts:getAiUsage` | - |
-| GET /sales-orders/ai-usage/summary | `workOrders.service.ts:getAiUsageSummary` | `WorkOrderUploadModal.tsx` |
+| POST /sales-orders/upload-image | `salesOrders.service.ts:uploadSalesOrderImage` | `SalesOrderUploadModal.tsx` (오더관리 > 오더 목록 > "수주 등록") |
+| POST /sales-orders/commit-analysis | `salesOrders.service.ts:commitSalesOrderAnalysis` | `SalesOrderUploadModal.tsx` |
+| GET /sales-orders/spec | `salesOrders.service.ts:getSalesOrderSpec` | - |
+| GET /sales-orders/ai-usage | `salesOrders.service.ts:getAiUsage` | - |
+| GET /sales-orders/ai-usage/summary | `salesOrders.service.ts:getAiUsageSummary` | `SalesOrderUploadModal.tsx` |
 
 ## work-orders
 

@@ -37,7 +37,7 @@ export class CommitOverviewDto {
   @IsString()
   shipDate?: string;
 
-  // 아래 6개는 PR-054에서 추가 — 작업지시서 AI 분석(오더개요) 경로에서만 채워진다.
+  // 아래 6개는 PR-054에서 추가 — 수주 등록(작업지시서 AI 분석, 오더개요) 경로에서만 채워진다.
   // Excel 매핑 커밋 경로는 이 필드들을 보내지 않으므로 계속 null로 남는다(기존 동작 유지).
   @ApiPropertyOptional({ example: '울혼방 코튼 반소매재킷' })
   @IsOptional()
