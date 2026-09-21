@@ -63,11 +63,23 @@
 | PATCH /shipments/:id/status | - | **미사용** — `ShipmentsManager.tsx`에 상태 변경(SHIPPING→DELIVERED) UI 자체가 없음 |
 | DELETE /shipments/:id | - | **미사용** |
 
+## sales-orders (수주 — PR-133)
+
+고객사로부터 받은 주문을 등록하는 흐름(작업지시서 문서 업로드 → AI 분석 → 저장). 예전에는 `/work-orders/*` 아래에 있었고 경로만 옮겼다(동작 동일).
+내부 생산 실행 지시(작업지시, `WorkOrder`)와는 서로 무관하다. 프론트 함수 이름과 화면 배치 정리는 PR-134에서 한다.
+
+| 메서드/경로 | 프론트 함수 | 호출 컴포넌트 |
+|---|---|---|
+| POST /sales-orders/upload-image | `workOrders.service.ts:uploadWorkOrderImage` | `WorkOrderUploadModal.tsx` |
+| POST /sales-orders/commit-analysis | `workOrders.service.ts:commitWorkOrderAnalysis` | `WorkOrderUploadModal.tsx` |
+| GET /sales-orders/spec | `workOrders.service.ts:getWorkOrderSpec` | - |
+| GET /sales-orders/ai-usage | `workOrders.service.ts:getAiUsage` | - |
+| GET /sales-orders/ai-usage/summary | `workOrders.service.ts:getAiUsageSummary` | `WorkOrderUploadModal.tsx` |
+
 ## work-orders
 
 | 메서드/경로 | 프론트 함수 | 호출 컴포넌트 |
 |---|---|---|
-| POST /work-orders/upload-image | `workOrders.service.ts:uploadWorkOrderImage` | `WorkOrderUploadModal.tsx` |
 | POST /work-orders | - | **미사용** — `WorkOrderUploadModal.handleConfirm()`은 AI 분석 결과를 실제로 저장하는 API 호출 없이 토스트만 띄우는 미완성 상태(코드 주석: "여기에 최종 DB 저장 로직") |
 | GET /work-orders | `workOrders.service.ts:getWorkOrders` | `WorkOrdersManager.tsx`, `Dashboard.tsx` |
 | GET /work-orders/:id | - | **미사용** |
