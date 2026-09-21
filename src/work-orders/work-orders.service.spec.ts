@@ -6,13 +6,9 @@ import { WorkOrdersService } from './work-orders.service';
 import { WorkOrder } from './entities/work-order.entity';
 import { Item } from '../items/entities/item.entity';
 import { WorkOrderStatus } from './entities/work-order-status.enum';
-import { VisionService } from './vision.service';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
-import { MappingCommitService } from '../mapping/services/mapping-commit.service';
-import { WorkOrderSpecsService } from './work-order-specs.service';
-import { AiUsageLogService } from './ai-usage-log.service';
 
 describe('WorkOrdersService', () => {
   let service: WorkOrdersService;
@@ -55,24 +51,9 @@ describe('WorkOrdersService', () => {
     createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
   };
 
-  const mockVisionService = {
-    analyzeWorkOrder: jest.fn(),
-  };
 
-  const mockMappingCommitService = {
-    commit: jest.fn(),
-  };
 
-  const mockWorkOrderSpecsService = {
-    save: jest.fn(),
-    findByStyleNo: jest.fn(),
-  };
 
-  const mockAiUsageLogService = {
-    log: jest.fn(),
-    findByUser: jest.fn(),
-    getSummaryByUser: jest.fn(),
-  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -94,22 +75,6 @@ describe('WorkOrdersService', () => {
         {
           provide: DataSource,
           useValue: mockDataSource,
-        },
-        {
-          provide: VisionService,
-          useValue: mockVisionService,
-        },
-        {
-          provide: MappingCommitService,
-          useValue: mockMappingCommitService,
-        },
-        {
-          provide: WorkOrderSpecsService,
-          useValue: mockWorkOrderSpecsService,
-        },
-        {
-          provide: AiUsageLogService,
-          useValue: mockAiUsageLogService,
         },
       ],
     }).compile();
@@ -431,40 +396,6 @@ describe('WorkOrdersService', () => {
       expect(mockQueryRunnerManager.findOne).not.toHaveBeenCalled(); // MasterStyle 조회 자체를 시도하지 않음
       expect(mockQueryRunnerManager.save.mock.calls.some(([entity]: any) => entity === Inventory)).toBe(false);
       expect(mockQueryRunner.commitTransaction).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('analyzeWorkOrderImage - AI 사용량 과금 로그', () => {
-    it('실제 Gemini 응답(pageCount > 0)이면 사용량을 로그로 남기고 과금액을 반환해야 한다', async () => {
-      mockVisionService.analyzeWorkOrder.mockResolvedValue({
-        results: [{ overview: {}, bomItems: [], sizeSpecs: [], workNotes: null }],
-        usage: { pageCount: 6, promptTokens: 3699, outputTokens: 11765 },
-        isMock: false,
-      });
-      mockAiUsageLogService.log.mockResolvedValue({ id: 1, chargedAmountKrw: 1000 });
-
-      const result = await service.analyzeWorkOrderImage({} as any, 42);
-
-      expect(mockAiUsageLogService.log).toHaveBeenCalledWith(42, 6, 3699, 11765);
-      expect(result).toEqual({
-        results: [{ overview: {}, bomItems: [], sizeSpecs: [], workNotes: null }],
-        chargedAmountKrw: 1000,
-        isMock: false,
-      });
-    });
-
-    it('목업 응답(pageCount === 0)이면 과금 로그를 남기지 않고 과금액 0, isMock: true를 반환해야 한다(PR-096)', async () => {
-      mockVisionService.analyzeWorkOrder.mockResolvedValue({
-        results: [{ overview: {}, bomItems: [], sizeSpecs: [], workNotes: null }],
-        usage: { pageCount: 0, promptTokens: 0, outputTokens: 0 },
-        isMock: true,
-      });
-
-      const result = await service.analyzeWorkOrderImage({} as any, 42);
-
-      expect(mockAiUsageLogService.log).not.toHaveBeenCalled();
-      expect(result.chargedAmountKrw).toBe(0);
-      expect(result.isMock).toBe(true);
     });
   });
 

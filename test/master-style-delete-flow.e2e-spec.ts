@@ -72,7 +72,7 @@ describe('MasterStyle 삭제(cascade) 회귀 테스트 (정리 PR)', () => {
     const styleNo = `DELETE-FLOW-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${token}`)
       .send({
         overview: {

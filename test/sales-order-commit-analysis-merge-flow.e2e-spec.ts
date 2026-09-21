@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
-const TEST_DB_PATH = path.resolve(__dirname, '../test-db-work-order-commit-analysis-merge-flow.sqlite');
+const TEST_DB_PATH = path.resolve(__dirname, '../test-db-sales-order-commit-analysis-merge-flow.sqlite');
 process.env.DB_TYPE = 'sqlite';
 process.env.DB_DATABASE = TEST_DB_PATH;
 
@@ -57,7 +57,7 @@ describe('작업지시서 AI 분석 커밋 — 재커밋 시 병합 (PR-098)', (
 
   it('1차 커밋: BomItem 1개(BK), factory=베트남, supplier 미기재(null)로 등록', async () => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${jwtToken}`)
       .send({
         overview: {
@@ -82,7 +82,7 @@ describe('작업지시서 AI 분석 커밋 — 재커밋 시 병합 (PR-098)', (
 
   it('2차 커밋: 기존 BK는 유지되고 신규 CR 컬러만 추가되며, 응답에 warnings가 포함된다', async () => {
     const res = await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${jwtToken}`)
       .send({
         overview: {

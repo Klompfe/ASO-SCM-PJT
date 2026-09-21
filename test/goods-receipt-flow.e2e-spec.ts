@@ -21,7 +21,7 @@ describe('완제품입고증(GoodsReceipt) 작성 흐름 (PR-107)', () => {
 
   const createStyle = async (styleNo: string) => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${token}`)
       .send({
         overview: {

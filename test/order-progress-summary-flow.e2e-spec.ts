@@ -81,12 +81,12 @@ describe('오더 진행현황 요약 (PR-067)', () => {
 
     // 미래 납기(정상 진행중)로 두 스타일 등록 — 하나는 승인, 하나는 미승인 상태로 남긴다.
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${userToken}`)
       .send(buildWorkOrderPayload(approvedStyle, 1000, '2027-01-01'))
       .expect(201);
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${userToken}`)
       .send(buildWorkOrderPayload(pendingStyle, 500, '2027-02-01'))
       .expect(201);

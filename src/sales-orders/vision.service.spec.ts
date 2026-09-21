@@ -6,7 +6,7 @@ import { VisionService } from './vision.service';
 // 이 사실이 응답에 명시적으로 드러나는지(isMock)를 검증한다 — 기존에는
 // usage.pageCount === 0로 간접 추론했는데, 이게 화면에 목업 여부가 전혀 안 보였던
 // 원인이었다(PR-096 배경).
-describe('VisionService.analyzeWorkOrder — isMock (PR-096)', () => {
+describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
   const buildService = async (apiKey: string | undefined): Promise<VisionService> => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -23,7 +23,7 @@ describe('VisionService.analyzeWorkOrder — isMock (PR-096)', () => {
   it('GEMINI_API_KEY가 설정되지 않으면 isMock: true와 목업 결과를 반환해야 한다', async () => {
     const service = await buildService(undefined);
 
-    const outcome = await service.analyzeWorkOrder({} as any);
+    const outcome = await service.analyzeSalesOrder({} as any);
 
     expect(outcome.isMock).toBe(true);
     expect(outcome.usage).toEqual({ pageCount: 0, promptTokens: 0, outputTokens: 0 });
@@ -34,7 +34,7 @@ describe('VisionService.analyzeWorkOrder — isMock (PR-096)', () => {
   it('GEMINI_API_KEY가 빈 문자열이어도(falsy) isMock: true여야 한다', async () => {
     const service = await buildService('');
 
-    const outcome = await service.analyzeWorkOrder({} as any);
+    const outcome = await service.analyzeSalesOrder({} as any);
 
     expect(outcome.isMock).toBe(true);
   });
@@ -58,7 +58,7 @@ describe('VisionService.analyzeWorkOrder — isMock (PR-096)', () => {
       getGenerativeModel: jest.fn(() => ({ generateContent: fakeGenerateContent })),
     };
 
-    const outcome = await service.analyzeWorkOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
 
     expect(outcome.isMock).toBe(false);
     expect(outcome.results).toEqual(fakeParsedResult);

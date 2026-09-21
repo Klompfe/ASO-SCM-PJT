@@ -62,11 +62,11 @@ describe('계약 일괄승인 (PR-090)', () => {
     if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
   });
 
-  // MasterStyle을 하나 만들고(work-orders/commit-analysis), 같은 스타일에 대해
+  // MasterStyle을 하나 만들고(sales-orders/commit-analysis), 같은 스타일에 대해
   // POST /contracts(issue)로 PENDING_APPROVAL 계약을 원하는 개수만큼 추가로 쌓는다.
   const createStyleWithContracts = async (styleNo: string, extraContractCount: number): Promise<number[]> => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${userToken}`)
       .send({
         overview: {

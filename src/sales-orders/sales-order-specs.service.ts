@@ -1,17 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { WorkOrderSpec } from './entities/work-order-spec.entity';
+import { SalesOrderSpec } from './entities/sales-order-spec.entity';
 import { AiSizeSpecRowDto } from './dto/ai-analysis.dto';
 
 @Injectable()
-export class WorkOrderSpecsService {
+export class SalesOrderSpecsService {
   constructor(
-    @InjectRepository(WorkOrderSpec)
-    private readonly specRepository: Repository<WorkOrderSpec>,
+    @InjectRepository(SalesOrderSpec)
+    private readonly specRepository: Repository<SalesOrderSpec>,
   ) {}
 
-  async save(styleNo: string, workNotes: string | null, sizeSpecs: AiSizeSpecRowDto[]): Promise<WorkOrderSpec> {
+  async save(styleNo: string, workNotes: string | null, sizeSpecs: AiSizeSpecRowDto[]): Promise<SalesOrderSpec> {
     const spec = this.specRepository.create({
       styleNo,
       workNotes,
@@ -27,7 +27,7 @@ export class WorkOrderSpecsService {
     return this.specRepository.save(spec);
   }
 
-  async findByStyleNo(styleNo: string): Promise<WorkOrderSpec[]> {
+  async findByStyleNo(styleNo: string): Promise<SalesOrderSpec[]> {
     return this.specRepository.find({
       where: { styleNo },
       relations: ['sizeSpecs'],

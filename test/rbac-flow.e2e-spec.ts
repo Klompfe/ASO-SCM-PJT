@@ -70,7 +70,7 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
   const createPendingContract = async (token: string): Promise<number> => {
     const styleNo = `RBAC-CONTRACT-TARGET-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${token}`)
       .send({
         overview: {

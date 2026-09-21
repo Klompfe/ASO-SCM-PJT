@@ -58,7 +58,7 @@ describe('수입통관 검색 필터 (PR-102)', () => {
 
   const createStyle = async (styleNo: string) => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${token}`)
       .send({
         overview: {
