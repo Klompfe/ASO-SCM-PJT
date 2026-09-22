@@ -4,6 +4,7 @@ import { getItems, type Item } from '../api/items.service';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { getProductionContracts, type ProductionContract } from '../api/productionContracts.service';
 import { getWorkOrders, type WorkOrder } from '../api/workOrders.service';
+import { getMasterStyles } from '../api/styles.service';
 
 // PR-127: SearchSelectField(PR-126)에 넘기는 서버 검색 함수 모음. 화면마다 <select>에 목록을 통째로(또는 최초 100건만) 불러오던 것을
 // "검색어마다 서버에 조회, 한 번에 SEARCH_LIMIT건"으로 바꿔 데이터가 몇 건이든 원하는 항목을 검색으로 고를 수 있게 한다.
@@ -47,3 +48,8 @@ export const purchaseOrderLabel = (po: Pick<PurchaseOrder, 'id' | 'itemId' | 'it
   `발주 #${po.id} (${po.item?.name ?? `#${po.itemId}`})`;
 export const productionContractLabel = (pc: Pick<ProductionContract, 'styleNo' | 'manufacturerId' | 'manufacturer'>) =>
   `${pc.styleNo} (${pc.manufacturer?.name ?? `#${pc.manufacturerId}`})`;
+
+// PR-129: 스타일번호 검색 선택(BOM 소요명세서/발주 화면의 "스타일번호로 필요 자재 찾기"와 같은 서버 검색). 한 번에 SEARCH_LIMIT건.
+export interface StyleOption { styleNo: string; overview?: { styleName?: string | null; totalQty?: number | string | null } | null }
+export const searchMasterStyles = async (keyword: string): Promise<StyleOption[]> =>
+  toList<StyleOption>(await getMasterStyles(kw(keyword) ? { styleNo: kw(keyword) } : undefined)).slice(0, SEARCH_LIMIT);
