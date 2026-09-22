@@ -8,6 +8,7 @@ import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
+import { resolveOptionalPagination } from '../common/dto/optional-pagination-query.dto';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -75,6 +76,22 @@ export class PurchaseOrdersService {
       } else {
         qb.andWhere('po.createdAt <= :endDate', { endDate: filter.endDate });
       }
+    }
+
+    // PR-127: 발주 검색 선택(입출금전표의 "관련 발주 연결" 등)용 — 품목명/코드/공급업체명 부분일치(LOWER() LIKE LOWER()라 SQLite/PostgreSQL 동일).
+    const keyword = filter?.keyword?.trim();
+    if (keyword) {
+      qb.andWhere(
+        '(LOWER(item.name) LIKE LOWER(:kw) OR LOWER(item.code) LIKE LOWER(:kw) OR LOWER(supplier.name) LIKE LOWER(:kw))',
+        { kw: `%${keyword}%` },
+      );
+    }
+
+    // PR-127: DTO에 page/limit가 정의돼 있는데도 예전엔 skip/take를 안 걸어 항상 전량이 반환됐다. page 또는 limit를 명시하면 실제로 적용하고,
+    // 둘 다 없으면(원장/리포트 등 전량을 기대하는 기존 호출부) 기존처럼 전량을 반환한다.
+    const paging = resolveOptionalPagination(filter);
+    if (paging) {
+      qb.skip(paging.skip).take(paging.take);
     }
 
     return qb.getMany();

@@ -157,4 +157,42 @@ describe('BuyersService', () => {
       );
     });
   });
+
+  // PR-127: 거래처 "검색 선택"용 keyword(고객사명/코드/브랜드약칭 부분일치, 대소문자 무시) — 공급업체(PR-126)와 같은 패턴.
+  describe('findAll — keyword 검색 (PR-127)', () => {
+    const buildQb = (result: any[]) => {
+      const qb: any = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(result),
+      };
+      (repo as any).createQueryBuilder = jest.fn().mockReturnValue(qb);
+      return qb;
+    };
+
+    it('keyword가 없거나 공백이면 기존과 같이 전체를 id 내림차순으로 조회한다(쿼리빌더 안 씀)', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([{ id: 2 }, { id: 1 }]);
+      expect(await service.findAll()).toEqual([{ id: 2 }, { id: 1 }]);
+      await service.findAll({ keyword: '   ' });
+      expect(repo.find).toHaveBeenCalledWith({ order: { id: 'DESC' } });
+      expect((repo as any).createQueryBuilder).toBeUndefined();
+    });
+
+    it('keyword가 있으면 이름/코드/브랜드약칭에 LOWER() LIKE LOWER() 부분일치(공백 제거)를 건다', async () => {
+      const qb = buildQb([{ id: 3, name: 'Myungbo Trading' }]);
+      const result = await service.findAll({ keyword: ' myung ' });
+      expect(result).toEqual([{ id: 3, name: 'Myungbo Trading' }]);
+      const [clause, params] = qb.where.mock.calls[0];
+      expect(clause).toContain('LOWER(b.name) LIKE LOWER(:kw)');
+      expect(clause).toContain('LOWER(b.code) LIKE LOWER(:kw)');
+      expect(clause).toContain('LOWER(b.brandCode) LIKE LOWER(:kw)');
+      expect(params).toEqual({ kw: '%myung%' });
+      expect(qb.orderBy).toHaveBeenCalledWith('b.id', 'DESC');
+    });
+
+    it('검색 결과가 없으면 빈 배열을 돌려준다', async () => {
+      buildQb([]);
+      expect(await service.findAll({ keyword: 'zzz' })).toEqual([]);
+    });
+  });
 });

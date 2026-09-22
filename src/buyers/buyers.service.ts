@@ -4,6 +4,7 @@ import { Like, Repository } from 'typeorm';
 import { Buyer } from './entities/buyer.entity';
 import { CreateBuyerDto } from './dto/create-buyer.dto';
 import { UpdateBuyerDto } from './dto/update-buyer.dto';
+import { GetBuyersFilterDto } from './dto/get-buyers-filter.dto';
 
 // PR-085: 회사 고정 접두사(상수) — "TY-{브랜드약칭}-{YY}{일련번호4자리}" 형식의
 // 자동채번(예: TY-MB-260001)에 쓴다.
@@ -91,10 +92,19 @@ export class BuyersService {
     throw new ConflictException('고객사 코드 자동채번에 반복적으로 실패했습니다. 잠시 후 다시 시도해 주세요.');
   }
 
-  async findAll(): Promise<Buyer[]> {
-    return await this.buyerRepository.find({
-      order: { id: 'DESC' },
-    });
+  // PR-127: keyword가 있으면 고객사명/코드/브랜드약칭 부분일치(LOWER() LIKE LOWER()라 SQLite/PostgreSQL에서 똑같이 동작).
+  async findAll(filter?: GetBuyersFilterDto): Promise<Buyer[]> {
+    const keyword = filter?.keyword?.trim();
+    if (!keyword) {
+      return await this.buyerRepository.find({
+        order: { id: 'DESC' },
+      });
+    }
+    return await this.buyerRepository
+      .createQueryBuilder('b')
+      .where('(LOWER(b.name) LIKE LOWER(:kw) OR LOWER(b.code) LIKE LOWER(:kw) OR LOWER(b.brandCode) LIKE LOWER(:kw))', { kw: `%${keyword}%` })
+      .orderBy('b.id', 'DESC')
+      .getMany();
   }
 
   async findOne(id: number): Promise<Buyer> {

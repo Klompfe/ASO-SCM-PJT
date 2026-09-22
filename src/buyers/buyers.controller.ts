@@ -7,11 +7,13 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BuyersService } from './buyers.service';
 import { CreateBuyerDto } from './dto/create-buyer.dto';
 import { UpdateBuyerDto } from './dto/update-buyer.dto';
+import { GetBuyersFilterDto } from './dto/get-buyers-filter.dto';
 import { Buyer } from './entities/buyer.entity';
 
 @ApiTags('Buyers (고객사 관리)')
@@ -29,10 +31,10 @@ export class BuyersController {
   }
 
   @Get()
-  @ApiOperation({ summary: '고객사 전체 목록 조회' })
+  @ApiOperation({ summary: '고객사 목록 조회 (keyword: 고객사명/코드/브랜드약칭 부분일치, 대소문자 무시)' })
   @ApiResponse({ status: 200, description: '조회 성공', type: [Buyer] })
-  findAll(): Promise<Buyer[]> {
-    return this.buyersService.findAll();
+  findAll(@Query() filter: GetBuyersFilterDto): Promise<Buyer[]> {
+    return this.buyersService.findAll(filter);
   }
 
   @Get(':id')

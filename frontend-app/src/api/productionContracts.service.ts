@@ -29,7 +29,16 @@ export interface CreateProductionContract {
   note?: string;
 }
 
-export const getProductionContracts = (params?: { from?: string; to?: string }): Promise<any> =>
+// PR-127: keyword(스타일번호/제조사명 부분일치)와 page/limit(선택 — 생략하면 전량)를 지원한다. 응답은 계속 배열.
+export interface GetProductionContractsFilter {
+  from?: string;
+  to?: string;
+  keyword?: string;
+  page?: number;
+  limit?: number;
+}
+
+export const getProductionContracts = (params?: GetProductionContractsFilter): Promise<any> =>
   apiClient.get('/production-contracts', { params });
 export const createProductionContract = (data: CreateProductionContract): Promise<any> =>
   apiClient.post('/production-contracts', data);

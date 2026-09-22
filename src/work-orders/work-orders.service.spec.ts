@@ -467,4 +467,40 @@ describe('WorkOrdersService', () => {
       expect(result.isMock).toBe(true);
     });
   });
+
+  // PR-127: BOM 소요명세서의 작업지시 "검색 선택"용 keyword(완제품 이름/코드/스타일번호 부분일치, 대소문자 무시).
+  describe('findAll — keyword 검색 (PR-127)', () => {
+    const buildQb = (result: any[] = []) => {
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(result),
+        getManyAndCount: jest.fn().mockResolvedValue([result, result.length]),
+      };
+      (mockWoRepository as any).createQueryBuilder = jest.fn().mockReturnValue(qb);
+      return qb;
+    };
+
+    it('keyword가 있으면 완제품 Item의 이름/코드/스타일번호에 LOWER() LIKE LOWER() 부분일치를 건다', async () => {
+      const qb = buildQb([{ id: 9 }]);
+      const result = await service.findAll({ keyword: ' mb6 ', page: 1, limit: 20 } as any);
+      const call = qb.andWhere.mock.calls.find(([clause]: [string]) => clause.includes(':kw'));
+      expect(call[0]).toContain('LOWER(item.name) LIKE LOWER(:kw)');
+      expect(call[0]).toContain('LOWER(item.code) LIKE LOWER(:kw)');
+      expect(call[0]).toContain('LOWER(item.styleNo) LIKE LOWER(:kw)');
+      expect(call[1]).toEqual({ kw: '%mb6%' });
+      expect(qb.take).toHaveBeenCalledWith(20);
+      expect(result.items).toEqual([{ id: 9 }]);
+    });
+
+    it('keyword가 없으면 검색 조건을 걸지 않는다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ page: 1, limit: 10 } as any);
+      expect(qb.andWhere.mock.calls.some(([clause]: [string]) => clause.includes(':kw'))).toBe(false);
+    });
+  });
 });

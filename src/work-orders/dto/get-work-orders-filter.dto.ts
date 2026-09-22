@@ -16,6 +16,11 @@ export class GetWorkOrdersFilterDto extends PaginationQueryDto {
   @IsNumber()
   itemId?: number;
 
+  @ApiPropertyOptional({ description: '완제품 품목명/품목코드/스타일번호 부분일치 검색어(대소문자 무시)', example: 'MB6' })
+  @IsOptional()
+  @IsString()
+  keyword?: string;
+
   @ApiPropertyOptional({ description: '조회 시작일 (YYYY-MM-DD)' })
   @IsOptional()
   @IsString()

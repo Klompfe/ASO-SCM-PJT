@@ -18,6 +18,8 @@ export interface GetWorkOrdersFilter {
   itemId?: number;
   startDate?: string;
   endDate?: string;
+  // PR-127: 완제품 품목명/코드/스타일번호 부분일치 검색어
+  keyword?: string;
 }
 
 export interface UpdateWorkOrderStatus {

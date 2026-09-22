@@ -27,6 +27,11 @@ export interface GetPurchaseOrdersFilter {
   status?: 'PENDING' | 'RECEIVED' | 'CANCELLED';
   startDate?: string;
   endDate?: string;
+  // PR-127: 품목명/코드/공급업체명 부분일치 검색어
+  keyword?: string;
+  // PR-127: page 또는 limit를 주면 서버가 실제로 페이지네이션한다(둘 다 생략하면 전량 — 원장/리포트용)
+  page?: number;
+  limit?: number;
 }
 
 export const getPurchaseOrders = (filter?: GetPurchaseOrdersFilter): Promise<any> =>
