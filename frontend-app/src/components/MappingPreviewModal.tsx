@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { commitMapping } from '../api/mapping.service';
+import { APPROVE_LABEL, BADGE_ALREADY_REGISTERED, REAPPROVE_LABEL, REAPPROVE_NOTICE_POINTS, REAPPROVE_NOTICE_TITLE } from '../utils/mappingApproval';
 
 interface MappingPreviewModalProps {
   isOpen: boolean;
@@ -58,13 +59,16 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
             <h3 className="text-xl font-bold">Style: {data?.styleNo || 'N/A'}</h3>
             {alreadyExists && (
               <span className="px-2 py-1 rounded text-sm font-bold bg-yellow-100 text-yellow-800">
-                이미 등록됨
+                {BADGE_ALREADY_REGISTERED}
               </span>
             )}
           </div>
           {alreadyExists && (
-            <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 p-2 rounded mb-2 text-sm">
-              이 Style No는 이미 등록되어 있습니다. 다시 승인하면 새로운 BOM/BOM Item이 추가로 쌓이며 기존 데이터는 자동으로 정리되지 않습니다(덮어쓰기 로직은 아직 구현되지 않음).
+            <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 p-2 rounded mb-2 text-sm text-left space-y-1" data-testid="reapprove-notice">
+              <p className="font-medium">{REAPPROVE_NOTICE_TITLE}</p>
+              <ul className="list-disc pl-5 space-y-0.5">
+                {REAPPROVE_NOTICE_POINTS.map((point) => <li key={point}>{point}</li>)}
+              </ul>
             </div>
           )}
           <div className="grid grid-cols-4 gap-4 text-sm">
@@ -107,7 +111,7 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
           disabled={saving}
           className={`px-4 py-2 text-white rounded disabled:bg-gray-400 ${alreadyExists ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-blue-600 hover:bg-blue-700'}`}
         >
-          {alreadyExists ? '재승인(덮어쓰기)' : '저장 및 승인'}
+          {alreadyExists ? REAPPROVE_LABEL : APPROVE_LABEL}
         </button>
       </div>
       </div>
