@@ -10,12 +10,25 @@ import { ImportFile, ImportStatus } from '../../imports/entities/import-file.ent
 import { Item, ItemType } from '../../items/entities/item.entity';
 import { CommitMappingDto } from '../dto/commit-mapping.dto';
 
+// PR-132: commit()이 사용자에게 알려야 하는 두 종류의 사실을 문자열 패턴이 아니라 구조로 구분한다.
+// - NEEDS_REVIEW: 병합 중 "자동 반영을 보류"했다 → 사용자가 확인하고 필요하면 수동으로 고쳐야 한다.
+// - AUTO_APPLIED: 시스템이 값을 "자동으로 채웠다"(정보성) → 확인만 하면 된다.
+export type CommitNoticeType = 'AUTO_APPLIED' | 'NEEDS_REVIEW';
+export type CommitNoticeCode = 'FACTORY_MISMATCH' | 'BOM_ITEM_VALUE_DIFF' | 'LINING_COMPOSITION_DEFAULT';
+
+export interface CommitNotice {
+  type: CommitNoticeType;
+  code: CommitNoticeCode;
+  message: string;
+}
+
 export interface CommitResult {
   success: boolean;
   styleNo: string;
-  // PR-098: 병합 중 자동 반영을 보류한 항목(기존 factory와 충돌, 기존 BomItem과 수량/
-  // 요척이 다름 등)을 호출자(작업지시서 업로드 화면, Excel 매핑 화면)가 사용자에게
-  // 보여줄 수 있도록 담는다.
+  // PR-132: 구조화된 알림(화면이 유형별로 구분해 보여준다). 문구가 바뀌어도 type/code는 유지된다.
+  notices: CommitNotice[];
+  // PR-098: 병합 중 자동 반영을 보류한 항목 등을 사람이 읽을 수 있는 문자열로 담는다. notices.message와 같은 내용이며(단일 원천),
+  // 작업지시서 업로드(WorkOrdersService.commitAnalysis)와 기존 호출부/테스트가 문자열 배열을 그대로 쓰므로 형태를 바꾸지 않는다.
   warnings: string[];
 }
 
@@ -60,7 +73,7 @@ export class MappingCommitService {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
-    const warnings: string[] = [];
+    const notices: CommitNotice[] = [];
 
     try {
       const { styleNo, overviewData, bomItems } = payload;
@@ -79,7 +92,7 @@ export class MappingCommitService {
       }
 
       if (style.overview) {
-        this.mergeOverview(style.overview, overviewData, warnings);
+        this.mergeOverview(style.overview, overviewData, notices);
       } else {
         style.overview = queryRunner.manager.create(StyleOverview, {
           factory: overviewData.factory,
@@ -142,10 +155,13 @@ export class MappingCommitService {
             Number(existingBomItem.consumption) !== Number(newConsumption) ||
             Number(existingBomItem.requiredQty) !== Number(newRequiredQty)
           ) {
-            warnings.push(
-              `${item.itemName}(${colorCode}/${spec}) 기존 값(요척 ${existingBomItem.consumption}, 소요량 ${existingBomItem.requiredQty}) ` +
+            notices.push({
+              type: 'NEEDS_REVIEW',
+              code: 'BOM_ITEM_VALUE_DIFF',
+              message:
+                `${item.itemName}(${colorCode}/${spec}) 기존 값(요척 ${existingBomItem.consumption}, 소요량 ${existingBomItem.requiredQty}) ` +
                 `→ 새 값(요척 ${newConsumption}, 소요량 ${newRequiredQty}) — 자동 반영하지 않음, 확인 후 수동 변경 필요`,
-            );
+            });
           }
           continue;
         }
@@ -155,9 +171,11 @@ export class MappingCommitService {
         let composition = item.composition ?? null;
         if (!composition && isLiningItem(item.category, item.itemName)) {
           composition = LINING_DEFAULT_COMPOSITION;
-          warnings.push(
-            `안감 항목 '${item.itemName}' 혼용률 미기재 — 기본값 ${LINING_DEFAULT_COMPOSITION} 자동 적용`,
-          );
+          notices.push({
+            type: 'AUTO_APPLIED',
+            code: 'LINING_COMPOSITION_DEFAULT',
+            message: `안감 항목 '${item.itemName}' 혼용률 미기재 — 기본값 ${LINING_DEFAULT_COMPOSITION} 자동 적용`,
+          });
         }
 
         const savedBomItem = await queryRunner.manager.save(BomItem, {
@@ -181,7 +199,7 @@ export class MappingCommitService {
       }
 
       await queryRunner.commitTransaction();
-      return { success: true, styleNo, warnings };
+      return { success: true, styleNo, notices, warnings: notices.map((n) => n.message) };
     } catch (err) {
       await queryRunner.rollbackTransaction();
       throw new InternalServerErrorException(err);
@@ -191,20 +209,22 @@ export class MappingCommitService {
   }
 
   // 기존 StyleOverview를 새 값으로 필드 단위 병합한다. factory는 예외: 기존 값이 이미
-  // 있으면 새 값이 달라도 자동으로 덮어쓰지 않고 warnings에만 기록한다(관세사/영업
+  // 있으면 새 값이 달라도 자동으로 덮어쓰지 않고 notices(NEEDS_REVIEW)에만 기록한다(관세사/영업
   // 검토 없이 "국가 단위 기본값" 위에 "구체적 공장명"이 실수로 덮어써지는 걸 막기 위함).
   // 나머지 필드는 이번 요청 값이 있으면(null/undefined가 아니면) 덮어쓰고, 없으면
   // 기존 값을 그대로 둔다.
   private mergeOverview(
     overview: StyleOverview,
     overviewData: CommitMappingDto['overviewData'],
-    warnings: string[],
+    notices: CommitNotice[],
   ): void {
     if (overviewData.factory) {
       if (overview.factory && overview.factory !== overviewData.factory) {
-        warnings.push(
-          `기존 factory 값 '${overview.factory}' → 새 값 '${overviewData.factory}' — 자동 반영하지 않음, 확인 후 수동 변경 필요`,
-        );
+        notices.push({
+          type: 'NEEDS_REVIEW',
+          code: 'FACTORY_MISMATCH',
+          message: `기존 factory 값 '${overview.factory}' → 새 값 '${overviewData.factory}' — 자동 반영하지 않음, 확인 후 수동 변경 필요`,
+        });
       } else if (!overview.factory) {
         overview.factory = overviewData.factory;
       }

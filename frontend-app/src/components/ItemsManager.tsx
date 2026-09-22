@@ -10,6 +10,8 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { ItemCatalogReport } from './ItemCatalogReport';
 import { Pagination } from './Pagination';
 import { selectBulkApproveTargets } from '../utils/mappingApproval';
+import { extractNotices, type StyleCommitResult } from '../utils/commitNotices';
+import { BulkApproveResult } from './CommitResultPanel';
 import { fetchItemPage } from '../utils/listQueries';
 import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
 
@@ -72,6 +74,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   const [existsMap, setExistsMap] = useState<Record<string, boolean>>({});
   const [bulkApproving, setBulkApproving] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(0);
+  // PR-132: 일괄승인 결과(스타일별 알림) 요약 — 확인이 필요한 차이가 있는 스타일을 놓치지 않게 화면에 남긴다.
+  const [bulkResults, setBulkResults] = useState<{ results: StyleCommitResult[]; skipped: number } | null>(null);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,6 +268,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
     setError(null);
     setParsedStyles([]);
     setExistsMap({});
+    setBulkResults(null);
     try {
       const styles = await parseMappingFile(selectedFile);
       setParsedStyles(styles);
@@ -311,17 +316,19 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
     setBulkApproving(true);
     setBulkProgress(0);
     let successCount = 0;
+    const successResults: StyleCommitResult[] = [];
     const failures: { styleNo: string; reason: string }[] = [];
 
     // 병렬로 돌리면 mapping-commit.service.ts의 "동일 이름 자재 없으면 새로 생성" 로직이
     // 서로 다른 시트에서 같은 자재명을 참조할 때 경합해 중복 생성될 수 있어 순차 실행한다.
     for (const style of targets) {
       try {
-        await commitMapping({
+        const res = await commitMapping({
           styleNo: style.styleNo,
           overviewData: style.overview,
           bomItems: style.bomItems || [],
         });
+        successResults.push({ styleNo: style.styleNo, notices: extractNotices(res) });
         successCount++;
       } catch (err) {
         const reason = getErrorMessage(err, '알 수 없는 오류');
@@ -334,9 +341,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
     }
 
     setBulkApproving(false);
-    if (failures.length === 0) {
-      toast.success(`일괄 승인 완료: ${successCount}개 성공${skippedCount > 0 ? `, ${skippedCount}개 제외` : ''}`);
-    } else {
+    // 성공한 스타일은 (실패가 함께 있어도) 스타일별 차이 요약을 화면에 남긴다. 성공만 있을 때는 이 요약이 완료 안내를 대신한다.
+    if (successResults.length > 0) setBulkResults({ results: successResults, skipped: skippedCount });
+    if (failures.length > 0) {
       // 실패 사유별로 묶어서 "사유: 해당 styleNo 개수"로 간추린다 — 실패가 많을 때
       // (예: 동일 원인으로 수십 건) 토스트가 읽을 수 없는 텍스트 벽이 되는 것을 막는다.
       // 스타일별 전체 사유는 console.error로 남겨 정확한 대상을 추적할 수 있게 한다.
@@ -412,6 +419,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
               {bulkApproving ? `일괄 승인 중... (${bulkProgress}/${parsedStyles.length})` : '일괄 승인'}
             </button>
           </div>
+          {bulkResults && <BulkApproveResult results={bulkResults.results} skipped={bulkResults.skipped} onDismiss={() => setBulkResults(null)} />}
           <StyleReviewList styles={parsedStyles} existsMap={existsMap} onSelect={handleSelectStyle} />
         </div>
       )}

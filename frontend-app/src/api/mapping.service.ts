@@ -38,5 +38,7 @@ export const parseMappingFile = (file: File): Promise<ParsedStyleResult[]> => {
 export const checkStyleExists = (styleNo: string): Promise<{ exists: boolean }> =>
   apiClient.get('/mapping/check-exists', { params: { styleNo } });
 
-export const commitMapping = (payload: { styleNo: string; overviewData: any; bomItems: any[] }): Promise<any> =>
+// PR-132: 응답의 notices(NEEDS_REVIEW/AUTO_APPLIED 구조화 알림)와 warnings(문자열 배열, 호환용)를 화면이 그대로 쓴다.
+export type { CommitResponse, CommitNotice } from '../utils/commitNotices';
+export const commitMapping = (payload: { styleNo: string; overviewData: any; bomItems: any[] }): Promise<import('../utils/commitNotices').CommitResponse> =>
   apiClient.post('/mapping/commit', payload);
