@@ -1,18 +1,25 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getWorkOrders, createWorkOrder, updateWorkOrderStatus, type GetWorkOrdersFilter, type WorkOrder, type CreateWorkOrder } from '../api/workOrders.service';
+import { createWorkOrder, updateWorkOrderStatus, type WorkOrder, type CreateWorkOrder } from '../api/workOrders.service';
 import type { Item } from '../api/items.service';
 import { SearchSelectField } from './SearchSelectField';
 import { masterLabel, searchItems } from '../utils/searchFetchers';
 import { WorkOrderUploadModal } from './WorkOrderUploadModal';
 import { useNavigate } from 'react-router-dom'; // Assumed react-router usage
 import { getErrorMessage } from '../utils/errorMessage';
+import { Pagination } from './Pagination';
+import { fetchWorkOrderPage, type WorkOrderListQuery } from '../utils/listQueries';
+import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
 
 const emptyCreateForm: CreateWorkOrder = { itemId: 0, targetQuantity: 1 };
 
 export const WorkOrdersManager: React.FC = () => {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-  const [filter, setFilter] = useState<GetWorkOrdersFilter>({});
+  // PR-128: 메인 목록은 서버 페이지네이션({items, meta})을 그대로 따른다 — 예전엔 filter가 {}라 첫 10건만 보이고 이동 수단이 없었다.
+  const [query, setQuery] = useState<WorkOrderListQuery>({ page: 1 });
+  const [keywordDraft, setKeywordDraft] = useState('');
+  const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE_META);
+  const [listLoading, setListLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   // PR-127: 품목은 <select>(getItems limit 100 — 100개 넘는 품목은 선택 불가)가 아니라 서버 검색 선택이다.
   const [item, setItem] = useState<Item | null>(null);
@@ -45,15 +52,24 @@ export const WorkOrdersManager: React.FC = () => {
       // Explicit token check (though interceptor handles it, user asked for explicit handling)
       getAuthHeader();
       
-      const res = await getWorkOrders(filter);
-      // GET /work-orders는 배열이 아니라 페이지네이션 객체({items, meta})를 반환한다.
-      const data = Array.isArray(res) ? res : (res && Array.isArray(res.items) ? res.items : []);
-      setWorkOrders(data);
+      setListLoading(true);
+      const res = await fetchWorkOrderPage(query);
+      // 마지막 페이지의 항목이 사라지는 등으로 요청 페이지가 전체 페이지를 넘으면 마지막 페이지로 되돌아가 다시 조회한다.
+      const recover = pageToRecoverTo(res.meta, query.page);
+      if (recover !== null) {
+        setQuery((q) => ({ ...q, page: recover }));
+        return;
+      }
+      setWorkOrders(res.items);
+      setMeta(res.meta);
     } catch (error) {
       handleAuthError(error);
       setWorkOrders([]);
+      setMeta(EMPTY_PAGE_META);
+    } finally {
+      setListLoading(false);
     }
-  }, [filter, navigate]);
+  }, [query, navigate]);
 
   useEffect(() => {
     loadWorkOrders();
@@ -76,7 +92,8 @@ export const WorkOrdersManager: React.FC = () => {
       toast.success('작업 지시가 등록되었습니다.');
       setNewWorkOrder(emptyCreateForm);
       setItem(null);
-      loadWorkOrders();
+      // 새 작업지시는 최신순 첫 페이지에 나타나므로 1페이지로 돌아가 다시 조회한다.
+      setQuery((q) => ({ ...q, page: 1 }));
     } catch (error) {
       handleAuthError(error);
     } finally {
@@ -139,15 +156,43 @@ export const WorkOrdersManager: React.FC = () => {
         </form>
       </div>
 
-      <div className="bg-gray-50 p-4 rounded-lg">
-        <label className="text-sm text-gray-600 block mb-2">Filter by Status</label>
-        <select className="border border-gray-300 rounded px-3 py-2 w-full md:w-64" onChange={(e) => setFilter({...filter, status: e.target.value})}>
-          <option value="">All</option>
-          <option value="PLANNED">Planned</option>
-          <option value="IN_PROGRESS">In Progress</option>
-          <option value="COMPLETED">Completed</option>
-        </select>
-      </div>
+      <form
+        className="bg-gray-50 p-4 rounded-lg flex flex-wrap gap-4 items-end"
+        onSubmit={(e) => { e.preventDefault(); setQuery((q) => ({ ...q, page: 1, keyword: keywordDraft })); }}
+      >
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">Filter by Status</label>
+          {/* 상태 값은 서버 WorkOrderStatus enum과 같다(예전 PLANNED는 없는 값이라 서버가 400으로 거부했다). 상태를 바꾸면 1페이지부터 다시 본다. */}
+          <select
+            aria-label="상태 필터"
+            className="border border-gray-300 rounded px-3 py-2 w-full md:w-64"
+            value={query.status ?? ''}
+            onChange={(e) => setQuery((q) => ({ ...q, page: 1, status: e.target.value || undefined }))}
+          >
+            <option value="">All</option>
+            <option value="PENDING">Pending</option>
+            <option value="IN_PROGRESS">In Progress</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">검색 (품목명/코드/스타일번호)</label>
+          <input
+            aria-label="작업지시 검색어"
+            className="border border-gray-300 rounded px-3 py-2 w-64"
+            placeholder="예: 셔츠, MB62SLM103Z"
+            value={keywordDraft}
+            onChange={(e) => setKeywordDraft(e.target.value)}
+          />
+        </div>
+        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">검색</button>
+        <button
+          type="button"
+          className="bg-gray-200 text-gray-700 px-4 py-2 rounded"
+          onClick={() => { setKeywordDraft(''); setQuery({ page: 1 }); }}
+        >초기화</button>
+      </form>
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <table className="w-full">
@@ -180,12 +225,16 @@ export const WorkOrdersManager: React.FC = () => {
             ))}
           </tbody>
         </table>
+        {workOrders.length === 0 && !listLoading && (
+          <p className="px-4 py-6 text-center text-sm text-gray-500" data-testid="work-orders-empty">조회된 작업지시가 없습니다.</p>
+        )}
       </div>
+      <Pagination page={meta.page} totalPages={meta.totalPages} total={meta.total} disabled={listLoading} onPageChange={(page) => setQuery((q) => ({ ...q, page }))} />
 
       <WorkOrderUploadModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
-        onSuccess={loadWorkOrders}
+        onSuccess={() => setQuery((q) => ({ ...q, page: 1 }))}
       />
     </div>
   );
