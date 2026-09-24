@@ -24,7 +24,7 @@ describe('수입통관(ImportShipment) 회귀 테스트 (PR-082)', () => {
 
   const createStyle = async (styleNo: string) => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${token}`)
       .send({
         overview: {

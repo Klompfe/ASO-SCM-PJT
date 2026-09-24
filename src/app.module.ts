@@ -17,6 +17,7 @@ import { ItemsModule } from './items/items.module';
 import { InventoriesModule } from './inventories/inventories.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
+import { SalesOrdersModule } from './sales-orders/sales-orders.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 import { MappingModule } from './mapping/mapping.module';
@@ -80,6 +81,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     InventoriesModule,
     PurchaseOrdersModule,
     WorkOrdersModule,
+    SalesOrdersModule,
     SuppliersModule,
     ShipmentsModule,
     MappingModule,

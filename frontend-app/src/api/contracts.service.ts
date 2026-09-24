@@ -17,7 +17,7 @@ export interface Contract {
   fobPrice: number | null;
   approvedByUserId: number | null;
   approvedAt: string | null;
-  triggeredByWorkOrderSpecId: number | null;
+  triggeredBySalesOrderSpecId: number | null; // PR-133: triggeredByWorkOrderSpecId에서 이름 변경
 }
 
 export const issueContract = (styleNo: string, notes?: string): Promise<any> =>

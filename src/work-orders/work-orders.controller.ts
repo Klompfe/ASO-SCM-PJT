@@ -8,69 +8,20 @@ import {
   Delete,
   ParseIntPipe,
   Query,
-  UseInterceptors,
-  UploadedFile,
-  ParseFilePipe,
-  FileTypeValidator,
   BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { WorkOrdersService } from './work-orders.service';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
 import { UpdateWorkOrderStatusDto } from './dto/update-work-order-status.dto';
 import { WorkOrder } from './entities/work-order.entity';
 import { GetWorkOrdersFilterDto } from './dto/get-work-orders-filter.dto';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
-import { GetUser } from '../auth/decorators/get-user.decorator';
 
 @ApiTags('Work Orders (작업 지시 관리)')
 @ApiBearerAuth()
 @Controller('work-orders')
 export class WorkOrdersController {
   constructor(private readonly woService: WorkOrdersService) {}
-
-  @Post('upload-image')
-  @ApiOperation({ summary: '작업지시서 이미지 분석' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        file: { type: 'string', format: 'binary' },
-      },
-    },
-  })
-  @UseInterceptors(FileInterceptor('file'))
-  async uploadImage(
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [new FileTypeValidator({ fileType: '.(png|jpeg|jpg|pdf)' })],
-      }),
-    )
-    file: Express.Multer.File,
-    @GetUser() user: any,
-  ) {
-    return await this.woService.analyzeWorkOrderImage(file, user.userId);
-  }
-
-  @Get('ai-usage')
-  @ApiOperation({ summary: '내 작업지시서 AI 분석 사용량/과금 이력 조회' })
-  async getAiUsage(@GetUser() user: any) {
-    return this.woService.getAiUsageForUser(user.userId);
-  }
-
-  @Get('ai-usage/summary')
-  @ApiOperation({ summary: '내 작업지시서 AI 분석 누적 사용량/과금 요약' })
-  async getAiUsageSummary(@GetUser() user: any) {
-    return this.woService.getAiUsageSummaryForUser(user.userId);
-  }
-
-  @Post('commit-analysis')
-  @ApiOperation({ summary: '작업지시서 AI 분석 결과 최종 저장 (오더개요+자재명세+작업명세)' })
-  async commitAnalysis(@Body() dto: AiWorkOrderResultDto) {
-    return this.woService.commitAnalysis(dto);
-  }
 
   @Get('style-requirements')
   @ApiOperation({ summary: '스타일+수량 기준 자재 필요량/이미 발주/부족 계산(작업지시 없이) — 발주 화면용. quantity 생략 시 스타일 총 수량' })
@@ -84,16 +35,6 @@ export class WorkOrdersController {
       throw new BadRequestException('quantity는 0보다 큰 숫자여야 합니다.');
     }
     return this.woService.getStyleRequirements(styleNo, quantity ? Number(quantity) : undefined);
-  }
-
-  @Get('spec')
-  @ApiOperation({ summary: '스타일별 작업명세(사이즈 스펙+지시사항) 조회' })
-  @ApiQuery({ name: 'styleNo', required: true, example: 'MB62SLM103Z' })
-  async findSpec(@Query('styleNo') styleNo: string) {
-    if (!styleNo) {
-      throw new BadRequestException('styleNo는 필수입니다.');
-    }
-    return this.woService.findSpecByStyleNo(styleNo);
   }
 
   @Post()

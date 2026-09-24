@@ -75,8 +75,9 @@ export class Contract {
   @Column({ nullable: true })
   approvedAt: Date | null;
 
-  // 이 계약 브랜치를 만든 작업지시서 등록(WorkOrderSpec)의 id — 수동 발행(POST /contracts)된
+  // 이 계약 브랜치를 만든 수주 등록(작업지시서 업로드, SalesOrderSpec)의 id — 수동 발행(POST /contracts)된
   // 계약은 null로 남는다. 정식 FK 관계는 두지 않는다(추적용 정보일 뿐, 조인해서 쓰지 않음).
+  // PR-133: triggeredByWorkOrderSpecId에서 이름을 바꿨다(마이그레이션으로 컬럼 RENAME, 값 보존).
   @Column({ nullable: true })
-  triggeredByWorkOrderSpecId: number | null;
+  triggeredBySalesOrderSpecId: number | null;
 }

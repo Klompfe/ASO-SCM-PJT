@@ -77,12 +77,13 @@ export const updateWorkOrderStatus = (id: number, data: UpdateWorkOrderStatus): 
 export const uploadWorkOrderImage = (file: File): Promise<any> => {
   const formData = new FormData();
   formData.append('file', file);
-  return apiClient.post('/work-orders/upload-image', formData, {
+  // PR-133: 수주(작업지시서 업로드) 흐름은 /sales-orders/* 로 분리되었다(함수 이름 정리는 PR-134에서 화면 재배치와 함께).
+  return apiClient.post('/sales-orders/upload-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 };
 export const commitWorkOrderAnalysis = (result: AiWorkOrderResult): Promise<any> =>
-  apiClient.post('/work-orders/commit-analysis', result);
+  apiClient.post('/sales-orders/commit-analysis', result);
 // PR-120: BOM 소요명세서(작업지시 물량 기준 자재 소요량/이미 발주 수량/부족 수량).
 export const getMaterialRequirements = (id: number): Promise<MaterialRequirements> =>
   apiClient.get(`/work-orders/${id}/material-requirements`);
@@ -97,7 +98,7 @@ export interface StyleRequirements extends Omit<MaterialRequirements, 'workOrder
 export const getStyleRequirements = (styleNo: string, quantity?: number): Promise<StyleRequirements> =>
   apiClient.get('/work-orders/style-requirements', { params: { styleNo, ...(quantity ? { quantity } : {}) } });
 export const getWorkOrderSpec = (styleNo: string): Promise<any> =>
-  apiClient.get('/work-orders/spec', { params: { styleNo } });
+  apiClient.get('/sales-orders/spec', { params: { styleNo } });
 
 export interface AiUsageLog {
   id: number;
@@ -115,5 +116,5 @@ export interface AiUsageSummary {
   totalCostUsd: number;
 }
 
-export const getAiUsage = (): Promise<any> => apiClient.get('/work-orders/ai-usage');
-export const getAiUsageSummary = (): Promise<any> => apiClient.get('/work-orders/ai-usage/summary');
+export const getAiUsage = (): Promise<any> => apiClient.get('/sales-orders/ai-usage');
+export const getAiUsageSummary = (): Promise<any> => apiClient.get('/sales-orders/ai-usage/summary');

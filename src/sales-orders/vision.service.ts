@@ -1,7 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
-import { AiWorkOrderResultDto } from './dto/ai-analysis.dto';
+import { AiSalesOrderResultDto } from './dto/ai-analysis.dto';
 
 export interface AiAnalysisUsage {
   pageCount: number;
@@ -10,7 +10,7 @@ export interface AiAnalysisUsage {
 }
 
 export interface AiAnalysisOutcome {
-  results: AiWorkOrderResultDto[];
+  results: AiSalesOrderResultDto[];
   usage: AiAnalysisUsage;
   // PR-096: GEMINI_API_KEY 미설정으로 목업 데이터를 반환한 경우 true. 기존에는
   // usage.pageCount === 0(과금 로그를 안 남기려는 목적으로 우회 도입된 값)으로
@@ -104,7 +104,7 @@ export class VisionService {
     }
   }
 
-  async analyzeWorkOrder(file: Express.Multer.File): Promise<AiAnalysisOutcome> {
+  async analyzeSalesOrder(file: Express.Multer.File): Promise<AiAnalysisOutcome> {
     if (!this.genAI) {
       // 목업 응답은 실제 API 비용이 없으므로 pageCount=0으로 반환해 과금 로그를 남기지 않는다.
       return {
@@ -133,7 +133,7 @@ export class VisionService {
         this.logger.warn(`Gemini 응답이 정상 종료되지 않음(finishReason=${finishReason}) - 응답이 잘렸을 수 있습니다.`);
       }
       const text = result.response.text();
-      const parsed = JSON.parse(text) as AiWorkOrderResultDto[];
+      const parsed = JSON.parse(text) as AiSalesOrderResultDto[];
 
       // 페이지 수 = 결과 배열 길이(스타일 1개 = 페이지 1개)로 근사한다 — 실측 검증 완료
       // (6페이지 파일→6건, 16페이지 파일→16건 정확히 일치, PR-055 참고).
@@ -177,7 +177,7 @@ export class VisionService {
     }
   }
 
-  private mockResult(): AiWorkOrderResultDto[] {
+  private mockResult(): AiSalesOrderResultDto[] {
     return [
       {
         overview: {

@@ -38,7 +38,7 @@ export class AiSizeSpecRowDto {
 }
 
 // 작업지시서 한 페이지(=스타일 하나) 분석 결과. AI 응답 형태이자 최종저장 요청 바디로도 쓰인다.
-export class AiWorkOrderResultDto {
+export class AiSalesOrderResultDto {
   @ApiProperty({ type: AiOverviewDto })
   @ValidateNested()
   @Type(() => AiOverviewDto)

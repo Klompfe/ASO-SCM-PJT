@@ -95,7 +95,7 @@ describe('작업지시서 등록 → 계약 자동생성/승인 워크플로 (PR
 
   it('작업지시서를 처음 등록하면 계약이 PENDING_APPROVAL로 자동 생성되어야 한다', async () => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${userToken}`)
       .send(buildWorkOrderPayload(styleNo, 1000))
       .expect(201);
@@ -116,7 +116,7 @@ describe('작업지시서 등록 → 계약 자동생성/승인 워크플로 (PR
 
   it('같은 styleNo로 작업지시서를 재등록하면 기존 계약을 덮어쓰지 않고 새 PENDING_APPROVAL 브랜치가 쌓여야 한다', async () => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${userToken}`)
       .send(buildWorkOrderPayload(styleNo, 2000))
       .expect(201);
@@ -189,7 +189,7 @@ describe('작업지시서 등록 → 계약 자동생성/승인 워크플로 (PR
 
   it('PENDING_APPROVAL 계약을 거절하면 REJECTED가 되어야 한다', async () => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${userToken}`)
       .send(buildWorkOrderPayload(styleNo, 3000))
       .expect(201);

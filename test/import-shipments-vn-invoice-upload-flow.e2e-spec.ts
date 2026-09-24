@@ -87,7 +87,7 @@ describe('Vietnam INV/PKL 엑셀 업로드(ImportShipment import-from-file) 회�
 
   const createStyle = async (styleNo: string) => {
     await request(app.getHttpServer())
-      .post('/work-orders/commit-analysis')
+      .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${token}`)
       .send({
         overview: {
