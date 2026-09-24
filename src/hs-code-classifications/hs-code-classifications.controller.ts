@@ -3,8 +3,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
+  ParseIntPipe,
   Post,
   Query,
   UploadedFile,
@@ -65,6 +69,19 @@ export class HsCodeClassificationsController {
       await this.service.upsertStyleMapping(dto.styleNo, classification.id);
     }
     return { ...classification, styleNo: dto.styleNo ?? null };
+  }
+
+  // PR-141: 삭제 — style_hs_code_mappings FK가 ON DELETE CASCADE라 이 분류에 연결된
+  // 스타일 매핑도 함께 지워진다(styles.controller.ts 스타일 삭제와 같은 cascade 방침).
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'HS코드 분류 삭제 — 연결된 스타일 매핑도 함께 삭제(cascade) (MANAGER/ADMIN)' })
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    await this.service.remove(id);
+    return { message: `HS코드 분류(ID ${id})가 삭제되었습니다.` };
   }
 
   // PR-084: MB6YSLP112Z처럼 관세사 확인 후 사용자가 정확한 품종/재직/혼용률 문구를

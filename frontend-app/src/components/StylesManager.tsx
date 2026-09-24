@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getMasterStyles, createMasterStyle, type MasterStyle, type CreateMasterStyle, type FindMasterStylesFilter } from '../api/styles.service';
+import { getMasterStyles, createMasterStyle, updateMasterStyle, type MasterStyle, type CreateMasterStyle, type UpdateMasterStyle, type FindMasterStylesFilter } from '../api/styles.service';
 import { getBrandPrefixRules } from '../api/brandPrefixRules.service';
 import { getSeasonDateRange, YEAR_OPTIONS, type Season } from '../utils/season';
 import {
@@ -92,6 +92,12 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const canApprove = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
   const [contractActionId, setContractActionId] = useState<number | null>(null);
+
+  // PR-141: 스타일 정보 수정 — 상세 모달 안에서 개요(공장/바이어/수량/생산유형/목표출고일/
+  // 단가 등)를 인라인으로 고친다. styleNo 자체는 수정 대상이 아니다(다른 테이블이 참조하는 키).
+  const [editingStyle, setEditingStyle] = useState(false);
+  const [editForm, setEditForm] = useState<UpdateMasterStyle>({});
+  const [savingStyle, setSavingStyle] = useState(false);
 
   // PR-101: 스타일번호/품목/기간/시즌 검색·필터. 시즌(연도+SS/FW)을 선택하면
   // Dashboard.tsx와 동일한 규칙(utils/season.ts)으로 기간이 자동 채워지고, 사용자가
@@ -280,10 +286,41 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
     setSelectedStyle(s);
     setContractNotes('');
     setShipmentForm({ plannedShipDate: '', quantity: '', remark: '' });
+    setEditingStyle(false);
+    setEditForm({
+      factory: s.overview?.factory ?? '',
+      buyer: s.overview?.buyer ?? '',
+      totalQty: s.overview?.totalQty ?? 0,
+      brand: s.overview?.brand ?? '',
+      itemType: s.overview?.itemType ?? '',
+      productionType: s.overview?.productionType ?? 'FOB',
+      targetRdd: toDateInputValue(s.overview?.targetRdd),
+      cmtPrice: s.overview?.cmtPrice ?? 0,
+      fobPrice: s.overview?.fobPrice ?? 0,
+    });
     loadContracts(s.styleNo);
     loadProcessStages(s.styleNo);
     loadMaterialReadiness(s.styleNo);
     loadShipments(s.styleNo);
+  };
+
+  const handleSaveStyleEdit = async () => {
+    if (!selectedStyle) return;
+    setSavingStyle(true);
+    try {
+      await updateMasterStyle(selectedStyle.styleNo, editForm);
+      toast.success('스타일 정보가 수정되었습니다.');
+      setEditingStyle(false);
+      const res = await getMasterStyles({ styleNo: selectedStyle.styleNo });
+      const data: MasterStyle[] = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
+      const refreshed = data.find((s) => s.styleNo === selectedStyle.styleNo);
+      if (refreshed) setSelectedStyle(refreshed);
+      loadStyles(buildFilter());
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '스타일 정보 수정에 실패했습니다.'));
+    } finally {
+      setSavingStyle(false);
+    }
   };
 
   // 진행현황 요약 탭에서 넘어온 styleNo가 있으면, 목록이 로드된 뒤 그 스타일의
@@ -578,19 +615,86 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
       {selectedStyle && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white p-6 rounded w-1/2 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">{selectedStyle.styleNo} 상세</h3>
-
-            <div className="grid grid-cols-2 gap-2 text-sm mb-6">
-              <div><span className="text-gray-500">브랜드:</span> {selectedStyle.overview?.brand ?? '-'}</div>
-              <div><span className="text-gray-500">생산유형:</span> {selectedStyle.overview?.productionType ?? '-'}</div>
-              <div><span className="text-gray-500">공장:</span> {selectedStyle.overview?.factory ?? '-'}</div>
-              <div><span className="text-gray-500">바이어:</span> {selectedStyle.overview?.buyer ?? '-'}</div>
-              <div><span className="text-gray-500">총수량:</span> {selectedStyle.overview?.totalQty ?? '-'}</div>
-              <div><span className="text-gray-500">목표출고일:</span> {selectedStyle.overview?.targetRdd ?? '-'}</div>
-              <div><span className="text-gray-500">FOB 단가:</span> {selectedStyle.overview?.fobPrice ?? '-'}</div>
-              <div><span className="text-gray-500">CMT 단가:</span> {selectedStyle.overview?.cmtPrice ?? '-'}</div>
-              <div><span className="text-gray-500">상태:</span> {selectedStyle.overview?.status ?? '-'}</div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold">{selectedStyle.styleNo} 상세</h3>
+              {canApprove && !editingStyle && (
+                <button
+                  type="button"
+                  onClick={() => setEditingStyle(true)}
+                  className="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                >수정</button>
+              )}
             </div>
+
+            {editingStyle ? (
+              <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-6 space-y-3">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex flex-col">
+                    <label className="text-gray-600 mb-1">브랜드</label>
+                    <input className="border p-2 rounded" value={editForm.brand ?? ''} onChange={(e) => setEditForm({ ...editForm, brand: e.target.value })} />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-gray-600 mb-1">품목</label>
+                    <input className="border p-2 rounded" value={editForm.itemType ?? ''} onChange={(e) => setEditForm({ ...editForm, itemType: e.target.value })} />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-gray-600 mb-1">공장</label>
+                    <input className="border p-2 rounded" value={editForm.factory ?? ''} onChange={(e) => setEditForm({ ...editForm, factory: e.target.value })} />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-gray-600 mb-1">바이어</label>
+                    <input className="border p-2 rounded" value={editForm.buyer ?? ''} onChange={(e) => setEditForm({ ...editForm, buyer: e.target.value })} />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-gray-600 mb-1">총수량</label>
+                    <input type="number" className="border p-2 rounded" value={editForm.totalQty ?? 0} onChange={(e) => setEditForm({ ...editForm, totalQty: Number(e.target.value) })} />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-gray-600 mb-1">목표출고일</label>
+                    <input type="date" aria-label="수정: 목표출고일" className="border p-2 rounded" value={editForm.targetRdd ?? ''} onChange={(e) => setEditForm({ ...editForm, targetRdd: e.target.value })} />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-gray-600 mb-1">생산유형</label>
+                    <div className="flex items-center gap-4 h-full">
+                      <label className="flex items-center gap-1"><input type="radio" checked={editForm.productionType === 'FOB'} onChange={() => setEditForm({ ...editForm, productionType: 'FOB' })} /> FOB</label>
+                      <label className="flex items-center gap-1"><input type="radio" checked={editForm.productionType === 'CMT'} onChange={() => setEditForm({ ...editForm, productionType: 'CMT' })} /> CMT</label>
+                    </div>
+                  </div>
+                  {editForm.productionType === 'FOB' ? (
+                    <div className="flex flex-col">
+                      <label className="text-gray-600 mb-1">FOB 단가</label>
+                      <input type="number" step="0.01" className="border p-2 rounded" value={editForm.fobPrice ?? 0} onChange={(e) => setEditForm({ ...editForm, fobPrice: Number(e.target.value) })} />
+                    </div>
+                  ) : (
+                    <div className="flex flex-col">
+                      <label className="text-gray-600 mb-1">CMT 단가</label>
+                      <input type="number" step="0.01" className="border p-2 rounded" value={editForm.cmtPrice ?? 0} onChange={(e) => setEditForm({ ...editForm, cmtPrice: Number(e.target.value) })} />
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveStyleEdit}
+                    disabled={savingStyle}
+                    className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                  >{savingStyle ? '저장 중...' : '저장'}</button>
+                  <button type="button" onClick={() => setEditingStyle(false)} className="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm">취소</button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 text-sm mb-6">
+                <div><span className="text-gray-500">브랜드:</span> {selectedStyle.overview?.brand ?? '-'}</div>
+                <div><span className="text-gray-500">생산유형:</span> {selectedStyle.overview?.productionType ?? '-'}</div>
+                <div><span className="text-gray-500">공장:</span> {selectedStyle.overview?.factory ?? '-'}</div>
+                <div><span className="text-gray-500">바이어:</span> {selectedStyle.overview?.buyer ?? '-'}</div>
+                <div><span className="text-gray-500">총수량:</span> {selectedStyle.overview?.totalQty ?? '-'}</div>
+                <div><span className="text-gray-500">목표출고일:</span> {selectedStyle.overview?.targetRdd ?? '-'}</div>
+                <div><span className="text-gray-500">FOB 단가:</span> {selectedStyle.overview?.fobPrice ?? '-'}</div>
+                <div><span className="text-gray-500">CMT 단가:</span> {selectedStyle.overview?.cmtPrice ?? '-'}</div>
+                <div><span className="text-gray-500">상태:</span> {selectedStyle.overview?.status ?? '-'}</div>
+              </div>
+            )}
 
             <h4 className="font-semibold mb-2">계약서 발행 이력</h4>
             {contracts.length === 0 ? (
