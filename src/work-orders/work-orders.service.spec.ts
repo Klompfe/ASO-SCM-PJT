@@ -9,6 +9,7 @@ import { WorkOrderStatus } from './entities/work-order-status.enum';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
+import { StatusCodesService } from '../status-codes/status-codes.service';
 
 describe('WorkOrdersService', () => {
   let service: WorkOrdersService;
@@ -51,6 +52,12 @@ describe('WorkOrdersService', () => {
     createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
   };
 
+  // PR-140: 기존 테스트는 전부 내장 WorkOrderStatus enum 값만 쓰므로 assertValidStatus()가
+  // enum 검사에서 바로 통과해 이 mock까지 도달하지 않는다 — 빈 배열이면 충분하다.
+  const mockStatusCodesService = {
+    findAll: jest.fn().mockResolvedValue([]),
+  };
+
 
 
 
@@ -64,6 +71,7 @@ describe('WorkOrdersService', () => {
     mockDataSource.createQueryRunner.mockReturnValue(mockQueryRunner);
     mockQueryRunnerManager.save.mockImplementation((_entity: any, data: any) => Promise.resolve(data));
     mockQueryRunnerManager.create.mockImplementation((_entity: any, data: any) => data);
+    mockStatusCodesService.findAll.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -75,6 +83,10 @@ describe('WorkOrdersService', () => {
         {
           provide: DataSource,
           useValue: mockDataSource,
+        },
+        {
+          provide: StatusCodesService,
+          useValue: mockStatusCodesService,
         },
       ],
     }).compile();
@@ -493,6 +505,42 @@ describe('WorkOrdersService', () => {
       await service.findAll({ page: 1, limit: 10 } as any);
       const clauses = qb.andWhere.mock.calls.map(([c]: [string]) => c);
       expect(clauses.some((c: string) => c.includes(':itemName') || c.includes(':itemCode') || c.includes(':styleNo'))).toBe(false);
+    });
+  });
+
+  // PR-140: 상태값이 status-codes 마스터 테이블(domain='WORK_ORDER') 기준으로 바뀌어도
+  // 기존 4개 내장 enum 값은 DB 조회 없이 항상 통과하고, 관리자가 추가한 새 코드는 마스터
+  // 테이블에서 활성 상태로 확인돼야 통과한다.
+  describe('updateStatus — 상태값 유효성 검증(status-codes 마스터 테이블 기준) (PR-140)', () => {
+    it('내장 enum 값(PENDING/IN_PROGRESS/COMPLETED/CANCELLED)은 마스터 테이블을 조회하지 않고 통과한다', async () => {
+      const wo = { id: 20, status: WorkOrderStatus.PENDING, targetQuantity: 1 };
+      mockWoRepository.findOne.mockResolvedValue(wo);
+      mockWoRepository.save.mockImplementation((w: any) => Promise.resolve(w));
+
+      await service.updateStatus(20, WorkOrderStatus.IN_PROGRESS);
+
+      expect(mockStatusCodesService.findAll).not.toHaveBeenCalled();
+    });
+
+    it('관리자가 추가한 새 상태코드는 마스터 테이블에 활성으로 있으면 통과한다', async () => {
+      const wo = { id: 21, status: WorkOrderStatus.PENDING, targetQuantity: 1 };
+      mockWoRepository.findOne.mockResolvedValue(wo);
+      mockWoRepository.save.mockImplementation((w: any) => Promise.resolve(w));
+      mockStatusCodesService.findAll.mockResolvedValue([{ id: 99, domain: 'WORK_ORDER', code: 'ON_HOLD', label: '보류', sortOrder: 5, isActive: true }]);
+
+      const result = await service.updateStatus(21, 'ON_HOLD');
+
+      expect(mockStatusCodesService.findAll).toHaveBeenCalledWith('WORK_ORDER', false);
+      expect(result.status).toBe('ON_HOLD');
+    });
+
+    it('마스터 테이블에 없는(등록되지 않았거나 비활성인) 상태코드는 BadRequestException', async () => {
+      const wo = { id: 22, status: WorkOrderStatus.PENDING, targetQuantity: 1 };
+      mockWoRepository.findOne.mockResolvedValue(wo);
+      mockStatusCodesService.findAll.mockResolvedValue([]);
+
+      await expect(service.updateStatus(22, 'NOT_A_REAL_STATUS')).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockWoRepository.save).not.toHaveBeenCalled();
     });
   });
 });

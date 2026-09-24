@@ -14,7 +14,8 @@ export type TabId =
   | 'hsCodeClassifications'
   | 'cashVouchers'
   | 'inventories'
-  | 'brands';
+  | 'brands'
+  | 'statusCodes';
 
 interface NavItem {
   id: TabId;
@@ -76,6 +77,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // PR-111: 스타일번호 접두사 → 브랜드 매핑 마스터.
       { id: 'brands', label: '브랜드 관리' },
       { id: 'exportShipmentDefaults', label: '선적서류 기본정보', adminOnly: true },
+      // PR-140: 목록 화면 상태값(작업지시 Filter by Status 등) 마스터 테이블 관리.
+      { id: 'statusCodes', label: '상태코드 관리', adminOnly: true },
       { id: 'users', label: '사용자 관리', adminOnly: true },
     ],
   },
@@ -204,6 +207,12 @@ const ICONS: Record<TabId, React.ReactNode> = {
       <circle cx="8" cy="8" r="1.4" />
     </svg>
   ),
+  statusCodes: (
+    <svg {...ICON_PROPS}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8.5 12.5l2.3 2.3L15.5 10" />
+    </svg>
+  ),
 };
 
 interface SidebarProps {
@@ -235,6 +244,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (!item.adminOnly) return true;
     if (item.id === 'users') return canManageUsers;
     if (item.id === 'exportShipmentDefaults') return isManagerOrAdmin;
+    if (item.id === 'statusCodes') return isManagerOrAdmin;
     return true;
   };
 

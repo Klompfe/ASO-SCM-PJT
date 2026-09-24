@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 // API 모듈은 axios 클라이언트(브라우저 전용)를 끌어오므로 가짜로 바꾸고, 첫 화면에 무엇이 그려지는지만 본다.
 vi.mock('../api/workOrders.service', () => ({ getWorkOrders: vi.fn(), createWorkOrder: vi.fn(), updateWorkOrderStatus: vi.fn() }));
+vi.mock('../api/statusCodes.service', () => ({ getStatusCodes: vi.fn().mockResolvedValue([]) }));
 vi.mock('../api/salesOrders.service', () => ({ uploadSalesOrderImage: vi.fn(), commitSalesOrderAnalysis: vi.fn(), getAiUsageSummary: vi.fn() }));
 vi.mock('../api/styles.service', () => ({ getMasterStyles: vi.fn(), createMasterStyle: vi.fn() }));
 vi.mock('../api/brandPrefixRules.service', () => ({ getBrandPrefixRules: vi.fn() }));

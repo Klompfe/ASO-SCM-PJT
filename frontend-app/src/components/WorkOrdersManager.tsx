@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { createWorkOrder, updateWorkOrderStatus, type WorkOrder, type CreateWorkOrder } from '../api/workOrders.service';
 import type { Item } from '../api/items.service';
+import { getStatusCodes, type StatusCode } from '../api/statusCodes.service';
 import { SearchSelectField } from './SearchSelectField';
 import { FilterSearchInput } from './FilterSearchInput';
 import { masterLabel, searchItems } from '../utils/searchFetchers';
@@ -21,6 +22,8 @@ export const WorkOrdersManager: React.FC = () => {
   const [itemNameDraft, setItemNameDraft] = useState('');
   const [itemCodeDraft, setItemCodeDraft] = useState('');
   const [styleNoDraft, setStyleNoDraft] = useState('');
+  // PR-140: "Filter by Status" 옵션을 하드코딩 대신 상태코드 마스터 테이블(domain='WORK_ORDER')에서 가져온다.
+  const [statusOptions, setStatusOptions] = useState<StatusCode[]>([]);
   const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE_META);
   const [listLoading, setListLoading] = useState(false);
   // PR-127: 품목은 <select>(getItems limit 100 — 100개 넘는 품목은 선택 불가)가 아니라 서버 검색 선택이다.
@@ -76,6 +79,14 @@ export const WorkOrdersManager: React.FC = () => {
   useEffect(() => {
     loadWorkOrders();
   }, [loadWorkOrders]);
+
+  // PR-140: 상태 필터 옵션 — 화면이 열릴 때(탭 재진입 포함, 이 컴포넌트가 다시 마운트되므로)
+  // 다시 불러온다. 관리 화면(상태코드 관리)에서 새 코드를 추가한 뒤 이 탭으로 돌아오면 반영된다.
+  useEffect(() => {
+    getStatusCodes('WORK_ORDER')
+      .then((res) => setStatusOptions(Array.isArray(res) ? res : []))
+      .catch(() => setStatusOptions([]));
+  }, []);
 
   const handleCreateWorkOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,7 +183,8 @@ export const WorkOrdersManager: React.FC = () => {
       >
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">Filter by Status</label>
-          {/* 상태 값은 서버 WorkOrderStatus enum과 같다(예전 PLANNED는 없는 값이라 서버가 400으로 거부했다). 상태를 바꾸면 1페이지부터 다시 본다. */}
+          {/* PR-140: 옵션은 하드코딩이 아니라 상태코드 마스터 테이블(GET /status-codes?domain=WORK_ORDER)에서
+              가져온다 — "상태코드 관리" 화면(관리자)에서 추가/수정한 값이 그대로 반영된다. 상태를 바꾸면 1페이지부터 다시 본다. */}
           <select
             aria-label="상태 필터"
             className="border border-gray-300 rounded px-3 py-2 w-full md:w-64"
@@ -180,10 +192,9 @@ export const WorkOrdersManager: React.FC = () => {
             onChange={(e) => setQuery((q) => ({ ...q, page: 1, status: e.target.value || undefined }))}
           >
             <option value="">All</option>
-            <option value="PENDING">Pending</option>
-            <option value="IN_PROGRESS">In Progress</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="CANCELLED">Cancelled</option>
+            {statusOptions.map((s) => (
+              <option key={s.code} value={s.code}>{s.label}</option>
+            ))}
           </select>
         </div>
         {/* PR-139: "검색(품목명/코드/스타일번호)" 통합 입력창을 항목별 개별 입력란 + 조회 버튼으로 분리했다.
