@@ -3,11 +3,12 @@ import toast from 'react-hot-toast';
 import { createWorkOrder, updateWorkOrderStatus, type WorkOrder, type CreateWorkOrder } from '../api/workOrders.service';
 import type { Item } from '../api/items.service';
 import { SearchSelectField } from './SearchSelectField';
+import { FilterSearchInput } from './FilterSearchInput';
 import { masterLabel, searchItems } from '../utils/searchFetchers';
 import { useNavigate } from 'react-router-dom'; // Assumed react-router usage
 import { getErrorMessage } from '../utils/errorMessage';
 import { Pagination } from './Pagination';
-import { fetchWorkOrderPage, type WorkOrderListQuery } from '../utils/listQueries';
+import { fetchWorkOrderPage, hasAnySearchCondition, type WorkOrderListQuery } from '../utils/listQueries';
 import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
 
 const emptyCreateForm: CreateWorkOrder = { itemId: 0, targetQuantity: 1 };
@@ -16,7 +17,10 @@ export const WorkOrdersManager: React.FC = () => {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   // PR-128: 메인 목록은 서버 페이지네이션({items, meta})을 그대로 따른다 — 예전엔 filter가 {}라 첫 10건만 보이고 이동 수단이 없었다.
   const [query, setQuery] = useState<WorkOrderListQuery>({ page: 1 });
-  const [keywordDraft, setKeywordDraft] = useState('');
+  // PR-139: "검색(품목명/코드/스타일번호)" 통합 입력창을 항목별 개별 입력란으로 분리 — 각각 독립적으로 채워 조회할 수 있다.
+  const [itemNameDraft, setItemNameDraft] = useState('');
+  const [itemCodeDraft, setItemCodeDraft] = useState('');
+  const [styleNoDraft, setStyleNoDraft] = useState('');
   const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE_META);
   const [listLoading, setListLoading] = useState(false);
   // PR-127: 품목은 <select>(getItems limit 100 — 100개 넘는 품목은 선택 불가)가 아니라 서버 검색 선택이다.
@@ -155,7 +159,16 @@ export const WorkOrdersManager: React.FC = () => {
 
       <form
         className="bg-gray-50 p-4 rounded-lg flex flex-wrap gap-4 items-end"
-        onSubmit={(e) => { e.preventDefault(); setQuery((q) => ({ ...q, page: 1, keyword: keywordDraft })); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          // PR-139: 상태 필터도 텍스트도 전부 비어있으면 그냥 전체 목록을 보여주는 대신 경고하고 조회를 막는다.
+          // 단, 상태 필터는 이미 query.status에 즉시 반영돼 있으므로(선택 즉시 재조회) 그것만으로도 유효한 조건이다.
+          if (!hasAnySearchCondition(query.status, itemNameDraft, itemCodeDraft, styleNoDraft)) {
+            toast.error('검색 조건을 하나 이상 선택하거나 입력해 주세요.');
+            return;
+          }
+          setQuery((q) => ({ ...q, page: 1, itemName: itemNameDraft, itemCode: itemCodeDraft, styleNo: styleNoDraft }));
+        }}
       >
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">Filter by Status</label>
@@ -173,21 +186,15 @@ export const WorkOrdersManager: React.FC = () => {
             <option value="CANCELLED">Cancelled</option>
           </select>
         </div>
-        <div className="flex flex-col">
-          <label className="text-sm text-gray-600 mb-1">검색 (품목명/코드/스타일번호)</label>
-          <input
-            aria-label="작업지시 검색어"
-            className="border border-gray-300 rounded px-3 py-2 w-64"
-            placeholder="예: 셔츠, MB62SLM103Z"
-            value={keywordDraft}
-            onChange={(e) => setKeywordDraft(e.target.value)}
-          />
-        </div>
-        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">검색</button>
+        {/* PR-139: "검색(품목명/코드/스타일번호)" 통합 입력창을 항목별 개별 입력란 + 조회 버튼으로 분리했다.
+            셋 다 AND로 걸리므로 하나만 채우고 조회해도 그 조건만으로 검색된다(listQueries.ts buildWorkOrdersQuery). */}
+        <FilterSearchInput label="품목명" ariaLabel="품목명 검색어" placeholder="예: 셔츠" value={itemNameDraft} onChange={setItemNameDraft} />
+        <FilterSearchInput label="품목코드" ariaLabel="품목코드 검색어" placeholder="예: MB62SLM103Z-01" value={itemCodeDraft} onChange={setItemCodeDraft} />
+        <FilterSearchInput label="스타일번호" ariaLabel="스타일번호 검색어" placeholder="예: MB62SLM103Z" value={styleNoDraft} onChange={setStyleNoDraft} />
         <button
           type="button"
           className="bg-gray-200 text-gray-700 px-4 py-2 rounded"
-          onClick={() => { setKeywordDraft(''); setQuery({ page: 1 }); }}
+          onClick={() => { setItemNameDraft(''); setItemCodeDraft(''); setStyleNoDraft(''); setQuery({ page: 1 }); }}
         >초기화</button>
       </form>
 

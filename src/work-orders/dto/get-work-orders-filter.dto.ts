@@ -21,6 +21,23 @@ export class GetWorkOrdersFilterDto extends PaginationQueryDto {
   @IsString()
   keyword?: string;
 
+  // PR-139: 목록 화면에서 품목명/품목코드/스타일번호를 각각 독립된 입력란으로 검색할 수 있도록 keyword와 별개로 추가.
+  // keyword는 기존 검색 선택(SearchSelectField 등, searchFetchers.ts의 searchWorkOrders)이 계속 쓰므로 그대로 둔다.
+  @ApiPropertyOptional({ description: '완제품 품목명 부분일치 검색어(대소문자 무시)', example: '셔츠' })
+  @IsOptional()
+  @IsString()
+  itemName?: string;
+
+  @ApiPropertyOptional({ description: '완제품 품목코드 부분일치 검색어(대소문자 무시)', example: 'MB6' })
+  @IsOptional()
+  @IsString()
+  itemCode?: string;
+
+  @ApiPropertyOptional({ description: '완제품 스타일번호 부분일치 검색어(대소문자 무시)', example: 'MB62SLM103Z' })
+  @IsOptional()
+  @IsString()
+  styleNo?: string;
+
   @ApiPropertyOptional({ description: '조회 시작일 (YYYY-MM-DD)' })
   @IsOptional()
   @IsString()
