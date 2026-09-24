@@ -12,7 +12,7 @@ import { Pagination } from './Pagination';
 import { selectBulkApproveTargets } from '../utils/mappingApproval';
 import { extractNotices, type StyleCommitResult } from '../utils/commitNotices';
 import { BulkApproveResult } from './CommitResultPanel';
-import { fetchItemPage } from '../utils/listQueries';
+import { fetchItemPage, hasAnySearchCondition } from '../utils/listQueries';
 import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
 
 interface ItemsManagerProps {
@@ -146,8 +146,13 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
   }, [catalogOpen, filter.type, filter.keyword]);
 
   // PR-103: 구분(type)/키워드(이름·코드) 검색 — 검색 시 page를 1로 리셋한다.
+  // PR-139: 구분도 안 고르고 키워드도 비어있으면(그냥 전체 목록이 나오는 대신) 경고하고 조회를 막는다.
   const handleItemSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!hasAnySearchCondition(searchType, searchKeyword)) {
+      toast.error('검색 조건을 하나 이상 선택하거나 입력해 주세요.');
+      return;
+    }
     setFilter({ page: 1, limit: 10, type: searchType || undefined, keyword: searchKeyword || undefined });
   };
 

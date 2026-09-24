@@ -70,6 +70,21 @@ export class WorkOrdersService {
       );
     }
 
+    // PR-139: 작업지시 목록 화면의 항목별 개별 검색(품목명/품목코드/스타일번호) — keyword(OR)와 달리 각각 AND로 걸려,
+    // 채운 항목만 조건이 되고 비운 항목은 무시된다(하나만 채워도 그 조건만으로 검색됨).
+    const itemName = filter?.itemName?.trim();
+    if (itemName) {
+      queryBuilder.andWhere('LOWER(item.name) LIKE LOWER(:itemName)', { itemName: `%${itemName}%` });
+    }
+    const itemCode = filter?.itemCode?.trim();
+    if (itemCode) {
+      queryBuilder.andWhere('LOWER(item.code) LIKE LOWER(:itemCode)', { itemCode: `%${itemCode}%` });
+    }
+    const styleNo = filter?.styleNo?.trim();
+    if (styleNo) {
+      queryBuilder.andWhere('LOWER(item.styleNo) LIKE LOWER(:styleNo)', { styleNo: `%${styleNo}%` });
+    }
+
     if (filter?.startDate) {
       queryBuilder.andWhere('wo.createdAt >= :startDate', { startDate: filter.startDate });
     }

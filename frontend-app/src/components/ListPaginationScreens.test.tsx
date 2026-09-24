@@ -26,7 +26,9 @@ describe('목록 화면 페이지네이션 UI (PR-128)', () => {
     expect(html).toContain('aria-label="이전 페이지"');
     expect(html).toContain('aria-label="다음 페이지"');
     expect(html).toContain('1 / 1'); // 첫 렌더(아직 조회 전)는 0건 상태
-    expect(html).toContain('aria-label="작업지시 검색어"');
+    expect(html).toContain('aria-label="품목명 검색어"');
+    expect(html).toContain('aria-label="품목코드 검색어"');
+    expect(html).toContain('aria-label="스타일번호 검색어"');
     for (const status of ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']) expect(html).toContain(`<option value="${status}">`);
     expect(html).not.toContain('PLANNED'); // 서버에 없는 값
   });

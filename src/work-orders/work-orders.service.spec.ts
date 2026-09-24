@@ -434,4 +434,65 @@ describe('WorkOrdersService', () => {
       expect(qb.andWhere.mock.calls.some(([clause]: [string]) => clause.includes(':kw'))).toBe(false);
     });
   });
+
+  // PR-139: 목록 화면의 항목별 개별 검색(품목명/품목코드/스타일번호) — keyword(OR)와 별개로 각각 AND로 걸린다.
+  describe('findAll — 항목별 개별 검색 itemName/itemCode/styleNo (PR-139)', () => {
+    const buildQb = (result: any[] = []) => {
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(result),
+        getManyAndCount: jest.fn().mockResolvedValue([result, result.length]),
+      };
+      (mockWoRepository as any).createQueryBuilder = jest.fn().mockReturnValue(qb);
+      return qb;
+    };
+
+    it('itemName만 있으면 item.name에만 LIKE 조건을 건다', async () => {
+      const qb = buildQb([{ id: 1 }]);
+      await service.findAll({ itemName: ' 셔츠 ', page: 1, limit: 10 } as any);
+      const clauses = qb.andWhere.mock.calls.map(([c]: [string]) => c);
+      expect(clauses).toContain('LOWER(item.name) LIKE LOWER(:itemName)');
+      expect(clauses.some((c: string) => c.includes(':itemCode'))).toBe(false);
+      expect(clauses.some((c: string) => c.includes(':styleNo'))).toBe(false);
+      const call = qb.andWhere.mock.calls.find(([c]: [string]) => c.includes(':itemName'));
+      expect(call[1]).toEqual({ itemName: '%셔츠%' });
+    });
+
+    it('itemCode만 있으면 item.code에만 LIKE 조건을 건다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ itemCode: 'MB6', page: 1, limit: 10 } as any);
+      const call = qb.andWhere.mock.calls.find(([c]: [string]) => c.includes(':itemCode'));
+      expect(call[0]).toBe('LOWER(item.code) LIKE LOWER(:itemCode)');
+      expect(call[1]).toEqual({ itemCode: '%MB6%' });
+    });
+
+    it('styleNo만 있으면 item.styleNo에만 LIKE 조건을 건다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ styleNo: 'MB62SLM103Z', page: 1, limit: 10 } as any);
+      const call = qb.andWhere.mock.calls.find(([c]: [string]) => c.includes(':styleNo'));
+      expect(call[0]).toBe('LOWER(item.styleNo) LIKE LOWER(:styleNo)');
+      expect(call[1]).toEqual({ styleNo: '%MB62SLM103Z%' });
+    });
+
+    it('셋 다 있으면 AND로 함께 걸린다(각각 만족해야 함)', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ itemName: '셔츠', itemCode: 'MB6', styleNo: 'MB62SLM103Z', page: 1, limit: 10 } as any);
+      const clauses = qb.andWhere.mock.calls.map(([c]: [string]) => c);
+      expect(clauses).toContain('LOWER(item.name) LIKE LOWER(:itemName)');
+      expect(clauses).toContain('LOWER(item.code) LIKE LOWER(:itemCode)');
+      expect(clauses).toContain('LOWER(item.styleNo) LIKE LOWER(:styleNo)');
+    });
+
+    it('셋 다 없으면 조건을 걸지 않는다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ page: 1, limit: 10 } as any);
+      const clauses = qb.andWhere.mock.calls.map(([c]: [string]) => c);
+      expect(clauses.some((c: string) => c.includes(':itemName') || c.includes(':itemCode') || c.includes(':styleNo'))).toBe(false);
+    });
+  });
 });
