@@ -155,9 +155,18 @@ describe('목록 페이지네이션: 작업지시/품목 (PR-128)', () => {
       expect(pending.meta.total).toBe(13); // 23-12 + 다른 품목 2
     });
 
-    it('화면이 예전에 보내던 없는 상태값(PLANNED)과 빈 문자열 상태는 서버가 400으로 거부한다 — 그래서 프론트는 서버 enum 값만 보내고 빈 값은 뺀다', async () => {
-      await get('/work-orders?status=PLANNED').expect(400);
-      await get('/work-orders?status=').expect(400);
+    // PR-140: 상태값이 status-codes 마스터 테이블(관리자가 추가/삭제 가능) 기준으로 바뀌면서,
+    // 컴파일 시점에 고정된 enum으로는 더 이상 검증할 수 없다 — 존재하지 않는 코드로
+    // 필터링해도(예: 오래전 있었다 지워진 값) 결과가 0건일 뿐 해가 없으므로 400 대신 그냥 빈
+    // 목록을 돌려준다. 빈 문자열도 마찬가지로 거부하지 않고 "필터 없음"으로 취급한다
+    // (buildWorkOrdersQuery가 빈 문자열을 애초에 안 보내지만, 서버도 방어적으로 안전하다).
+    it('등록되지 않은 상태값이나 빈 문자열 상태는 400이 아니라 그냥 그 조건에 맞는(또는 전체) 결과를 돌려준다', async () => {
+      const unknown = (await get('/work-orders?status=PLANNED').expect(200)).body.data;
+      expect(unknown.items).toEqual([]);
+      expect(unknown.meta.total).toBe(0);
+
+      const empty = (await get('/work-orders?status=').expect(200)).body.data;
+      expect(empty.meta.total).toBe(25); // 필터 없음 취급 — 이 describe 블록에서 생성된 전체 건수
     });
 
     it('전체 페이지를 넘는 page는 빈 목록 + totalPages(프론트가 마지막 페이지로 되돌아가는 근거)', async () => {

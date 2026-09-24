@@ -11,6 +11,9 @@ import { Inventory } from '../inventories/entities/inventory.entity';
 import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
 import { calculateMaterialRequirements } from './utils/material-requirements.util';
 import { pickActiveBom } from '../boms/utils/active-bom.util';
+import { StatusCodesService } from '../status-codes/status-codes.service';
+
+const STATUS_DOMAIN = 'WORK_ORDER';
 
 const EMPTY_REQUIREMENTS = {
   rows: [] as ReturnType<typeof calculateMaterialRequirements>,
@@ -27,6 +30,7 @@ export class WorkOrdersService {
     @InjectRepository(WorkOrder)
     private readonly woRepository: Repository<WorkOrder>,
     private readonly dataSource: DataSource,
+    private readonly statusCodesService: StatusCodesService,
   ) {}
 
   async create(dto: CreateWorkOrderDto): Promise<WorkOrder> {
@@ -207,12 +211,28 @@ export class WorkOrdersService {
     const wo = await this.findOne(id);
     const statusValue = typeof statusOrDto === 'object' && statusOrDto.status ? statusOrDto.status : statusOrDto;
 
+    await this.assertValidStatus(statusValue);
+
     if (statusValue !== WorkOrderStatus.COMPLETED) {
       wo.status = statusValue;
       return await this.woRepository.save(wo);
     }
 
     return await this.completeWithInventoryDeduction(wo);
+  }
+
+  // PR-140: 상태값은 이제 status-codes 마스터 테이블(domain='WORK_ORDER')이 기준이라, 관리자가
+  // 추가한 코드도 여기서 통과돼야 한다. 마스터 테이블에 아직 시드가 없는 예외적 상황(예: SQLite
+  // 테스트처럼 마이그레이션이 실행되지 않는 환경)에서도 회귀가 나지 않도록, 원래 내장돼 있던
+  // WorkOrderStatus enum 값은 마스터 테이블 조회 결과와 무관하게 항상 유효한 값으로 허용한다.
+  private async assertValidStatus(status: string): Promise<void> {
+    if (Object.values(WorkOrderStatus).includes(status as WorkOrderStatus)) {
+      return;
+    }
+    const activeCodes = await this.statusCodesService.findAll(STATUS_DOMAIN, false);
+    if (!activeCodes.some((c) => c.code === status)) {
+      throw new BadRequestException(`유효하지 않은 작업지시 상태값입니다: ${status}`);
+    }
   }
 
   private async completeWithInventoryDeduction(wo: WorkOrder): Promise<WorkOrder> {

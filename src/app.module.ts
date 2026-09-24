@@ -33,6 +33,7 @@ import { ProductionContractsModule } from './production-contracts/production-con
 import { CashVouchersModule } from './cash-vouchers/cash-vouchers.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { BrandPrefixRulesModule } from './brand-prefix-rules/brand-prefix-rules.module';
+import { StatusCodesModule } from './status-codes/status-codes.module';
 import { HealthController } from './health/health.controller';
 import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
@@ -80,6 +81,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     ItemsModule,
     InventoriesModule,
     PurchaseOrdersModule,
+    StatusCodesModule,
     WorkOrdersModule,
     SalesOrdersModule,
     SuppliersModule,

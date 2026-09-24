@@ -22,6 +22,7 @@ vi.mock('../api/workOrders.service', () => ({
   getMaterialRequirements: vi.fn(),
   getStyleRequirements: vi.fn(),
 }));
+vi.mock('../api/statusCodes.service', () => ({ getStatusCodes: vi.fn().mockResolvedValue([]) }));
 vi.mock('../api/cashVouchers.service', () => ({
   getCashVouchers: vi.fn(),
   getCashVoucherSummary: vi.fn(),

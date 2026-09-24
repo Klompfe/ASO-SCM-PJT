@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router-dom';
 // 배포 화면에서 검증한다.)
 vi.mock('react-hot-toast', () => ({ default: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('../api/workOrders.service', () => ({ getWorkOrders: vi.fn(), createWorkOrder: vi.fn(), updateWorkOrderStatus: vi.fn() }));
+vi.mock('../api/statusCodes.service', () => ({ getStatusCodes: vi.fn().mockResolvedValue([]) }));
 vi.mock('../api/items.service', () => ({ getItems: vi.fn(), getAllItems: vi.fn(), createItem: vi.fn(), updateItem: vi.fn() }));
 vi.mock('../api/styles.service', () => ({ getMasterStyles: vi.fn() }));
 vi.mock('../api/boms.service', () => ({ getBomByStyleNo: vi.fn(), updateBomItem: vi.fn(), addBomLabelSet: vi.fn() }));

@@ -1,14 +1,16 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsNumber, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { WorkOrderStatus } from '../entities/work-order.entity';
 
 export class GetWorkOrdersFilterDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: '작업지시 상태 필터', enum: WorkOrderStatus })
+  // PR-140: 상태값이 status-codes 마스터 테이블(관리자가 추가 가능) 기준으로 바뀌어 컴파일
+  // 시점의 고정 enum으로는 검증할 수 없다 — 존재하지 않는 코드로 필터링해도 결과가 0건일
+  // 뿐 해가 없으므로(읽기 경로) 문자열만 받고 값 자체는 검증하지 않는다.
+  @ApiPropertyOptional({ description: '작업지시 상태 필터(status-codes의 code 값)', example: 'IN_PROGRESS' })
   @IsOptional()
-  @IsEnum(WorkOrderStatus)
-  status?: WorkOrderStatus;
+  @IsString()
+  status?: string;
 
   @ApiPropertyOptional({ description: '생산 완제품 ID 필터' })
   @IsOptional()

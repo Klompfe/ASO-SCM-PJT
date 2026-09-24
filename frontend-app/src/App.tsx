@@ -22,6 +22,7 @@ import { HsCodeManager } from './components/HsCodeManager';
 import { ImportShipmentManager } from './components/ImportShipmentManager';
 import { InventoryReport } from './components/InventoryReport';
 import { BrandManager } from './components/BrandManager';
+import { StatusCodesManager } from './components/StatusCodesManager';
 import { Sidebar, TAB_LABELS, type TabId } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
 import { getCurrentUser, type CurrentUser } from './api/auth.service';
@@ -258,6 +259,7 @@ function App() {
         case 'cashVouchers': return <CashVouchersManager />;
         case 'inventories': return <InventoryReport />;
         case 'brands': return <BrandManager />;
+        case 'statusCodes': return <StatusCodesManager />;
         default:
           // Routing Fallback: If unknown, default to Dashboard
           return <Dashboard />;
