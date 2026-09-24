@@ -28,7 +28,7 @@ export interface CommitResult {
   // PR-132: 구조화된 알림(화면이 유형별로 구분해 보여준다). 문구가 바뀌어도 type/code는 유지된다.
   notices: CommitNotice[];
   // PR-098: 병합 중 자동 반영을 보류한 항목 등을 사람이 읽을 수 있는 문자열로 담는다. notices.message와 같은 내용이며(단일 원천),
-  // 작업지시서 업로드(WorkOrdersService.commitAnalysis)와 기존 호출부/테스트가 문자열 배열을 그대로 쓰므로 형태를 바꾸지 않는다.
+  // 수주 등록(작업지시서 업로드, SalesOrdersService.commitAnalysis)와 기존 호출부/테스트가 문자열 배열을 그대로 쓰므로 형태를 바꾸지 않는다.
   warnings: string[];
 }
 

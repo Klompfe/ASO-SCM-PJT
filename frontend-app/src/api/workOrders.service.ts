@@ -31,59 +31,9 @@ export interface CreateWorkOrder {
   targetQuantity: number;
 }
 
-// 작업지시서 AI 분석 결과 3단 구조 — vision.service.ts의 AiWorkOrderResultDto와 동일한 shape.
-export interface AiOverview {
-  styleNo: string | null;
-  styleName: string | null;
-  itemType: string | null;
-  brand: string | null;
-  productionType: 'FOB' | 'CMT' | null;
-  factory: string | null;
-  buyer: string | null;
-  totalQty: number | null;
-  targetRdd: string | null;
-}
-
-export interface AiBomItem {
-  category: string | null;
-  itemName: string;
-  spec: string | null;
-  colorCode: string | null;
-  consumption: number | null;
-  requiredQty: number | null;
-  supplier: string | null;
-  remarks: string | null;
-}
-
-export interface AiSizeSpecRow {
-  part: string;
-  size: string;
-  instructedValue: string | null;
-  sampleValue: string | null;
-  diffValue: string | null;
-  finalValue: string | null;
-}
-
-export interface AiWorkOrderResult {
-  overview: AiOverview;
-  bomItems: AiBomItem[];
-  sizeSpecs: AiSizeSpecRow[];
-  workNotes: string | null;
-}
-
 export const getWorkOrders = (filter: GetWorkOrdersFilter): Promise<any> => apiClient.get('/work-orders', { params: filter });
 export const createWorkOrder = (data: CreateWorkOrder): Promise<any> => apiClient.post('/work-orders', data);
 export const updateWorkOrderStatus = (id: number, data: UpdateWorkOrderStatus): Promise<any> => apiClient.patch(`/work-orders/${id}/status`, data);
-export const uploadWorkOrderImage = (file: File): Promise<any> => {
-  const formData = new FormData();
-  formData.append('file', file);
-  // PR-133: 수주(작업지시서 업로드) 흐름은 /sales-orders/* 로 분리되었다(함수 이름 정리는 PR-134에서 화면 재배치와 함께).
-  return apiClient.post('/sales-orders/upload-image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-};
-export const commitWorkOrderAnalysis = (result: AiWorkOrderResult): Promise<any> =>
-  apiClient.post('/sales-orders/commit-analysis', result);
 // PR-120: BOM 소요명세서(작업지시 물량 기준 자재 소요량/이미 발주 수량/부족 수량).
 export const getMaterialRequirements = (id: number): Promise<MaterialRequirements> =>
   apiClient.get(`/work-orders/${id}/material-requirements`);
@@ -97,24 +47,3 @@ export interface StyleRequirements extends Omit<MaterialRequirements, 'workOrder
 }
 export const getStyleRequirements = (styleNo: string, quantity?: number): Promise<StyleRequirements> =>
   apiClient.get('/work-orders/style-requirements', { params: { styleNo, ...(quantity ? { quantity } : {}) } });
-export const getWorkOrderSpec = (styleNo: string): Promise<any> =>
-  apiClient.get('/sales-orders/spec', { params: { styleNo } });
-
-export interface AiUsageLog {
-  id: number;
-  pageCount: number;
-  promptTokens: number;
-  outputTokens: number;
-  estimatedCostUsd: number;
-  chargedAmountKrw: number;
-  createdAt: string;
-}
-
-export interface AiUsageSummary {
-  totalCalls: number;
-  totalChargedKrw: number;
-  totalCostUsd: number;
-}
-
-export const getAiUsage = (): Promise<any> => apiClient.get('/sales-orders/ai-usage');
-export const getAiUsageSummary = (): Promise<any> => apiClient.get('/sales-orders/ai-usage/summary');

@@ -57,7 +57,7 @@ export class StyleOverview {
   @Column({ type: 'decimal', nullable: true })
   fobPrice: number | null;
 
-  // PR-054: 작업지시서 AI 분석(오더개요)에서 채워진다 — styleNo와 별개로 표기되는
+  // PR-054: 수주 등록(작업지시서 AI 분석, 오더개요)에서 채워진다 — styleNo와 별개로 표기되는
   // 스타일명(예: "울혼방 코튼 반소매재킷")이 원본 문서에 있어 추가.
   @Column({ nullable: true })
   styleName: string | null;

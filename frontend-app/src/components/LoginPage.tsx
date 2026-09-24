@@ -35,7 +35,7 @@ const FEATURES: { title: string; description: string; icon: React.ReactNode }[] 
   },
   {
     title: '오더·발주관리',
-    description: '작업지시서부터 발주·입고까지 추적',
+    description: '수주(작업지시서)부터 발주·입고까지 추적',
     icon: (
       <svg {...ICON_PROPS}>
         <path d="M7 3h8l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />

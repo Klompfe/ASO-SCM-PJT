@@ -21,9 +21,6 @@ vi.mock('../api/workOrders.service', () => ({
   updateWorkOrderStatus: vi.fn(),
   getMaterialRequirements: vi.fn(),
   getStyleRequirements: vi.fn(),
-  uploadWorkOrderImage: vi.fn(),
-  commitWorkOrderAnalysis: vi.fn(),
-  getAiUsageSummary: vi.fn(),
 }));
 vi.mock('../api/cashVouchers.service', () => ({
   getCashVouchers: vi.fn(),

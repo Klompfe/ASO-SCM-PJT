@@ -4,7 +4,6 @@ import { createWorkOrder, updateWorkOrderStatus, type WorkOrder, type CreateWork
 import type { Item } from '../api/items.service';
 import { SearchSelectField } from './SearchSelectField';
 import { masterLabel, searchItems } from '../utils/searchFetchers';
-import { WorkOrderUploadModal } from './WorkOrderUploadModal';
 import { useNavigate } from 'react-router-dom'; // Assumed react-router usage
 import { getErrorMessage } from '../utils/errorMessage';
 import { Pagination } from './Pagination';
@@ -20,7 +19,6 @@ export const WorkOrdersManager: React.FC = () => {
   const [keywordDraft, setKeywordDraft] = useState('');
   const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE_META);
   const [listLoading, setListLoading] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   // PR-127: 품목은 <select>(getItems limit 100 — 100개 넘는 품목은 선택 불가)가 아니라 서버 검색 선택이다.
   const [item, setItem] = useState<Item | null>(null);
   const [newWorkOrder, setNewWorkOrder] = useState<CreateWorkOrder>(emptyCreateForm);
@@ -116,7 +114,6 @@ export const WorkOrdersManager: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-semibold text-gray-800">Work Orders</h2>
-        <button onClick={() => setIsModalOpen(true)} className="bg-purple-600 text-white px-4 py-2 rounded">이미지로 등록 (AI 분석)</button>
       </div>
 
       <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
@@ -230,12 +227,6 @@ export const WorkOrdersManager: React.FC = () => {
         )}
       </div>
       <Pagination page={meta.page} totalPages={meta.totalPages} total={meta.total} disabled={listLoading} onPageChange={(page) => setQuery((q) => ({ ...q, page }))} />
-
-      <WorkOrderUploadModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onSuccess={() => setQuery((q) => ({ ...q, page: 1 }))}
-      />
     </div>
   );
 };

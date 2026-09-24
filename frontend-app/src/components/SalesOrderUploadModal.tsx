@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { uploadWorkOrderImage, commitWorkOrderAnalysis, getAiUsageSummary, type AiWorkOrderResult, type AiUsageSummary } from '../api/workOrders.service';
+import { uploadSalesOrderImage, commitSalesOrderAnalysis, getAiUsageSummary, type AiSalesOrderResult, type AiUsageSummary } from '../api/salesOrders.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
 interface Props {
@@ -9,9 +9,11 @@ interface Props {
   onSuccess: () => void;
 }
 
-export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
+// PR-134: 수주(고객사로부터 받은 주문) 등록 — 작업지시서 문서를 올려 AI로 분석하고 오더개요/자재명세/작업명세/계약으로 저장한다.
+// 예전에는 "작업지시" 탭(WorkOrdersManager)에 있었지만 이 흐름은 생산 실행 지시(WorkOrder)를 만들지 않는다 — 오더관리 탭으로 옮겼다.
+export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
   const [file, setFile] = useState<File | null>(null);
-  const [results, setResults] = useState<AiWorkOrderResult[]>([]);
+  const [results, setResults] = useState<AiSalesOrderResult[]>([]);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
@@ -58,8 +60,8 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     if (!file) return;
     setLoading(true);
     try {
-      const res = await uploadWorkOrderImage(file);
-      const data: AiWorkOrderResult[] = Array.isArray(res?.results) ? res.results : [];
+      const res = await uploadSalesOrderImage(file);
+      const data: AiSalesOrderResult[] = Array.isArray(res?.results) ? res.results : [];
       const charge: number = typeof res?.chargedAmountKrw === 'number' ? res.chargedAmountKrw : 0;
       const mock: boolean = res?.isMock === true;
       setResults(data);
@@ -88,7 +90,7 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     const result = results[index];
     setSavingIndex(index);
     try {
-      await commitWorkOrderAnalysis(result);
+      await commitSalesOrderAnalysis(result);
       toast.success(`${result.overview.styleNo ?? `#${index + 1}`} 저장되었습니다.`);
       setSavedIndexes((prev) => new Set(prev).add(index));
       onSuccess();
@@ -99,7 +101,7 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     }
   };
 
-  // Style No.를 못 읽은 항목은 백엔드가 거부하므로(WorkOrdersService.commitAnalysis) 제외하고,
+  // Style No.를 못 읽은 항목은 백엔드가 거부하므로(SalesOrdersService.commitAnalysis) 제외하고,
   // 병렬 실행하면 서로 다른 스타일이 같은 자재명을 참조할 때 mapping-commit의 "없으면 새로
   // 생성" 로직이 경합할 수 있어(PR-052와 동일한 이유) 순차 실행한다.
   const handleBulkSave = async () => {
@@ -124,7 +126,7 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
     for (const { result, index } of targets) {
       const label = result.overview.styleNo ?? `#${index + 1}`;
       try {
-        await commitWorkOrderAnalysis(result);
+        await commitSalesOrderAnalysis(result);
         setSavedIndexes((prev) => new Set(prev).add(index));
         successCount++;
       } catch (err) {
@@ -174,7 +176,7 @@ export const WorkOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucce
       <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
         <div className="p-6 overflow-y-auto flex-1 min-h-0">
           <div className="flex justify-between items-baseline mb-4">
-            <h3 className="text-xl font-bold">작업지시서 이미지 업로드</h3>
+            <h3 className="text-xl font-bold">수주 등록(작업지시서 업로드)</h3>
             {usageSummary && (
               <span className="text-xs text-gray-400">
                 누적 AI 분석 {usageSummary.totalCalls}건 · 누적 과금 {usageSummary.totalChargedKrw.toLocaleString()}원
