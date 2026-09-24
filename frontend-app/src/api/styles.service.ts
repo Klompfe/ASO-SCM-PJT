@@ -45,6 +45,11 @@ export interface FindMasterStylesFilter {
   brand?: string;
 }
 
+// PR-141: 수정 — styleNo(PK, 다른 테이블이 참조)는 제외하고 나머지 개요 필드만 부분 수정.
+export type UpdateMasterStyle = Partial<Omit<CreateMasterStyle, 'styleNo'>>;
+
 export const getMasterStyles = (filter?: FindMasterStylesFilter): Promise<any> =>
   apiClient.get('/master-styles', { params: filter });
 export const createMasterStyle = (data: CreateMasterStyle): Promise<any> => apiClient.post('/master-styles', data);
+export const updateMasterStyle = (styleNo: string, data: UpdateMasterStyle): Promise<any> =>
+  apiClient.patch(`/master-styles/${encodeURIComponent(styleNo)}`, data);

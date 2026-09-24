@@ -80,3 +80,7 @@ export const uploadHsCodeClassifications = (file: File): Promise<any> => {
 // 있게 하는 용도) — 없으면 404(apiClient 인터셉터가 에러로 던짐, 호출 측에서 catch).
 export const getHsCodeClassificationByStyle = (styleNo: string): Promise<any> =>
   apiClient.get(`/hs-code-classifications/style/${encodeURIComponent(styleNo)}`);
+
+// PR-141: 삭제 — 연결된 스타일 매핑도 서버(DB FK ON DELETE CASCADE)가 함께 지운다.
+export const deleteHsCodeClassification = (id: number): Promise<any> =>
+  apiClient.delete(`/hs-code-classifications/${id}`);

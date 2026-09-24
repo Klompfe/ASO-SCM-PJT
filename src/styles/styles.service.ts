@@ -9,6 +9,7 @@ import { OrderShipment } from './entities/order-shipment.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
 import { CreateMasterStyleDto } from './dto/create-master-style.dto';
+import { UpdateMasterStyleDto } from './dto/update-master-style.dto';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
 import { classifyBrand } from '../common/utils/brand-classifier.util';
 
@@ -84,6 +85,35 @@ export class StylesService {
     style.overview = overview;
 
     return this.masterStyleRepository.save(style);
+  }
+
+  // PR-141: 등록 시 받는 필드(overview 쪽)만 수정한다 — styleNo(PK, 다른 테이블이
+  // 문자열로 참조)는 UpdateMasterStyleDto에 없어 여기 도달하지 않는다. 넘어온 필드만
+  // 갱신하고(부분 수정), 나머지는 기존 값을 그대로 둔다.
+  async update(styleNo: string, dto: UpdateMasterStyleDto): Promise<MasterStyle> {
+    const style = await this.masterStyleRepository.findOne({
+      where: { styleNo },
+      relations: ['overview'],
+    });
+    if (!style) {
+      throw new NotFoundException(`등록된 스타일이 없습니다: ${styleNo}`);
+    }
+    if (!style.overview) {
+      throw new NotFoundException(`스타일 ${styleNo}의 개요 정보를 찾을 수 없습니다.`);
+    }
+
+    if (dto.factory !== undefined) style.overview.factory = dto.factory;
+    if (dto.buyer !== undefined) style.overview.buyer = dto.buyer;
+    if (dto.totalQty !== undefined) style.overview.totalQty = dto.totalQty;
+    if (dto.brand !== undefined) style.overview.brand = dto.brand;
+    if (dto.itemType !== undefined) style.overview.itemType = dto.itemType;
+    if (dto.productionType !== undefined) style.overview.productionType = dto.productionType;
+    if (dto.targetRdd !== undefined) style.overview.targetRdd = new Date(dto.targetRdd);
+    if (dto.cmtPrice !== undefined) style.overview.cmtPrice = dto.cmtPrice;
+    if (dto.fobPrice !== undefined) style.overview.fobPrice = dto.fobPrice;
+
+    await this.overviewRepository.save(style.overview);
+    return style;
   }
 
   // [정리] MasterStyle 삭제 — 모든 관련 FK가 ON DELETE NO ACTION으로 걸려 있어(초기

@@ -6,6 +6,7 @@ import {
   createHsCodeClassification,
   uploadHsCodeClassifications,
   getHsCodeClassificationByStyle,
+  deleteHsCodeClassification,
   type HsCodeClassification,
   type HsCodeImportConflict,
   type CreateHsCodeClassification,
@@ -126,6 +127,26 @@ export const HsCodeManager: React.FC = () => {
       toast.error(getErrorMessage(err, '저장에 실패했습니다.'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // PR-141: 삭제 — 스타일에 매핑돼 있어도(연결 스타일번호 열이 채워져 있어도) 그 매핑까지
+  // 함께 지워지므로(백엔드 FK cascade) 확인 문구에 그 사실을 명시한다.
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const handleDelete = async (item: HsCodeClassification) => {
+    const mappedNote = item.styleNos && item.styleNos.length > 0
+      ? ` 연결된 스타일번호(${item.styleNos.join(', ')})의 매핑도 함께 삭제됩니다.`
+      : '';
+    if (!window.confirm(`"${item.itemType} / ${item.fabricType} / ${item.composition}" 분류를 삭제하시겠습니까?${mappedNote}`)) return;
+    setDeletingId(item.id);
+    try {
+      await deleteHsCodeClassification(item.id);
+      toast.success('HS코드 분류가 삭제되었습니다.');
+      await load();
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '삭제에 실패했습니다.'));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -357,6 +378,7 @@ export const HsCodeManager: React.FC = () => {
                 <th className="py-2 pr-3">HS코드</th>
                 <th className="py-2 pr-3">관,부가세 유무</th>
                 <th className="py-2 pr-3">연결 스타일번호</th>
+                <th className="py-2 pr-3">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -370,11 +392,21 @@ export const HsCodeManager: React.FC = () => {
                   <td className="py-2 pr-3 text-gray-500">
                     {item.styleNos && item.styleNos.length > 0 ? item.styleNos.join(', ') : '-'}
                   </td>
+                  <td className="py-2 pr-3">
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(item)}
+                      disabled={deletingId === item.id}
+                      className="text-red-600 hover:underline text-xs disabled:opacity-50"
+                    >
+                      {deletingId === item.id ? '삭제 중...' : '삭제'}
+                    </button>
+                  </td>
                 </tr>
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-gray-400">
+                  <td colSpan={7} className="py-6 text-center text-gray-400">
                     등록된 HS코드 분류가 없습니다.
                   </td>
                 </tr>

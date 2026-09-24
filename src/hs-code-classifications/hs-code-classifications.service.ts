@@ -213,6 +213,18 @@ export class HsCodeClassificationsService {
     return this.classificationRepository.save(row);
   }
 
+  // PR-141: 삭제 — style_hs_code_mappings.classificationId FK가 이미 ON DELETE CASCADE로
+  // 걸려 있어(1789321811717-CreateHsCodeClassifications.ts) 분류를 지우면 그 분류에 연결된
+  // 매핑도 DB가 함께 지운다. 스타일 삭제(styles.service.ts remove())가 하위 데이터를 전부
+  // cascade로 지우는 것과 같은 방침 — "매핑이 있으면 막는다"로 하면 이 FK 설계와 어긋난다.
+  async remove(id: number): Promise<void> {
+    const existing = await this.classificationRepository.findOne({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException(`ID가 ${id}인 HS코드 분류를 찾을 수 없습니다.`);
+    }
+    await this.classificationRepository.delete(id);
+  }
+
   async lookup(dto: LookupHsCodeDto): Promise<HsCodeClassification> {
     const found = await this.classificationRepository.findOne({
       where: {

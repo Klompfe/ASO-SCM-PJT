@@ -21,6 +21,7 @@ describe('HsCodeClassificationsService', () => {
             findOne: jest.fn(),
             create: jest.fn((v) => v),
             save: jest.fn(),
+            delete: jest.fn(),
             createQueryBuilder: jest.fn(),
           },
         },
@@ -176,6 +177,26 @@ describe('HsCodeClassificationsService', () => {
 
       expect(qb.innerJoin).toHaveBeenCalled();
       expect(qb.distinct).toHaveBeenCalledWith(true);
+    });
+  });
+
+  // PR-141: 삭제 — style_hs_code_mappings FK가 ON DELETE CASCADE라 매핑은 DB가 알아서
+  // 지운다(1789321811717-CreateHsCodeClassifications.ts). 서비스는 존재 확인 후 삭제만 한다.
+  describe('remove', () => {
+    it('존재하지 않는 id면 NotFoundException, delete를 호출하지 않는다', async () => {
+      (classificationRepo.findOne as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.remove(999)).rejects.toBeInstanceOf(NotFoundException);
+      expect(classificationRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('존재하면 delete(id)를 호출한다(매핑 cascade는 DB FK가 처리 — 서비스에서 따로 지우지 않음)', async () => {
+      (classificationRepo.findOne as jest.Mock).mockResolvedValue({ id: 5, itemType: 'JK' });
+
+      await service.remove(5);
+
+      expect(classificationRepo.delete).toHaveBeenCalledWith(5);
+      expect(styleMappingRepo.save).not.toHaveBeenCalled();
     });
   });
 });
