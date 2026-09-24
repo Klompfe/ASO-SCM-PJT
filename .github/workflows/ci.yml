@@ -30,9 +30,13 @@ jobs:
 
       - name: Run backend unit tests
         run: npm run test
+        env:
+          JWT_SECRET: ci-test-only-secret-not-for-production
 
       - name: Run backend e2e tests
         run: npm run test:e2e
+        env:
+          JWT_SECRET: ci-test-only-secret-not-for-production
 
       - name: Install frontend dependencies
         working-directory: frontend-app
