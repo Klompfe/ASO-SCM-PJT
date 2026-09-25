@@ -7,6 +7,7 @@ import { FindMasterStylesDto } from './dto/find-master-styles.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { AuditLog } from '../audit-log/audit-log.decorator';
 
 @ApiTags('마스터 스타일')
 @ApiBearerAuth()
@@ -28,6 +29,7 @@ export class StylesController {
   // 계약/오더 정보와 맞물린 값이라 같은 RBAC 기준(MANAGER/ADMIN)을 적용한다.
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @AuditLog({ entityType: 'MasterStyle', table: 'master_style', pkColumn: 'styleNo' })
   @Patch(':styleNo')
   update(@Param('styleNo') styleNo: string, @Body() dto: UpdateMasterStyleDto) {
     return this.stylesService.update(styleNo, dto);
@@ -38,6 +40,7 @@ export class StylesController {
   // contracts.controller.ts의 승인/거절/삭제와 동일).
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @AuditLog({ entityType: 'MasterStyle', table: 'master_style', pkColumn: 'styleNo' })
   @Delete(':styleNo')
   @HttpCode(HttpStatus.OK)
   async remove(@Param('styleNo') styleNo: string) {

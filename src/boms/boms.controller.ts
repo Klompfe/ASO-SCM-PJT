@@ -6,6 +6,7 @@ import { SetActiveBomDto } from './dto/set-active-bom.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { AuditLog } from '../audit-log/audit-log.decorator';
 
 @ApiTags('자재명세(BOM)')
 @ApiBearerAuth()
@@ -37,6 +38,9 @@ export class BomsController {
   @Patch('styles/:styleNo/active-bom')
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  // 스타일 하나에 BOM이 여러 건 있을 수 있어(styleNo만으로는 어느 Bom 행인지 특정 불가)
+  // beforeValue 자동 조회(table/pkColumn)는 생략한다 — afterValue/행위자/일시는 남는다.
+  @AuditLog({ entityType: 'Bom(activeBom)' })
   @ApiOperation({ summary: '스타일에서 사용할(활성) BOM 선택 — 나머지 BOM은 비활성 (MANAGER/ADMIN)' })
   setActiveBom(@Param('styleNo') styleNo: string, @Body() dto: SetActiveBomDto) {
     return this.bomsService.setActiveBom(styleNo, dto.bomId);

@@ -12,6 +12,7 @@ import { Material, Color, Size } from './master/entities/master.entities';
 // Module Imports
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { ReadOnlyGuard } from './auth/guards/read-only.guard';
 import { UsersModule } from './users/users.module';
 import { ItemsModule } from './items/items.module';
 import { InventoriesModule } from './inventories/inventories.module';
@@ -34,6 +35,7 @@ import { CashVouchersModule } from './cash-vouchers/cash-vouchers.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { BrandPrefixRulesModule } from './brand-prefix-rules/brand-prefix-rules.module';
 import { StatusCodesModule } from './status-codes/status-codes.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
 import { HealthController } from './health/health.controller';
 import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
@@ -99,12 +101,19 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     CashVouchersModule,
     GoodsReceiptsModule,
     BrandPrefixRulesModule,
+    AuditLogModule,
   ],
   controllers: [HealthController],
   providers: [
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // PR-151: JwtAuthGuard 다음 순서로 등록해야 request.user가 채워진 뒤에 실행된다
+    // (APP_GUARD를 여러 개 등록하면 등록 순서대로 실행됨).
+    {
+      provide: APP_GUARD,
+      useClass: ReadOnlyGuard,
     },
   ],
 })

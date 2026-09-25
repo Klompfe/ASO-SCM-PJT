@@ -26,6 +26,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
 import { Public } from '../auth/public.decorator';
 import { HsCodeApiKeyGuard } from './guards/hs-code-api-key.guard';
+import { AuditLog } from '../audit-log/audit-log.decorator';
 
 // PR-081: 완제품 수입통관 HS코드 분류(품종+재직+혼용률 -> HS코드) 관리.
 // - 내부(로그인 사용자): 목록 조회는 누구나, 등록/임포트는 MANAGER/ADMIN.
@@ -40,6 +41,8 @@ export class HsCodeClassificationsController {
   @ApiBearerAuth()
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  // 여러 행을 한 번에 갱신하는 일괄 업로드라 단일 대상 beforeValue를 특정할 수 없다.
+  @AuditLog({ entityType: 'HsCodeClassification(import)' })
   @Post('import')
   @ApiOperation({ summary: 'HS코드 분류 엑셀 업로드 (시즌별 갱신, MANAGER/ADMIN)' })
   @ApiConsumes('multipart/form-data')
@@ -61,6 +64,9 @@ export class HsCodeClassificationsController {
   @ApiBearerAuth()
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  // upsert라 등록/수정 어느 쪽인지는 처리 전엔 알 수 없고, 대상 식별자(itemType+fabricType+
+  // composition 조합)가 라우트 파라미터가 아니라 body에 있어 beforeValue 자동 조회는 생략한다.
+  @AuditLog({ entityType: 'HsCodeClassification' })
   @Post()
   @ApiOperation({ summary: 'HS코드 분류 수동 등록/수정 (MANAGER/ADMIN, styleNo 지정 시 매핑도 함께 갱신)' })
   async create(@Body() dto: CreateHsCodeClassificationDto) {
@@ -76,6 +82,7 @@ export class HsCodeClassificationsController {
   @ApiBearerAuth()
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @AuditLog({ entityType: 'HsCodeClassification', table: 'hs_code_classifications', pkColumn: 'id' })
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'HS코드 분류 삭제 — 연결된 스타일 매핑도 함께 삭제(cascade) (MANAGER/ADMIN)' })

@@ -7,6 +7,7 @@ import { GetStatusCodesFilterDto } from './dto/get-status-codes-filter.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { AuditLog } from '../audit-log/audit-log.decorator';
 
 @ApiTags('상태코드 관리 (마스터·설정)')
 @ApiBearerAuth()
@@ -23,6 +24,7 @@ export class StatusCodesController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @AuditLog({ entityType: 'StatusCode' })
   @ApiOperation({ summary: '상태코드 등록 (MANAGER/ADMIN)' })
   create(@Body() dto: CreateStatusCodeDto) {
     return this.service.create(dto);
@@ -31,6 +33,7 @@ export class StatusCodesController {
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @AuditLog({ entityType: 'StatusCode', table: 'status_codes', pkColumn: 'id' })
   @ApiOperation({ summary: '상태코드 수정 — 라벨/정렬순서/활성여부만(도메인·코드값은 불변) (MANAGER/ADMIN)' })
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateStatusCodeDto) {
     return this.service.update(id, dto);
@@ -39,6 +42,7 @@ export class StatusCodesController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @AuditLog({ entityType: 'StatusCode', table: 'status_codes', pkColumn: 'id' })
   @ApiOperation({ summary: '상태코드 삭제 — 사용 중이면 막힘(대신 비활성화 권장) (MANAGER/ADMIN)' })
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.service.remove(id);

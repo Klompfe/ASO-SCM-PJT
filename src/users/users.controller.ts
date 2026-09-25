@@ -18,6 +18,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserRole } from './entities/user.entity';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { AuditLog } from '../audit-log/audit-log.decorator';
 
 // PR-070: 공개 가입 경로는 /auth/register(@Public())로 별도 유지되므로, 이 컨트롤러의
 // 사용자 관리 엔드포인트(생성 포함)는 전부 MANAGER/ADMIN 전용으로 제한한다 — 지금까지는
@@ -32,6 +33,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
+  @AuditLog({ entityType: 'User' })
   @ApiOperation({ summary: '신규 사용자 생성', description: '새로운 사용자를 등록합니다.' })
   @ApiResponse({ status: 201, description: '성공적으로 생성됨', type: User })
   @ApiResponse({ status: 400, description: '잘못된 입력 값 (Validation 에러)' })
@@ -57,6 +59,7 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @AuditLog({ entityType: 'User', table: 'users', pkColumn: 'id' })
   @ApiOperation({ summary: '사용자 정보 수정', description: '특정 사용자의 이메일, 이름, 역할(role), 활성화 상태를 수정합니다.' })
   @ApiParam({ name: 'id', description: '사용자 PK ID', example: 1 })
   @ApiResponse({ status: 200, description: '수정 성공', type: User })
@@ -70,6 +73,7 @@ export class UsersController {
   }
 
   @Delete(':id')
+  @AuditLog({ entityType: 'User', table: 'users', pkColumn: 'id' })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '사용자 삭제', description: 'ID를 기준으로 특정 사용자를 삭제합니다.' })
   @ApiParam({ name: 'id', description: '사용자 PK ID', example: 1 })
