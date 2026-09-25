@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { ImportShipment, ImportShipmentStatus } from './entities/import-shipment.entity';
 import { ImportShipmentLine } from './entities/import-shipment-line.entity';
 import { MasterStyle } from '../styles/entities/master-style.entity';
@@ -8,6 +8,7 @@ import { CreateImportShipmentDto } from './dto/create-import-shipment.dto';
 import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.dto';
 import { FindImportShipmentsDto } from './dto/find-import-shipments.dto';
 import { UpdateImportShipmentHeaderDto } from './dto/update-import-shipment-header.dto';
+import { BulkClearImportShipmentsDto } from './dto/bulk-clear-import-shipments.dto';
 import { HsCodeClassificationsService } from '../hs-code-classifications/hs-code-classifications.service';
 import { ImportShipmentExcelParser } from './utils/import-shipment-excel-parser.util';
 import { ImportShipmentPackingDetailExcelParser, type ParsedPackingDetailRow } from './utils/import-shipment-packing-detail-excel-parser.util';
@@ -69,6 +70,7 @@ export class ImportShipmentsService {
     private readonly hsCodeClassificationsService: HsCodeClassificationsService,
     private readonly brandPrefixRulesService: BrandPrefixRulesService,
     private readonly packingDetailsService: ImportShipmentPackingDetailsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // 3절: 라인 저장 시 (itemType,fabricType(trim),composition)으로 PR-081
@@ -235,6 +237,67 @@ export class ImportShipmentsService {
     shipment.clearedAt = newStatus === ImportShipmentStatus.CLEARED ? new Date() : shipment.clearedAt;
     await this.importShipmentRepository.save(shipment);
     return this.findOneOrFail(id);
+  }
+
+  // PR-152: INVOICE/Packing List(invoiceNo) 단위 일괄 통관완료처리. invoiceNo가 있으면
+  // 그 번호를 가진 문서 전부를 대상으로 하고(원문 요구대로 기본 방식), 없고 ids만 있으면
+  // 그 id들만 대상으로 한다. 대상 중 PENDING_CLEARANCE 건만 CLEARED로 전이하고, 이미
+  // CLEARED인 건은 조용히 건너뛴다(전이 규칙 위반이 아니라 "이미 끝났다"는 정상 상황이라
+  // updateStatus()처럼 에러를 던지지 않는다 — 일괄처리의 성격상 섞여 있는 게 자연스럽다).
+  // 트랜잭션으로 묶어 일부만 반영되는 상황을 막는다.
+  async bulkClear(dto: BulkClearImportShipmentsDto): Promise<{
+    invoiceNo: string | null;
+    clearedCount: number;
+    clearedIds: number[];
+    skippedAlreadyClearedCount: number;
+    skippedAlreadyClearedIds: number[];
+  }> {
+    const invoiceNo = dto.invoiceNo?.trim() || null;
+    const ids = dto.ids;
+
+    if (!invoiceNo && (!ids || ids.length === 0)) {
+      throw new BadRequestException('invoiceNo 또는 ids 중 하나는 반드시 지정해야 합니다.');
+    }
+
+    const shipments = await this.importShipmentRepository.find({
+      where: invoiceNo ? { invoiceNo } : { id: In(ids!) },
+    });
+    if (shipments.length === 0) {
+      throw new NotFoundException(
+        invoiceNo
+          ? `INVOICE 번호 "${invoiceNo}"를 가진 수입통관 문서를 찾을 수 없습니다.`
+          : `지정한 id에 해당하는 수입통관 문서를 찾을 수 없습니다.`,
+      );
+    }
+
+    const toClear = shipments.filter((s) => s.status === ImportShipmentStatus.PENDING_CLEARANCE);
+    const alreadyCleared = shipments.filter((s) => s.status === ImportShipmentStatus.CLEARED);
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const clearedAt = new Date();
+      for (const shipment of toClear) {
+        shipment.status = ImportShipmentStatus.CLEARED;
+        shipment.clearedAt = clearedAt;
+        await queryRunner.manager.save(shipment);
+      }
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+
+    return {
+      invoiceNo,
+      clearedCount: toClear.length,
+      clearedIds: toClear.map((s) => s.id),
+      skippedAlreadyClearedCount: alreadyCleared.length,
+      skippedAlreadyClearedIds: alreadyCleared.map((s) => s.id),
+    };
   }
 
   // 3절: 사용자가 HS코드를 직접 입력하면 그 값으로 HsCodeClassification에도 새

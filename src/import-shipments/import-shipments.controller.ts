@@ -21,6 +21,7 @@ import { UpdateImportShipmentStatusDto } from './dto/update-import-shipment-stat
 import { UpdateImportShipmentLineDto } from './dto/update-import-shipment-line.dto';
 import { FindImportShipmentsDto } from './dto/find-import-shipments.dto';
 import { UpdateImportShipmentHeaderDto } from './dto/update-import-shipment-header.dto';
+import { BulkClearImportShipmentsDto } from './dto/bulk-clear-import-shipments.dto';
 
 // PR-082: 완제품 수입통관 추적(HS코드 자동조회/기록까지만 — 원부자재단가/선적일
 // 계산은 이 저장소 밖의 수입통관 이메일 에이전트가 담당). export-shipments처럼
@@ -71,6 +72,13 @@ export class ImportShipmentsController {
   @ApiOperation({ summary: '상태 전이 (PENDING_CLEARANCE→CLEARED, 역행 불가)' })
   updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateImportShipmentStatusDto) {
     return this.importShipmentsService.updateStatus(id, dto.status);
+  }
+
+  // PR-152: INV/PKL(invoiceNo) 단위 일괄 통관완료처리 — 건별 PUT :id/status는 그대로 둔다.
+  @Post('bulk-clear')
+  @ApiOperation({ summary: '통관완료 일괄처리 — invoiceNo(권장) 또는 ids로 PENDING_CLEARANCE 건을 전부 CLEARED로 전환, 이미 완료된 건은 건너뜀' })
+  bulkClear(@Body() dto: BulkClearImportShipmentsDto) {
+    return this.importShipmentsService.bulkClear(dto);
   }
 
   @Put(':id/lines/:lineId')

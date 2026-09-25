@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ImportShipmentsService } from './import-shipments.service';
 import { ImportShipment, ImportShipmentStatus } from './entities/import-shipment.entity';
 import { ImportShipmentLine } from './entities/import-shipment-line.entity';
@@ -25,9 +25,28 @@ describe('ImportShipmentsService', () => {
   const mockBrandPrefixRulesService = { findAll: jest.fn().mockResolvedValue([]) };
   const mockPackingDetailsService = { createMany: jest.fn().mockResolvedValue([]) };
 
+  // PR-152: bulkClear()가 트랜잭션으로 묶는다 — work-orders.service.spec.ts와 동일한
+  // QueryRunner mock 패턴(manager.save는 넘어온 엔티티를 그대로 반환).
+  let mockQueryRunnerManager: { save: jest.Mock };
+  let mockQueryRunner: {
+    connect: jest.Mock; startTransaction: jest.Mock; commitTransaction: jest.Mock;
+    rollbackTransaction: jest.Mock; release: jest.Mock; manager: { save: jest.Mock };
+  };
+  const mockDataSource = { createQueryRunner: jest.fn() };
+
   beforeEach(async () => {
     mockBrandPrefixRulesService.findAll.mockResolvedValue([]);
     mockPackingDetailsService.createMany.mockClear();
+    mockQueryRunnerManager = { save: jest.fn((entity: any) => Promise.resolve(entity)) };
+    mockQueryRunner = {
+      connect: jest.fn(),
+      startTransaction: jest.fn(),
+      commitTransaction: jest.fn(),
+      rollbackTransaction: jest.fn(),
+      release: jest.fn(),
+      manager: mockQueryRunnerManager,
+    };
+    mockDataSource.createQueryRunner.mockReturnValue(mockQueryRunner);
     (ImportShipmentPackingDetailExcelParser.parse as jest.Mock).mockReturnValue(null);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -71,6 +90,7 @@ describe('ImportShipmentsService', () => {
             upsertOne: jest.fn(),
           },
         },
+        { provide: DataSource, useValue: mockDataSource },
       ],
     }).compile();
 
@@ -616,6 +636,83 @@ describe('ImportShipmentsService', () => {
 
       expect(mockPackingDetailsService.createMany).not.toHaveBeenCalled();
       expect(result.warnings.some((w) => w.includes('ZZ'))).toBe(true);
+    });
+  });
+
+  // PR-152: INVOICE/Packing List(invoiceNo) 단위 일괄 통관완료처리.
+  describe('bulkClear — INV/PKL 단위 일괄 통관완료처리 (PR-152)', () => {
+    const shipment = (id: number, status: ImportShipmentStatus, invoiceNo = 'TYVN2026-26') => ({
+      id, invoiceNo, status, clearedAt: null,
+    });
+
+    it('invoiceNo로 PENDING_CLEARANCE 건만 CLEARED로 바뀌고, 이미 CLEARED인 건은 건너뛴다', async () => {
+      const s1 = shipment(1, ImportShipmentStatus.PENDING_CLEARANCE);
+      const s2 = shipment(2, ImportShipmentStatus.PENDING_CLEARANCE);
+      const s3 = shipment(3, ImportShipmentStatus.CLEARED);
+      (shipmentRepo.find as jest.Mock).mockResolvedValue([s1, s2, s3]);
+
+      const result = await service.bulkClear({ invoiceNo: 'TYVN2026-26' });
+
+      expect(shipmentRepo.find).toHaveBeenCalledWith({ where: { invoiceNo: 'TYVN2026-26' } });
+      expect(result.clearedCount).toBe(2);
+      expect(result.clearedIds.sort()).toEqual([1, 2]);
+      expect(result.skippedAlreadyClearedCount).toBe(1);
+      expect(result.skippedAlreadyClearedIds).toEqual([3]);
+      expect(mockQueryRunnerManager.save).toHaveBeenCalledTimes(2); // CLEARED였던 s3는 save 대상 아님
+      expect(s1.status).toBe(ImportShipmentStatus.CLEARED);
+      expect((s1 as any).clearedAt).not.toBeNull();
+      expect(mockQueryRunner.commitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('ids로도 지정할 수 있다(invoiceNo 없이)', async () => {
+      const s1 = shipment(1, ImportShipmentStatus.PENDING_CLEARANCE);
+      (shipmentRepo.find as jest.Mock).mockResolvedValue([s1]);
+
+      const result = await service.bulkClear({ ids: [1] });
+
+      const calledWith = (shipmentRepo.find as jest.Mock).mock.calls[0][0];
+      expect(calledWith.where.id.value).toEqual([1]); // TypeORM In() 연산자 내부 표현
+      expect(result.invoiceNo).toBeNull();
+      expect(result.clearedCount).toBe(1);
+    });
+
+    it('invoiceNo와 ids가 둘 다 있으면 invoiceNo를 우선한다', async () => {
+      (shipmentRepo.find as jest.Mock).mockResolvedValue([shipment(1, ImportShipmentStatus.PENDING_CLEARANCE)]);
+
+      await service.bulkClear({ invoiceNo: 'TYVN2026-26', ids: [999] });
+
+      expect(shipmentRepo.find).toHaveBeenCalledWith({ where: { invoiceNo: 'TYVN2026-26' } });
+    });
+
+    it('둘 다 없으면 400', async () => {
+      await expect(service.bulkClear({})).rejects.toBeInstanceOf(BadRequestException);
+      expect(shipmentRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('존재하지 않는 invoiceNo면 404', async () => {
+      (shipmentRepo.find as jest.Mock).mockResolvedValue([]);
+      await expect(service.bulkClear({ invoiceNo: 'NO-SUCH-INVOICE' })).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockQueryRunner.startTransaction).not.toHaveBeenCalled();
+    });
+
+    it('전부 이미 CLEARED면 성공하지만 clearedCount는 0이고 아무것도 저장하지 않는다', async () => {
+      (shipmentRepo.find as jest.Mock).mockResolvedValue([shipment(1, ImportShipmentStatus.CLEARED)]);
+
+      const result = await service.bulkClear({ invoiceNo: 'TYVN2026-26' });
+
+      expect(result.clearedCount).toBe(0);
+      expect(result.skippedAlreadyClearedCount).toBe(1);
+      expect(mockQueryRunnerManager.save).not.toHaveBeenCalled();
+    });
+
+    it('저장 도중 실패하면 롤백하고 에러를 그대로 던진다', async () => {
+      (shipmentRepo.find as jest.Mock).mockResolvedValue([shipment(1, ImportShipmentStatus.PENDING_CLEARANCE)]);
+      mockQueryRunnerManager.save.mockRejectedValue(new Error('DB down'));
+
+      await expect(service.bulkClear({ invoiceNo: 'TYVN2026-26' })).rejects.toThrow('DB down');
+      expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
+      expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);
     });
   });
 });
