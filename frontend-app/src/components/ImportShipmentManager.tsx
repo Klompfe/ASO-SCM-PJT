@@ -6,6 +6,7 @@ import {
   updateImportShipmentStatus,
   updateImportShipmentLineHsCode,
   importImportShipmentsFromFile,
+  bulkClearImportShipments,
   type ImportShipment,
   type CreateImportShipmentLine,
 } from '../api/importShipments.service';
@@ -18,6 +19,7 @@ import { ImportShipmentReportTable } from './ImportShipmentReportTable';
 import { ImportShipmentVoyagePanel } from './ImportShipmentVoyagePanel';
 import { effectiveStyleNo, isNewStyleNo, validateVoyageDates } from '../utils/importShipmentForm';
 import { describeImportFilters, importShipmentColumns, summarizeShipments } from '../utils/importShipmentReport';
+import { groupByInvoiceNo } from '../utils/importShipmentGrouping';
 
 const emptyLine: CreateImportShipmentLine = {
   itemType: '',
@@ -246,6 +248,25 @@ export const ImportShipmentManager: React.FC = () => {
       await load();
     } catch (err: any) {
       toast.error(getErrorMessage(err, '처리에 실패했습니다.'));
+    }
+  };
+
+  // PR-152: 같은 invoiceNo(INV/PKL)를 가진 문서 중 통관대기 건을 한 번에 통관완료 처리한다.
+  const [bulkClearingInvoiceNo, setBulkClearingInvoiceNo] = useState<string | null>(null);
+  const handleBulkClear = async (invoiceNo: string) => {
+    if (!window.confirm(`INVOICE "${invoiceNo}"의 통관대기 건을 전부 통관완료 처리하시겠습니까?`)) return;
+    setBulkClearingInvoiceNo(invoiceNo);
+    try {
+      const res = await bulkClearImportShipments({ invoiceNo });
+      toast.success(
+        `통관완료 처리: ${res.clearedCount}건` +
+          (res.skippedAlreadyClearedCount > 0 ? ` (이미 완료되어 건너뜀 ${res.skippedAlreadyClearedCount}건)` : ''),
+      );
+      await load(appliedFilter);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '일괄 통관완료 처리에 실패했습니다.'));
+    } finally {
+      setBulkClearingInvoiceNo(null);
     }
   };
 
@@ -494,83 +515,111 @@ export const ImportShipmentManager: React.FC = () => {
         >
         <ImportSummaryCards shipments={shipments} />
         <div className="hidden print:block"><ImportShipmentReportTable shipments={shipments} /></div>
-        <div className="space-y-4 print:hidden mt-4">
-          {shipments.map((s) => (
-            <div key={s.id} className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-semibold text-gray-800">{s.styleNo}</span>
-                  {s.brand && (
-                    <span className="ml-2 px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">{s.brand}</span>
-                  )}
-                  {s.style?.overview?.styleName && (
-                    <span className="text-gray-500 text-sm ml-2">{s.style.overview.styleName}</span>
-                  )}
-                  {s.invoiceNo && <span className="text-gray-400 text-xs ml-2">INV: {s.invoiceNo}</span>}
-                </div>
-                <div className="flex items-center gap-2">
-                  {statusBadge(s.status)}
-                  {s.status === 'PENDING_CLEARANCE' && (
+        <div className="space-y-6 print:hidden mt-4">
+          {groupByInvoiceNo(shipments).map((group) => (
+            <div key={group.invoiceNo ?? '__no-invoice__'} className="space-y-4">
+              {/* PR-152: invoiceNo가 있는 그룹만 인보이스 헤더+일괄처리 버튼을 보여준다 — 인보이스 미지정 건은
+                  일괄처리할 "묶음" 자체가 없어(전부 개별 건) 헤더 없이 카드만 그대로 나열한다. */}
+              {group.invoiceNo && (
+                <div className="flex items-center justify-between bg-gray-100 rounded-lg px-4 py-2">
+                  <div className="text-sm font-semibold text-gray-700">
+                    INVOICE: {group.invoiceNo}
+                    <span className="text-gray-500 font-normal ml-2">
+                      ({group.shipments.length}건 중 통관대기 {group.pendingCount}건)
+                    </span>
+                  </div>
+                  {group.pendingCount > 0 && (
                     <button
-                      className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
-                      onClick={() => handleClear(s.id)}
-                    >통관완료 처리</button>
+                      className="bg-green-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                      disabled={bulkClearingInvoiceNo === group.invoiceNo}
+                      onClick={() => handleBulkClear(group.invoiceNo as string)}
+                    >
+                      {bulkClearingInvoiceNo === group.invoiceNo
+                        ? '처리 중...'
+                        : `통관완료 일괄처리 (${group.pendingCount}건)`}
+                    </button>
                   )}
-                  <button
-                    className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded text-sm hover:bg-indigo-200"
-                    onClick={() => setExpandedShipmentId(expandedShipmentId === s.id ? null : s.id)}
-                  >
-                    {expandedShipmentId === s.id ? '완제품입고증 닫기' : '완제품입고증'}
-                  </button>
                 </div>
-              </div>
+              )}
 
-              <ImportShipmentVoyagePanel shipment={s} onSaved={() => load(appliedFilter)} />
+              {group.shipments.map((s) => (
+                <div key={s.id} className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold text-gray-800">{s.styleNo}</span>
+                      {s.brand && (
+                        <span className="ml-2 px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">{s.brand}</span>
+                      )}
+                      {s.style?.overview?.styleName && (
+                        <span className="text-gray-500 text-sm ml-2">{s.style.overview.styleName}</span>
+                      )}
+                      {s.invoiceNo && <span className="text-gray-400 text-xs ml-2">INV: {s.invoiceNo}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {statusBadge(s.status)}
+                      {s.status === 'PENDING_CLEARANCE' && (
+                        <button
+                          className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+                          onClick={() => handleClear(s.id)}
+                        >통관완료 처리</button>
+                      )}
+                      <button
+                        className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded text-sm hover:bg-indigo-200"
+                        onClick={() => setExpandedShipmentId(expandedShipmentId === s.id ? null : s.id)}
+                      >
+                        {expandedShipmentId === s.id ? '완제품입고증 닫기' : '완제품입고증'}
+                      </button>
+                    </div>
+                  </div>
 
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-500 border-b border-gray-100">
-                    <th className="py-1 pr-2">품종</th>
-                    <th className="py-1 pr-2">재직</th>
-                    <th className="py-1 pr-2">혼용률</th>
-                    <th className="py-1 pr-2">HS코드</th>
-                    <th className="py-1 pr-2">수량</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {s.lines.map((line) => (
-                    <tr key={line.id} className="border-b border-gray-50">
-                      <td className="py-1 pr-2">{line.itemType}</td>
-                      <td className="py-1 pr-2">{line.fabricType}</td>
-                      <td className="py-1 pr-2">{line.composition}</td>
-                      <td className="py-1 pr-2">
-                        {line.unmatched ? (
-                          <div className="flex items-center gap-1">
-                            <span className="px-2 py-0.5 rounded bg-red-100 text-red-700 text-xs font-medium">HS코드 미확인</span>
-                            <input
-                              className="border border-gray-300 rounded px-1 py-0.5 text-xs w-28"
-                              placeholder="HS코드 입력"
-                              value={hsCodeDrafts[line.id] ?? ''}
-                              onChange={(e) =>
-                                setHsCodeDrafts((prev) => ({ ...prev, [line.id]: e.target.value }))
-                              }
-                            />
-                            <button
-                              className="text-blue-600 text-xs"
-                              onClick={() => handleHsCodeSave(s.id, line.id)}
-                            >저장</button>
-                          </div>
-                        ) : (
-                          <span className="font-mono">{line.hsCode}</span>
-                        )}
-                      </td>
-                      <td className="py-1 pr-2">{line.qty} {line.unit}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                  <ImportShipmentVoyagePanel shipment={s} onSaved={() => load(appliedFilter)} />
 
-              {expandedShipmentId === s.id && <GoodsReceiptPanel importShipmentId={s.id} />}
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-500 border-b border-gray-100">
+                        <th className="py-1 pr-2">품종</th>
+                        <th className="py-1 pr-2">재직</th>
+                        <th className="py-1 pr-2">혼용률</th>
+                        <th className="py-1 pr-2">HS코드</th>
+                        <th className="py-1 pr-2">수량</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {s.lines.map((line) => (
+                        <tr key={line.id} className="border-b border-gray-50">
+                          <td className="py-1 pr-2">{line.itemType}</td>
+                          <td className="py-1 pr-2">{line.fabricType}</td>
+                          <td className="py-1 pr-2">{line.composition}</td>
+                          <td className="py-1 pr-2">
+                            {line.unmatched ? (
+                              <div className="flex items-center gap-1">
+                                <span className="px-2 py-0.5 rounded bg-red-100 text-red-700 text-xs font-medium">HS코드 미확인</span>
+                                <input
+                                  className="border border-gray-300 rounded px-1 py-0.5 text-xs w-28"
+                                  placeholder="HS코드 입력"
+                                  value={hsCodeDrafts[line.id] ?? ''}
+                                  onChange={(e) =>
+                                    setHsCodeDrafts((prev) => ({ ...prev, [line.id]: e.target.value }))
+                                  }
+                                />
+                                <button
+                                  className="text-blue-600 text-xs"
+                                  onClick={() => handleHsCodeSave(s.id, line.id)}
+                                >저장</button>
+                              </div>
+                            ) : (
+                              <span className="font-mono">{line.hsCode}</span>
+                            )}
+                          </td>
+                          <td className="py-1 pr-2">{line.qty} {line.unit}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {expandedShipmentId === s.id && <GoodsReceiptPanel importShipmentId={s.id} />}
+                </div>
+              ))}
             </div>
           ))}
           {shipments.length === 0 && (

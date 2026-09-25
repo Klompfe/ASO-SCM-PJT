@@ -97,6 +97,17 @@ export const updateImportShipmentHeader = (id: number, data: ImportShipmentVoyag
 export const updateImportShipmentStatus = (id: number, status: ImportShipmentStatus): Promise<any> =>
   apiClient.put(`/import-shipments/${id}/status`, { status });
 
+// PR-152: INV/PKL(invoiceNo) 단위 일괄 통관완료처리 — invoiceNo가 기본, ids는 보조 수단.
+export interface BulkClearImportShipmentsResult {
+  invoiceNo: string | null;
+  clearedCount: number;
+  clearedIds: number[];
+  skippedAlreadyClearedCount: number;
+  skippedAlreadyClearedIds: number[];
+}
+export const bulkClearImportShipments = (params: { invoiceNo?: string; ids?: number[] }): Promise<BulkClearImportShipmentsResult> =>
+  apiClient.post('/import-shipments/bulk-clear', params);
+
 export const updateImportShipmentLineHsCode = (
   importShipmentId: number,
   lineId: number,
