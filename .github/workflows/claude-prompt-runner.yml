@@ -1,0 +1,43 @@
+name: Claude Prompt Runner
+
+# PR-155: 수동 실행 전용(workflow_dispatch). Actions 탭에서 prompt_file 경로를 입력해 실행한다.
+# prompts/ 폴더에 새 파일이 올라온다고 자동으로 실행되지 않으며, main 병합·배포도 이 워크플로가 대신하지 않는다
+# — anthropics/claude-code-action은 지정된 prompt를 지시받은 브랜치에서 작업/커밋만 하고, 병합은 항상 사람이 PR을 보고 진행한다.
+on:
+  workflow_dispatch:
+    inputs:
+      prompt_file:
+        description: '처리할 지시서 경로 (예: prompts/PR-156-prompt.md)'
+        required: true
+        type: string
+
+jobs:
+  run-prompt:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read prompt file
+        id: read_prompt
+        run: |
+          if [ ! -f "${{ inputs.prompt_file }}" ]; then
+            echo "prompt_file이 존재하지 않습니다: ${{ inputs.prompt_file }}"
+            exit 1
+          fi
+          {
+            echo 'content<<PROMPT_EOF'
+            cat "${{ inputs.prompt_file }}"
+            echo
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: ${{ steps.read_prompt.outputs.content }}
