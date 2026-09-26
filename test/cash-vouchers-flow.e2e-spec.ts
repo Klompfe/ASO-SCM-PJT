@@ -7,10 +7,12 @@ process.env.DB_DATABASE = TEST_DB_PATH;
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
+import { User, UserRole } from '../src/users/entities/user.entity';
 
 // PR-094: 입출금전표(CashVoucher) 등록 → 목록 조회 → summary(기간 합계) 확인 흐름을
 // 실제 HTTP 요청으로 검증한다.
@@ -31,10 +33,13 @@ describe('입출금전표관리 흐름 (PR-094)', () => {
     app.useGlobalInterceptors(new TransformInterceptor());
     await app.init();
 
+    // PR-153: 입출금전표 CUD는 ACCOUNTING/MASTER 전용으로 가드가 걸려 있어(기본값
+    // STAFF로는 403) 회원가입 후 직접 role을 올려 사용한다.
     const email = `cash-vouchers-e2e-${Date.now()}@test.com`;
     await request(app.getHttpServer())
       .post('/auth/register')
       .send({ email, password: 'password123!', name: 'Cash Vouchers E2E' });
+    await moduleFixture.get(DataSource).getRepository(User).update({ email }, { role: UserRole.ACCOUNTING });
     token = (
       await request(app.getHttpServer())
         .post('/auth/login')

@@ -77,7 +77,7 @@ describe('오더 진행현황 요약 (PR-067)', () => {
 
   beforeAll(async () => {
     userToken = await registerAndLogin(`summary-user-${Date.now()}@test.com`);
-    managerToken = await registerAndLogin(`summary-manager-${Date.now()}@test.com`, UserRole.MANAGER);
+    managerToken = await registerAndLogin(`summary-manager-${Date.now()}@test.com`, UserRole.ADMIN);
 
     // 미래 납기(정상 진행중)로 두 스타일 등록 — 하나는 승인, 하나는 미승인 상태로 남긴다.
     await request(app.getHttpServer())

@@ -16,5 +16,5 @@ export interface AuditLogOptions {
 
 // PR-151: 기존 @Roles()와 독립적으로 붙이는 감사 로그 메타데이터. AuditLogInterceptor가
 // 이 메타데이터가 있는 라우트만 기록한다(전역으로 등록돼 있지만 메타데이터 없으면 조용히
-// 통과) — 전체 API가 아니라 이미 MANAGER/ADMIN으로 제한된 15개 API에만 붙인다.
+// 통과) — 전체 API가 아니라 이미 ADMIN/MASTER으로 제한된 15개 API에만 붙인다.
 export const AuditLog = (options: AuditLogOptions) => SetMetadata(AUDIT_LOG_KEY, options);

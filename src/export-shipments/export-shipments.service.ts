@@ -330,7 +330,7 @@ export class ExportShipmentsService {
   }
 
   // DRAFT->REVIEWED는 누구나(인증된 사용자), REVIEWED->FINALIZED는 계약 승인과 동일하게
-  // MANAGER/ADMIN만 — 두 전이가 같은 엔드포인트를 쓰므로 RolesGuard 데코레이터로는
+  // ADMIN/MASTER만 — 두 전이가 같은 엔드포인트를 쓰므로 RolesGuard 데코레이터로는
   // 표현할 수 없어 서비스 레이어에서 조건부로 검사한다.
   async updateStatus(
     id: number,
@@ -347,7 +347,7 @@ export class ExportShipmentsService {
     }
 
     if (newStatus === ExportShipmentStatus.FINALIZED) {
-      if (userRole !== UserRole.MANAGER && userRole !== UserRole.ADMIN) {
+      if (userRole !== UserRole.ADMIN && userRole !== UserRole.MASTER) {
         throw new ForbiddenException('FINALIZED 확정은 관리자 권한이 필요합니다.');
       }
     }

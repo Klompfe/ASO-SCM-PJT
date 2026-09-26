@@ -37,11 +37,11 @@ export class BomsController {
 
   @Patch('styles/:styleNo/active-bom')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   // 스타일 하나에 BOM이 여러 건 있을 수 있어(styleNo만으로는 어느 Bom 행인지 특정 불가)
   // beforeValue 자동 조회(table/pkColumn)는 생략한다 — afterValue/행위자/일시는 남는다.
   @AuditLog({ entityType: 'Bom(activeBom)' })
-  @ApiOperation({ summary: '스타일에서 사용할(활성) BOM 선택 — 나머지 BOM은 비활성 (MANAGER/ADMIN)' })
+  @ApiOperation({ summary: '스타일에서 사용할(활성) BOM 선택 — 나머지 BOM은 비활성 (ADMIN/MASTER)' })
   setActiveBom(@Param('styleNo') styleNo: string, @Body() dto: SetActiveBomDto) {
     return this.bomsService.setActiveBom(styleNo, dto.bomId);
   }

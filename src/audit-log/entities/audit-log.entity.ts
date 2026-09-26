@@ -1,6 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
 
-// PR-151: "누가 언제 무엇을 바꿨는지" 기록. 지금은 이미 MANAGER/ADMIN으로 제한돼
+// PR-151: "누가 언제 무엇을 바꿨는지" 기록. 지금은 이미 ADMIN/MASTER으로 제한돼
 // 민감 CUD로 분류된 15개 API(styles/contracts/status-codes/hs-code-classifications/
 // boms/users/export-shipment-defaults 컨트롤러)에만 적용한다 — 전체 API로 한 번에
 // 확장하면 로그가 너무 많아지고 검증도 어렵다(요청 사양).

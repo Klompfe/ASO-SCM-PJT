@@ -87,7 +87,7 @@ describe('작업지시서 등록 → 계약 자동생성/승인 워크플로 (PR
 
   beforeAll(async () => {
     userToken = await registerAndLogin(`contract-user-${Date.now()}@test.com`);
-    managerToken = await registerAndLogin(`contract-manager-${Date.now()}@test.com`, UserRole.MANAGER);
+    managerToken = await registerAndLogin(`contract-manager-${Date.now()}@test.com`, UserRole.ADMIN);
   });
 
   let firstContractId: number;

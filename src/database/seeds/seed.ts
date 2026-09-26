@@ -13,7 +13,7 @@ async function bootstrap() {
 
   console.log('🌱 Seed 데이터 투입을 시작합니다...');
 
-  // 1. 초기 관리자 계정 생성
+  // 1. 초기 마스터 계정 생성(PR-153: 기존 ADMIN 계정이 최상위 MASTER로 재정의됨)
   const userRepo = dataSource.getRepository(User);
   const existingUser = await userRepo.findOne({ where: { email: 'admin@scm.com' } });
   if (!existingUser) {
@@ -23,13 +23,13 @@ async function bootstrap() {
       email: 'admin@scm.com',
       password: hashedPassword,
       name: '시스템 관리자',
-      role: UserRole.ADMIN,
+      role: UserRole.MASTER,
     });
-    console.log('✅ 관리자 계정 생성 완료 (admin@scm.com / admin1234!)');
+    console.log('✅ 마스터 계정 생성 완료 (admin@scm.com / admin1234!)');
   }
 
-  // 1-1. MANAGER 권한 테스트 계정 생성(PR-065) — RolesGuard로 보호된 라우트를
-  // 수동으로 검증할 때 쓸 계정이 지금까지 하나도 없었다.
+  // 1-1. ADMIN(PR-153: 구 MANAGER — 섹션 승인 권한) 권한 테스트 계정 생성(PR-065) —
+  // RolesGuard로 보호된 라우트를 수동으로 검증할 때 쓸 계정이 지금까지 하나도 없었다.
   const existingManager = await userRepo.findOne({ where: { email: 'manager@scm.com' } });
   if (!existingManager) {
     const hashedPassword = await bcrypt.hash('manager1234!', 10);
@@ -37,10 +37,10 @@ async function bootstrap() {
       username: 'manager',
       email: 'manager@scm.com',
       password: hashedPassword,
-      name: '매니저 테스트 계정',
-      role: UserRole.MANAGER,
+      name: '관리자 테스트 계정',
+      role: UserRole.ADMIN,
     });
-    console.log('✅ 매니저 계정 생성 완료 (manager@scm.com / manager1234!)');
+    console.log('✅ 관리자 계정 생성 완료 (manager@scm.com / manager1234!)');
   }
 
   // 2. 초기 공급업체 생성

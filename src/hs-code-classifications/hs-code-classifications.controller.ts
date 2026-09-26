@@ -29,7 +29,7 @@ import { HsCodeApiKeyGuard } from './guards/hs-code-api-key.guard';
 import { AuditLog } from '../audit-log/audit-log.decorator';
 
 // PR-081: 완제품 수입통관 HS코드 분류(품종+재직+혼용률 -> HS코드) 관리.
-// - 내부(로그인 사용자): 목록 조회는 누구나, 등록/임포트는 MANAGER/ADMIN.
+// - 내부(로그인 사용자): 목록 조회는 누구나, 등록/임포트는 ADMIN/MASTER.
 // - 외부(Python 수입통관 이메일 에이전트): /lookup, /by-style/:styleNo는
 //   @Public()으로 전역 JwtAuthGuard를 우회하고 HsCodeApiKeyGuard(x-api-key)로
 //   인증한다 — 이 프로젝트 밖의 서버 대 서버 호출이라 JWT 로그인 세션이 없다.
@@ -40,11 +40,11 @@ export class HsCodeClassificationsController {
 
   @ApiBearerAuth()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   // 여러 행을 한 번에 갱신하는 일괄 업로드라 단일 대상 beforeValue를 특정할 수 없다.
   @AuditLog({ entityType: 'HsCodeClassification(import)' })
   @Post('import')
-  @ApiOperation({ summary: 'HS코드 분류 엑셀 업로드 (시즌별 갱신, MANAGER/ADMIN)' })
+  @ApiOperation({ summary: 'HS코드 분류 엑셀 업로드 (시즌별 갱신, ADMIN/MASTER)' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   import(@UploadedFile() file: Express.Multer.File) {
@@ -63,12 +63,12 @@ export class HsCodeClassificationsController {
 
   @ApiBearerAuth()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   // upsert라 등록/수정 어느 쪽인지는 처리 전엔 알 수 없고, 대상 식별자(itemType+fabricType+
   // composition 조합)가 라우트 파라미터가 아니라 body에 있어 beforeValue 자동 조회는 생략한다.
   @AuditLog({ entityType: 'HsCodeClassification' })
   @Post()
-  @ApiOperation({ summary: 'HS코드 분류 수동 등록/수정 (MANAGER/ADMIN, styleNo 지정 시 매핑도 함께 갱신)' })
+  @ApiOperation({ summary: 'HS코드 분류 수동 등록/수정 (ADMIN/MASTER, styleNo 지정 시 매핑도 함께 갱신)' })
   async create(@Body() dto: CreateHsCodeClassificationDto) {
     const classification = await this.service.upsertOne(dto);
     if (dto.styleNo) {
@@ -81,11 +81,11 @@ export class HsCodeClassificationsController {
   // 스타일 매핑도 함께 지워진다(styles.controller.ts 스타일 삭제와 같은 cascade 방침).
   @ApiBearerAuth()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'HsCodeClassification', table: 'hs_code_classifications', pkColumn: 'id' })
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'HS코드 분류 삭제 — 연결된 스타일 매핑도 함께 삭제(cascade) (MANAGER/ADMIN)' })
+  @ApiOperation({ summary: 'HS코드 분류 삭제 — 연결된 스타일 매핑도 함께 삭제(cascade) (ADMIN/MASTER)' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.service.remove(id);
     return { message: `HS코드 분류(ID ${id})가 삭제되었습니다.` };

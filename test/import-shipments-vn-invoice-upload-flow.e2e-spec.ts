@@ -120,7 +120,7 @@ describe('Vietnam INV/PKL 엑셀 업로드(ImportShipment import-from-file) 회�
     await request(app.getHttpServer())
       .post('/auth/register')
       .send({ email: managerEmail, password: 'password123!', name: 'VN Invoice Upload Manager' });
-    await dataSource.getRepository(User).update({ email: managerEmail }, { role: UserRole.MANAGER });
+    await dataSource.getRepository(User).update({ email: managerEmail }, { role: UserRole.ADMIN });
     managerToken = (
       await request(app.getHttpServer()).post('/auth/login').send({ email: managerEmail, password: 'password123!' }).expect(201)
     ).body.data.accessToken;

@@ -31,7 +31,7 @@ export class AuthController {
     return await this.authService.login(loginDto);
   }
 
-  // PR-066: 프론트엔드가 role을 알아야 MANAGER/ADMIN 전용 버튼(계약 승인 등)을
+  // PR-066: 프론트엔드가 role을 알아야 ADMIN/MASTER 전용 버튼(계약 승인 등)을
   // 조건부로 보여줄 수 있다 — 로그인 직후뿐 아니라 새로고침 시에도 동작해야 하므로
   // localStorage에 role을 따로 캐싱하지 않고 매번 이 엔드포인트로 현재 값을 가져온다.
   @ApiBearerAuth()

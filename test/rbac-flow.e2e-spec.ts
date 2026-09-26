@@ -51,7 +51,7 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
       .send({ email, password, name: 'RBAC Tester' })
       .expect(201);
 
-    // 회원가입 API는 role을 받지 않는다(항상 기본값 USER) — MANAGER 계정은
+    // 회원가입 API는 role을 받지 않는다(항상 기본값 STAFF) — ADMIN/MASTER 계정은
     // 공개 API로 만들 수 없으므로 테스트에서 직접 리포지토리로 role을 올린다.
     if (role) {
       await dataSource.getRepository(User).update({ email }, { role });
@@ -93,14 +93,14 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
 
   it('JWT payload와 req.user에 role이 실제로 채워져야 한다', async () => {
     const email = `rbac-payload-${Date.now()}@test.com`;
-    const token = await registerAndLogin(email, UserRole.MANAGER);
+    const token = await registerAndLogin(email, UserRole.ADMIN);
     const decode = (t: string) => JSON.parse(Buffer.from(t.split('.')[1], 'base64').toString());
-    expect(decode(token).role).toBe(UserRole.MANAGER);
+    expect(decode(token).role).toBe(UserRole.ADMIN);
   });
 
-  it('USER 권한으로 PATCH /contracts/:id/approve를 호출하면 403이어야 한다', async () => {
+  it('STAFF 권한으로 PATCH /contracts/:id/approve를 호출하면 403이어야 한다', async () => {
     const email = `rbac-user-${Date.now()}@test.com`;
-    const token = await registerAndLogin(email); // role 지정 없음 → 기본값 USER
+    const token = await registerAndLogin(email); // role 지정 없음 → 기본값 STAFF
     const contractId = await createPendingContract(token);
 
     await request(app.getHttpServer())
@@ -109,9 +109,9 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
       .expect(403);
   });
 
-  it('MANAGER 권한으로 PATCH /contracts/:id/approve를 호출하면 정상 통과해야 한다', async () => {
+  it('ADMIN 권한으로 PATCH /contracts/:id/approve를 호출하면 정상 통과해야 한다', async () => {
     const email = `rbac-manager-${Date.now()}@test.com`;
-    const token = await registerAndLogin(email, UserRole.MANAGER);
+    const token = await registerAndLogin(email, UserRole.ADMIN);
     const contractId = await createPendingContract(token);
 
     const res = await request(app.getHttpServer())
@@ -123,7 +123,7 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
 
   it('role 지정 없는 기존 라우트(GET /items)는 인증만 되면 그대로 통과해야 한다', async () => {
     const email = `rbac-regression-${Date.now()}@test.com`;
-    const token = await registerAndLogin(email); // USER
+    const token = await registerAndLogin(email); // STAFF
 
     await request(app.getHttpServer())
       .get('/items')
@@ -131,10 +131,10 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
       .expect(200);
   });
 
-  // PR-070: users.controller.ts 전체에 RolesGuard(MANAGER, ADMIN)를 적용한 회귀 테스트.
-  it('USER 권한으로 GET /users를 호출하면 403이어야 한다', async () => {
+  // PR-070: users.controller.ts 전체에 RolesGuard(ADMIN, MASTER)를 적용한 회귀 테스트.
+  it('STAFF 권한으로 GET /users를 호출하면 403이어야 한다', async () => {
     const email = `rbac-users-forbidden-${Date.now()}@test.com`;
-    const token = await registerAndLogin(email); // USER
+    const token = await registerAndLogin(email); // STAFF
 
     await request(app.getHttpServer())
       .get('/users')
@@ -142,9 +142,9 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
       .expect(403);
   });
 
-  it('MANAGER 권한으로 GET /users를 호출하면 정상 통과해야 한다', async () => {
+  it('ADMIN 권한으로 GET /users를 호출하면 정상 통과해야 한다', async () => {
     const email = `rbac-users-allowed-${Date.now()}@test.com`;
-    const token = await registerAndLogin(email, UserRole.MANAGER);
+    const token = await registerAndLogin(email, UserRole.ADMIN);
 
     await request(app.getHttpServer())
       .get('/users')
@@ -152,23 +152,59 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
       .expect(200);
   });
 
-  it('MANAGER가 다른 사용자의 role을 USER에서 MANAGER로 변경할 수 있어야 한다', async () => {
-    const managerEmail = `rbac-role-changer-${Date.now()}@test.com`;
-    const managerToken = await registerAndLogin(managerEmail, UserRole.MANAGER);
+  // PR-153: role 변경은 MASTER만 가능(ADMIN도 불가) — "모든 권한 변경은 마스터 사용자의
+  // 승인으로 진행"을 소프트웨어로 강제하는 부분의 회귀 테스트.
+  it('ADMIN은 다른 사용자의 role을 변경할 수 없어야 한다(403)', async () => {
+    const adminEmail = `rbac-role-changer-forbidden-${Date.now()}@test.com`;
+    const adminToken = await registerAndLogin(adminEmail, UserRole.ADMIN);
 
-    const targetEmail = `rbac-role-target-${Date.now()}@test.com`;
-    await registerAndLogin(targetEmail); // USER (기본값)
+    const targetEmail = `rbac-role-target-forbidden-${Date.now()}@test.com`;
+    await registerAndLogin(targetEmail); // STAFF (기본값)
+    const target = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
+
+    await request(app.getHttpServer())
+      .patch(`/users/${target.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ role: UserRole.ADMIN })
+      .expect(403);
+
+    const untouched = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
+    expect(untouched.role).toBe(UserRole.STAFF);
+  });
+
+  it('ADMIN도 role 외의 필드(isActive)는 여전히 수정할 수 있어야 한다', async () => {
+    const adminEmail = `rbac-role-other-fields-${Date.now()}@test.com`;
+    const adminToken = await registerAndLogin(adminEmail, UserRole.ADMIN);
+
+    const targetEmail = `rbac-role-other-fields-target-${Date.now()}@test.com`;
+    await registerAndLogin(targetEmail);
     const target = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
 
     const res = await request(app.getHttpServer())
       .patch(`/users/${target.id}`)
-      .set('Authorization', `Bearer ${managerToken}`)
-      .send({ role: UserRole.MANAGER })
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ isActive: false })
       .expect(200);
-    expect(res.body.data.role).toBe(UserRole.MANAGER);
+    expect(res.body.data.isActive).toBe(false);
+  });
+
+  it('MASTER가 다른 사용자의 role을 STAFF에서 ADMIN으로 변경할 수 있어야 한다', async () => {
+    const masterEmail = `rbac-role-changer-${Date.now()}@test.com`;
+    const masterToken = await registerAndLogin(masterEmail, UserRole.MASTER);
+
+    const targetEmail = `rbac-role-target-${Date.now()}@test.com`;
+    await registerAndLogin(targetEmail); // STAFF (기본값)
+    const target = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
+
+    const res = await request(app.getHttpServer())
+      .patch(`/users/${target.id}`)
+      .set('Authorization', `Bearer ${masterToken}`)
+      .send({ role: UserRole.ADMIN })
+      .expect(200);
+    expect(res.body.data.role).toBe(UserRole.ADMIN);
 
     const updated = await dataSource.getRepository(User).findOne({ where: { email: targetEmail } });
-    expect(updated.role).toBe(UserRole.MANAGER);
+    expect(updated.role).toBe(UserRole.ADMIN);
   });
 
   // PR-071: User.password에 select:false를 적용한 회귀 테스트. GET /users(목록/단건),
@@ -177,7 +213,7 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
   describe('User 응답에서 password 필드 제외 (PR-071)', () => {
     it('GET /users 목록 응답의 각 항목에 password 키가 없어야 한다', async () => {
       const managerEmail = `pw-hide-list-manager-${Date.now()}@test.com`;
-      const managerToken = await registerAndLogin(managerEmail, UserRole.MANAGER);
+      const managerToken = await registerAndLogin(managerEmail, UserRole.ADMIN);
 
       const res = await request(app.getHttpServer())
         .get('/users')
@@ -192,7 +228,7 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
 
     it('GET /users/:id 단건 응답에 password 키가 없어야 한다', async () => {
       const managerEmail = `pw-hide-one-manager-${Date.now()}@test.com`;
-      const managerToken = await registerAndLogin(managerEmail, UserRole.MANAGER);
+      const managerToken = await registerAndLogin(managerEmail, UserRole.ADMIN);
       const manager = await dataSource.getRepository(User).findOne({ where: { email: managerEmail } });
 
       const res = await request(app.getHttpServer())
@@ -205,7 +241,7 @@ describe('RBAC(RolesGuard) 회귀 테스트 (PR-065)', () => {
 
     it('PATCH /users/:id 응답에도 password 키가 없어야 한다', async () => {
       const managerEmail = `pw-hide-patch-manager-${Date.now()}@test.com`;
-      const managerToken = await registerAndLogin(managerEmail, UserRole.MANAGER);
+      const managerToken = await registerAndLogin(managerEmail, UserRole.ADMIN);
 
       const targetEmail = `pw-hide-patch-target-${Date.now()}@test.com`;
       await registerAndLogin(targetEmail);

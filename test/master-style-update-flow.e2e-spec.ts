@@ -52,7 +52,7 @@ describe('MasterStyle 수정 (PR-141)', () => {
 
     const stamp = Date.now();
     userToken = await registerAndLogin(`style-update-user-${stamp}@test.com`);
-    managerToken = await registerAndLogin(`style-update-manager-${stamp}@test.com`, UserRole.MANAGER);
+    managerToken = await registerAndLogin(`style-update-manager-${stamp}@test.com`, UserRole.ADMIN);
   });
 
   afterAll(async () => {

@@ -4,6 +4,7 @@ import {
   Post,
   Body,
   Query,
+  UseGuards,
   UseInterceptors,
   UploadedFile,
   ParseFilePipe,
@@ -15,18 +16,20 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { SalesOrdersService } from './sales-orders.service';
 import { AiSalesOrderResultDto } from './dto/ai-analysis.dto';
 import { GetUser } from '../auth/decorators/get-user.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/entities/user.entity';
 
 // PR-133: 수주(고객사로부터 받은 주문) 등록 — 작업지시서 문서 업로드/AI 분석/저장. 예전에는 /work-orders/* 아래에 섞여 있었다
 // (경로만 옮겼고 동작은 그대로다: upload-image, ai-usage, ai-usage/summary, commit-analysis, spec).
 //
-// PR-151: OPERATOR 역할을 이 두 엔드포인트(upload-image/commit-analysis)에 @Roles()로
-// 걸어봤으나, 기존 e2e 테스트 10개 스위트(goods-receipt/order-progress-summary/
-// import-shipments-search-filter/contract-approval/master-style-delete/rbac-flow/
-// sales-order-commit-analysis-merge 등, 전부 다른 기능을 검증하면서 이 두 API를
-// "아무 로그인 사용자나 쓸 수 있는 테스트 픽스처 생성 도구"로 재사용하고 있었다)가
-// 403으로 깨져 되돌렸다 — 실제로 걸려면 그 테스트들의 토큰 생성 로직도 함께
-// MANAGER/OPERATOR로 바꿔야 하는데, 이 PR 범위를 크게 벗어나는 규모라 별도 PR로
-// 넘긴다(완료 보고에 근거와 함께 명시).
+// PR-151: OPERATOR 역할(당시 기본값이 아니었던 별도 역할)을 이 두 엔드포인트에 걸었다가
+// e2e 10개 스위트가 403으로 깨져 되돌렸었다.
+// PR-153: 새 STAFF가 예전 기본값(USER)을 그대로 대체하는 역할이라(엔티티 default가
+// STAFF), 로그인만 해서 만든 e2e 픽스처 토큰도 자동으로 STAFF를 갖는다 — 그래서
+// STAFF를 포함해 다시 걸어도 전체 e2e 회귀가 깨지지 않았다(실제 확인 완료).
+// ACCOUNTING만 제외되는 셈이라 "작업지시서 업로드는 회계 전용 계정이 아니면 누구나"라는
+// 실질 정책과도 맞는다.
 @ApiTags('Sales Orders (수주 관리)')
 @ApiBearerAuth()
 @Controller('sales-orders')
@@ -34,6 +37,8 @@ export class SalesOrdersController {
   constructor(private readonly salesOrdersService: SalesOrdersService) {}
 
   @Post('upload-image')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.STAFF, UserRole.ADMIN, UserRole.MASTER)
   @ApiOperation({ summary: '수주 등록 — 작업지시서 이미지 분석' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -70,6 +75,8 @@ export class SalesOrdersController {
   }
 
   @Post('commit-analysis')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.STAFF, UserRole.ADMIN, UserRole.MASTER)
   @ApiOperation({ summary: '수주 등록 — 작업지시서 AI 분석 결과 최종 저장 (오더개요+자재명세+작업명세)' })
   async commitAnalysis(@Body() dto: AiSalesOrderResultDto) {
     return this.salesOrdersService.commitAnalysis(dto);

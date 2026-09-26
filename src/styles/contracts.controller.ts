@@ -30,7 +30,7 @@ export class ContractsController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'Contract', table: 'contract', pkColumn: 'id' })
   @Patch(':id/approve')
   approve(@Param('id', ParseIntPipe) id: number, @GetUser() user: any) {
@@ -40,7 +40,7 @@ export class ContractsController {
   // PR-090: bulk-approve는 :id 세그먼트가 아니라 고정 경로라 ':id/approve'와
   // 세그먼트 수가 달라 라우트 순서와 무관하게 충돌하지 않는다.
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   // 여러 계약을 한 번에 승인하는 일괄 처리라 단일 대상 beforeValue를 특정할 수 없다.
   @AuditLog({ entityType: 'Contract(bulkApprove)' })
   @Patch('bulk-approve')
@@ -49,7 +49,7 @@ export class ContractsController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'Contract', table: 'contract', pkColumn: 'id' })
   @Patch(':id/reject')
   reject(@Param('id', ParseIntPipe) id: number) {
@@ -57,7 +57,7 @@ export class ContractsController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'Contract', table: 'contract', pkColumn: 'id' })
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {

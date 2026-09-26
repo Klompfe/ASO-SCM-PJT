@@ -65,7 +65,7 @@ describe('BOM 중복 검토 + 활성 BOM 선택 (PR-121)', () => {
     await app.init();
     dataSource = app.get(DataSource);
     userToken = await login();
-    managerToken = await login(UserRole.MANAGER);
+    managerToken = await login(UserRole.ADMIN);
 
     mat.a = await mkItem('BA-FABRIC', 'RAW_MATERIAL');
     mat.b = await mkItem('BA-LINING', 'RAW_MATERIAL');

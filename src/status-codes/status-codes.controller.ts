@@ -23,27 +23,27 @@ export class StatusCodesController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'StatusCode' })
-  @ApiOperation({ summary: '상태코드 등록 (MANAGER/ADMIN)' })
+  @ApiOperation({ summary: '상태코드 등록 (ADMIN/MASTER)' })
   create(@Body() dto: CreateStatusCodeDto) {
     return this.service.create(dto);
   }
 
   @Patch(':id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'StatusCode', table: 'status_codes', pkColumn: 'id' })
-  @ApiOperation({ summary: '상태코드 수정 — 라벨/정렬순서/활성여부만(도메인·코드값은 불변) (MANAGER/ADMIN)' })
+  @ApiOperation({ summary: '상태코드 수정 — 라벨/정렬순서/활성여부만(도메인·코드값은 불변) (ADMIN/MASTER)' })
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateStatusCodeDto) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'StatusCode', table: 'status_codes', pkColumn: 'id' })
-  @ApiOperation({ summary: '상태코드 삭제 — 사용 중이면 막힘(대신 비활성화 권장) (MANAGER/ADMIN)' })
+  @ApiOperation({ summary: '상태코드 삭제 — 사용 중이면 막힘(대신 비활성화 권장) (ADMIN/MASTER)' })
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.service.remove(id);
   }

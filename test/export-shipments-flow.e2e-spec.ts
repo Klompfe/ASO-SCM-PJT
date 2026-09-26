@@ -49,7 +49,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
     await request(app.getHttpServer())
       .post('/auth/register')
       .send({ email: managerEmail, password: 'password123!', name: 'Export E2E Manager' });
-    await dataSource.getRepository(User).update({ email: managerEmail }, { role: UserRole.MANAGER });
+    await dataSource.getRepository(User).update({ email: managerEmail }, { role: UserRole.ADMIN });
     managerToken = (
       await request(app.getHttpServer())
         .post('/auth/login')

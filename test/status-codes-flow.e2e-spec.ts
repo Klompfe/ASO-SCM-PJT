@@ -49,7 +49,7 @@ describe('상태코드 마스터 테이블 (PR-140)', () => {
 
     const stamp = Date.now();
     userToken = await registerAndLogin(`status-codes-user-${stamp}@test.com`);
-    managerToken = await registerAndLogin(`status-codes-manager-${stamp}@test.com`, UserRole.MANAGER);
+    managerToken = await registerAndLogin(`status-codes-manager-${stamp}@test.com`, UserRole.ADMIN);
   });
 
   afterAll(async () => {

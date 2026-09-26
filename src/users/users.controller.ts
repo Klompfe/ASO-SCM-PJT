@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  ForbiddenException,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -18,16 +19,22 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserRole } from './entities/user.entity';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { GetUser } from '../auth/decorators/get-user.decorator';
 import { AuditLog } from '../audit-log/audit-log.decorator';
 
 // PR-070: 공개 가입 경로는 /auth/register(@Public())로 별도 유지되므로, 이 컨트롤러의
-// 사용자 관리 엔드포인트(생성 포함)는 전부 MANAGER/ADMIN 전용으로 제한한다 — 지금까지는
+// 사용자 관리 엔드포인트(생성 포함)는 전부 ADMIN/MASTER 전용으로 제한한다 — 지금까지는
 // RBAC 가드가 전혀 걸려 있지 않아 인증만 되면 누구나 다른 사용자 목록/정보를 조회하거나
 // role을 바꿀 수 있는 상태였다.
+// PR-153: "모든 권한 변경은 마스터 사용자의 승인으로 진행"을 소프트웨어로 강제하기 위해,
+// PATCH :id 요청 본문에 role 필드가 있으면 ADMIN은 막고 MASTER만 허용한다(클래스 레벨
+// @Roles(ADMIN, MASTER)로는 필드 단위 구분이 안 돼 update()에서 별도 체크). 이 변경은
+// AuditLog로 자동 기록되므로 별도 승인 큐는 만들지 않는다(감사 로그 = 승인 기록으로 충분
+// 하다는 판단, 제시님 확인 완료) — 화면상의 승인 대기 워크플로는 이번 범위 밖.
 @ApiTags('Users')
 @ApiBearerAuth()
 @UseGuards(RolesGuard)
-@Roles(UserRole.MANAGER, UserRole.ADMIN)
+@Roles(UserRole.ADMIN, UserRole.MASTER)
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
@@ -68,7 +75,11 @@ export class UsersController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateUserDto: UpdateUserDto,
+    @GetUser() user: any,
   ): Promise<User> {
+    if (updateUserDto.role !== undefined && user.role !== UserRole.MASTER) {
+      throw new ForbiddenException('사용자 역할(role) 변경은 마스터 사용자만 할 수 있습니다.');
+    }
     return await this.usersService.update(id, updateUserDto);
   }
 

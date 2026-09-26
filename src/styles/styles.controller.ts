@@ -26,9 +26,9 @@ export class StylesController {
   }
 
   // PR-141: 스타일 정보 수정 — 삭제와 같은 파괴적 잠재력은 없지만(부분 필드만 바뀜),
-  // 계약/오더 정보와 맞물린 값이라 같은 RBAC 기준(MANAGER/ADMIN)을 적용한다.
+  // 계약/오더 정보와 맞물린 값이라 같은 RBAC 기준(ADMIN/MASTER)을 적용한다.
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'MasterStyle', table: 'master_style', pkColumn: 'styleNo' })
   @Patch(':styleNo')
   update(@Param('styleNo') styleNo: string, @Body() dto: UpdateMasterStyleDto) {
@@ -36,10 +36,10 @@ export class StylesController {
   }
 
   // [정리] 스타일 삭제는 Bom/BomItem/Contract/OrderProcessStage/OrderShipment까지
-  // 함께 지워지는 파괴적인 작업이라 MANAGER/ADMIN으로 제한한다(RBAC 관례는
+  // 함께 지워지는 파괴적인 작업이라 ADMIN/MASTER으로 제한한다(RBAC 관례는
   // contracts.controller.ts의 승인/거절/삭제와 동일).
   @UseGuards(RolesGuard)
-  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MASTER)
   @AuditLog({ entityType: 'MasterStyle', table: 'master_style', pkColumn: 'styleNo' })
   @Delete(':styleNo')
   @HttpCode(HttpStatus.OK)

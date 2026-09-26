@@ -66,7 +66,7 @@ describe('수입통관(ImportShipment) 회귀 테스트 (PR-082)', () => {
     await request(app.getHttpServer())
       .post('/auth/register')
       .send({ email, password: 'password123!', name: 'Import Shipments E2E' });
-    await dataSource.getRepository(User).update({ email }, { role: UserRole.MANAGER });
+    await dataSource.getRepository(User).update({ email }, { role: UserRole.ADMIN });
     token = (
       await request(app.getHttpServer())
         .post('/auth/login')

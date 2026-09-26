@@ -64,7 +64,7 @@ describe('HS코드 분류(HsCodeClassification) 회귀 테스트 (PR-081)', () =
       .send({ email: managerEmail, password: 'password123!', name: 'HsCode E2E Manager' });
     await dataSource
       .getRepository(User)
-      .update({ email: managerEmail }, { role: UserRole.MANAGER });
+      .update({ email: managerEmail }, { role: UserRole.ADMIN });
     managerToken = (
       await request(app.getHttpServer())
         .post('/auth/login')

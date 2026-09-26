@@ -111,7 +111,7 @@ describe('MasterStyle 삭제(cascade) 회귀 테스트 (정리 PR)', () => {
   });
 
   it('존재하지 않는 styleNo를 삭제하려 하면 404여야 한다', async () => {
-    const token = await registerAndLogin(`delete-404-${Date.now()}@test.com`, UserRole.MANAGER);
+    const token = await registerAndLogin(`delete-404-${Date.now()}@test.com`, UserRole.ADMIN);
     await request(app.getHttpServer())
       .delete('/master-styles/NO-SUCH-STYLE-EVER')
       .set('Authorization', `Bearer ${token}`)
@@ -119,7 +119,7 @@ describe('MasterStyle 삭제(cascade) 회귀 테스트 (정리 PR)', () => {
   });
 
   it('MANAGER 권한으로 삭제하면 200이고, 관련 하위 데이터(StyleOverview/Bom/BomItem/Contract/OrderProcessStage/OrderShipment)까지 실제로 전부 삭제되어야 한다', async () => {
-    const token = await registerAndLogin(`delete-manager-${Date.now()}@test.com`, UserRole.MANAGER);
+    const token = await registerAndLogin(`delete-manager-${Date.now()}@test.com`, UserRole.ADMIN);
     const styleNo = await createFullStyle(token);
 
     // 삭제 전: 6개 관련 테이블에 실제로 데이터가 있는지 먼저 확인한다(삭제 검증의 전제).
@@ -154,7 +154,7 @@ describe('MasterStyle 삭제(cascade) 회귀 테스트 (정리 PR)', () => {
   });
 
   it('삭제된 styleNo는 목록 조회에서도 더 이상 나타나지 않아야 한다', async () => {
-    const token = await registerAndLogin(`delete-reget-${Date.now()}@test.com`, UserRole.MANAGER);
+    const token = await registerAndLogin(`delete-reget-${Date.now()}@test.com`, UserRole.ADMIN);
     const styleNo = await createFullStyle(token);
 
     await request(app.getHttpServer())

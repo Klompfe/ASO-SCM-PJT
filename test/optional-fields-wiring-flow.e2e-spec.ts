@@ -7,10 +7,12 @@ process.env.DB_DATABASE = TEST_DB_PATH;
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
+import { User, UserRole } from '../src/users/entities/user.entity';
 
 // PR-106: 여러 화면(발주/원자재입고/납품포장내역/수출선적/입출금전표)에서 백엔드 DTO엔
 // 있지만 프론트 생성 폼에 입력란이 없어 절대 채워지지 않던 선택 필드들을 화면에 연결했다.
@@ -35,10 +37,13 @@ describe('화면에 누락되어 있던 선택 필드 일괄 연결 (PR-106)', (
     app.useGlobalInterceptors(new TransformInterceptor());
     await app.init();
 
+    // PR-153: 이 테스트가 커버하는 화면 중 입출금전표(/cash-vouchers) 등록은
+    // ACCOUNTING/MASTER 전용으로 가드가 걸려 있어(기본값 STAFF로는 403) role을 올려 사용한다.
     const email = `optional-fields-e2e-${Date.now()}@test.com`;
     await request(app.getHttpServer())
       .post('/auth/register')
       .send({ email, password: 'password123!', name: 'Optional Fields E2E' });
+    await moduleFixture.get(DataSource).getRepository(User).update({ email }, { role: UserRole.ACCOUNTING });
     token = (
       await request(app.getHttpServer())
         .post('/auth/login')

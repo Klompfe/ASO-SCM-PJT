@@ -55,7 +55,7 @@ describe('수출선적서류 기 작성 엑셀 가져오기(import) 회귀 테�
     await request(app.getHttpServer())
       .post('/auth/register')
       .send({ email: managerEmail, password: 'password123!', name: 'Import E2E Manager' });
-    await dataSource.getRepository(User).update({ email: managerEmail }, { role: UserRole.MANAGER });
+    await dataSource.getRepository(User).update({ email: managerEmail }, { role: UserRole.ADMIN });
     managerToken = (
       await request(app.getHttpServer())
         .post('/auth/login')

@@ -54,7 +54,7 @@ describe('계약 일괄승인 (PR-090)', () => {
     };
 
     userToken = await registerAndLogin(`bulk-approve-user-${Date.now()}@test.com`);
-    managerToken = await registerAndLogin(`bulk-approve-manager-${Date.now()}@test.com`, UserRole.MANAGER);
+    managerToken = await registerAndLogin(`bulk-approve-manager-${Date.now()}@test.com`, UserRole.ADMIN);
   });
 
   afterAll(async () => {

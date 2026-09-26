@@ -48,7 +48,7 @@ describe('HS코드 분류 삭제 (PR-141)', () => {
 
     const stamp = Date.now();
     userToken = await registerAndLogin(`hscode-delete-user-${stamp}@test.com`);
-    managerToken = await registerAndLogin(`hscode-delete-manager-${stamp}@test.com`, UserRole.MANAGER);
+    managerToken = await registerAndLogin(`hscode-delete-manager-${stamp}@test.com`, UserRole.ADMIN);
   });
 
   afterAll(async () => {
