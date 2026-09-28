@@ -109,3 +109,80 @@ describe('ExportShipmentsService.findAll — 검색 필터 (PR-102)', () => {
     expect(shipmentRepo.find).not.toHaveBeenCalled();
   });
 });
+
+// PR-157: 환율 입력/수정 시 재계산 규칙(사람이 확정한 라인은 건드리지 않음) + USD 단가 수동확정.
+describe('ExportShipmentsService.updateExchangeRate / confirmLinePrice (PR-157)', () => {
+  let service: ExportShipmentsService;
+  let shipmentRepo: Repository<ExportShipment>;
+  let lineRepo: Repository<ExportShipmentLine>;
+  let receiptRepo: Repository<PackingReceipt>;
+  let poRepo: Repository<PurchaseOrder>;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExportShipmentsService,
+        { provide: getRepositoryToken(PurchaseOrder), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(PackingReceipt), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(BomItem), useValue: {} },
+        { provide: getRepositoryToken(ExportShipment), useValue: { findOne: jest.fn(), save: jest.fn((x) => x) } },
+        { provide: getRepositoryToken(ExportShipmentLine), useValue: { findOne: jest.fn(), save: jest.fn((x) => x) } },
+        { provide: ExportShipmentDefaultsService, useValue: {} },
+        { provide: BrandPrefixRulesService, useValue: {} },
+      ],
+    }).compile();
+
+    service = module.get(ExportShipmentsService);
+    shipmentRepo = module.get(getRepositoryToken(ExportShipment));
+    lineRepo = module.get(getRepositoryToken(ExportShipmentLine));
+    receiptRepo = module.get(getRepositoryToken(PackingReceipt));
+    poRepo = module.get(getRepositoryToken(PurchaseOrder));
+  });
+
+  describe('updateExchangeRate', () => {
+    it('PURCHASE_ORDER/미확정 라인만 새 환율로 재계산하고, MANUAL/MIDO_PRICE_TABLE로 이미 확정된 라인은 건드리지 않는다', async () => {
+      const lines = [
+        { id: 1, qty: 100, packingReceiptId: 10, priceSource: null },
+        { id: 2, qty: 50, packingReceiptId: 11, priceSource: 'MANUAL', unitPriceUsd: 9.99 },
+      ];
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, status: 'DRAFT', invoiceDate: null, lines });
+      (receiptRepo.findOne as jest.Mock).mockResolvedValue({ id: 10, purchaseOrderId: 100 });
+      (poRepo.findOne as jest.Mock).mockResolvedValue({ id: 100, unitPrice: 1300 });
+
+      await service.updateExchangeRate(1, { exchangeRateUsdKrw: 1300 });
+
+      expect(lines[0].unitPriceUsd).toBe(1); // 1300 ÷ 1300
+      expect((lines[0] as any).amountUsd).toBe(100); // 1 × qty(100)
+      expect(lines[0].priceSource).toBe('PURCHASE_ORDER');
+      expect(lines[1].unitPriceUsd).toBe(9.99); // 그대로 유지
+      expect(poRepo.findOne).toHaveBeenCalledTimes(1); // MANUAL 라인은 조회조차 안 함
+    });
+
+    it('FINALIZED 상태면 수정할 수 없다', async () => {
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, status: 'FINALIZED', lines: [] });
+      await expect(service.updateExchangeRate(1, { exchangeRateUsdKrw: 1300 })).rejects.toThrow(
+        'FINALIZED 상태의 문서는 더 이상 수정할 수 없습니다.',
+      );
+    });
+  });
+
+  describe('confirmLinePrice', () => {
+    it('사람이 확정한 USD 단가로 unitPriceUsd/amountUsd/priceSource를 저장한다(범위 중 하나를 서버가 고르지 않음)', async () => {
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, status: 'DRAFT' });
+      (lineRepo.findOne as jest.Mock).mockResolvedValue({ id: 5, exportShipmentId: 1, qty: 10 });
+
+      const result = await service.confirmLinePrice(1, 5, { source: 'MIDO_PRICE_TABLE' as any, unitPriceUsd: 2.5, midoPriceItemId: 3 });
+
+      expect(result.unitPriceUsd).toBe(2.5);
+      expect(result.amountUsd).toBe(25);
+      expect(result.priceSource).toBe('MIDO_PRICE_TABLE');
+    });
+
+    it('FINALIZED 상태면 수정할 수 없다', async () => {
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, status: 'FINALIZED' });
+      await expect(
+        service.confirmLinePrice(1, 5, { source: 'MANUAL' as any, unitPriceUsd: 1 }),
+      ).rejects.toThrow('FINALIZED 상태의 문서는 더 이상 수정할 수 없습니다.');
+    });
+  });
+});

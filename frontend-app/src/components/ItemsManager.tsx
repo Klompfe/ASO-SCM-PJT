@@ -62,7 +62,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
   // PR-073: 자재명세(BOM) 상세 테이블의 혼용율/HS코드 인라인 수정.
   const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
-  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string }>({ composition: '', hsCode: '' });
+  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string }>({ composition: '', hsCode: '', threadType: '' });
   // PR-099: "라벨류 기본 세트 추가" 버튼 처리 중 표시.
   const [addingLabelSet, setAddingLabelSet] = useState(false);
 
@@ -221,18 +221,22 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
   const startEditBomItem = (row: BomItemRow) => {
     setEditingBomItemId(row.id);
-    setEditBomItemForm({ composition: row.composition || '', hsCode: row.hsCode || '' });
+    setEditBomItemForm({ composition: row.composition || '', hsCode: row.hsCode || '', threadType: row.threadType || '' });
   };
 
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
-    setEditBomItemForm({ composition: '', hsCode: '' });
+    setEditBomItemForm({ composition: '', hsCode: '', threadType: '' });
   };
 
   const handleUpdateBomItem = async (id: number) => {
     try {
-      await updateBomItem(id, { composition: editBomItemForm.composition, hsCode: editBomItemForm.hsCode });
-      toast.success('혼용율/HS코드가 수정되었습니다.');
+      await updateBomItem(id, {
+        composition: editBomItemForm.composition,
+        hsCode: editBomItemForm.hsCode,
+        ...(editBomItemForm.threadType ? { threadType: editBomItemForm.threadType as any } : {}),
+      });
+      toast.success('혼용율/HS코드/실 종류가 수정되었습니다.');
       cancelEditBomItem();
       if (selectedStyleNo) {
         const res = await getBomByStyleNo(selectedStyleNo);
@@ -512,6 +516,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                     <th className="px-4 py-2 text-left">비고</th>
                     <th className="px-4 py-2 text-left">혼용율</th>
                     <th className="px-4 py-2 text-left">HS코드</th>
+                    <th className="px-4 py-2 text-left">실 종류</th>
                     <th className="px-4 py-2 text-left">Action</th>
                   </tr>
                 </thead>
@@ -545,6 +550,19 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                             onChange={(e) => setEditBomItemForm({ ...editBomItemForm, hsCode: e.target.value })}
                           />
                         </td>
+                        <td className="px-4 py-2">
+                          <select
+                            className="border rounded px-2 py-1"
+                            aria-label="실 종류"
+                            value={editBomItemForm.threadType}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, threadType: e.target.value })}
+                          >
+                            <option value="">해당없음/미지정</option>
+                            <option value="COA_SA">코아사 (2500M/콘)</option>
+                            <option value="OBA_SA_SKU_I_SA">오바사·스쿠이사 (4000M/콘)</option>
+                            <option value="POLY_JINUIDO">폴리지누이도 (500M/콘)</option>
+                          </select>
+                        </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                           <button className="text-blue-600" onClick={() => handleUpdateBomItem(it.id)}>저장</button>
                           <button className="text-gray-500" onClick={cancelEditBomItem}>취소</button>
@@ -564,6 +582,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                         <td className="px-4 py-2">{it.remarks}</td>
                         <td className="px-4 py-2">{it.composition ?? '-'}</td>
                         <td className="px-4 py-2">{it.hsCode ?? '-'}</td>
+                        <td className="px-4 py-2">
+                          {it.threadType === 'COA_SA' ? '코아사' : it.threadType === 'OBA_SA_SKU_I_SA' ? '오바사·스쿠이사' : it.threadType === 'POLY_JINUIDO' ? '폴리지누이도' : '-'}
+                        </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                           <button className="text-blue-600" onClick={() => startEditBomItem(it)}>수정</button>
                           {onOrderItem && it.material?.id && (

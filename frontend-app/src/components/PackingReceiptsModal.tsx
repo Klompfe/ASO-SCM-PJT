@@ -11,7 +11,7 @@ import {
 } from '../api/packingReceipts.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
-const emptyRoll: CreatePackingReceiptRoll = { rollNo: '', color: '', widthCm: undefined, widthInch: undefined, grossWeight: undefined, netWeight: undefined, thickness: undefined };
+const emptyRoll: CreatePackingReceiptRoll = { rollNo: '', color: '', widthCm: undefined, widthInch: undefined, grossWeight: undefined, netWeight: undefined, thickness: undefined, lengthYd: undefined };
 const emptyCarton: CreatePackingReceiptCarton = { cartonNo: '', color: '', size: '', lotNo: '', qty: 0, itemName: '', weightKg: undefined };
 
 interface PackingReceiptsModalProps {
@@ -30,6 +30,8 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
   const [category, setCategory] = useState<PackingMaterialCategory>('FABRIC');
   const [receivedDate, setReceivedDate] = useState('');
   const [remark, setRemark] = useState('');
+  // PR-157: 공급업체 제공 CBM(수동 입력) — 없는 업체는 비워둔다.
+  const [cbm, setCbm] = useState('');
   const [rolls, setRolls] = useState<CreatePackingReceiptRoll[]>([{ ...emptyRoll }]);
   const [cartons, setCartons] = useState<CreatePackingReceiptCarton[]>([{ ...emptyCarton }]);
   const [submitting, setSubmitting] = useState(false);
@@ -58,6 +60,7 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
   const resetDirectInputForm = () => {
     setReceivedDate('');
     setRemark('');
+    setCbm('');
     setRolls([{ ...emptyRoll }]);
     setCartons([{ ...emptyCarton }]);
   };
@@ -66,10 +69,11 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
     e.preventDefault();
     setSubmitting(true);
     try {
+      const cbmValue = cbm.trim() === '' ? undefined : Number(cbm);
       const payload =
         category === 'FABRIC'
-          ? { materialCategory: category, receivedDate: receivedDate || undefined, remark: remark || undefined, rolls: rolls.filter((r) => r.rollNo.trim() !== '') }
-          : { materialCategory: category, receivedDate: receivedDate || undefined, remark: remark || undefined, cartons: cartons.filter((c) => c.cartonNo.trim() !== '') };
+          ? { materialCategory: category, receivedDate: receivedDate || undefined, remark: remark || undefined, cbm: cbmValue, rolls: rolls.filter((r) => r.rollNo.trim() !== '') }
+          : { materialCategory: category, receivedDate: receivedDate || undefined, remark: remark || undefined, cbm: cbmValue, cartons: cartons.filter((c) => c.cartonNo.trim() !== '') };
       await createPackingReceipt(purchaseOrderId, payload);
       toast.success('포장내역이 등록되었습니다.');
       resetDirectInputForm();
@@ -131,9 +135,9 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
                   <span className="text-gray-500 text-xs">{r.receivedDate ?? '-'} {r.remark ? `· ${r.remark}` : ''}</span>
                 </div>
                 {r.materialCategory === 'FABRIC' ? (
-                  <div>롤 {r.totals.rollCount}개 · GROSS {r.totals.totalGrossWeight?.toFixed(2)} · NET {r.totals.totalNetWeight?.toFixed(2)}</div>
+                  <div>롤 {r.totals.rollCount}개 · 길이 {r.totals.totalLengthYd ? `${r.totals.totalLengthYd.toFixed(2)}YD` : '미입력'} · GROSS {r.totals.totalGrossWeight?.toFixed(2)} · NET {r.totals.totalNetWeight?.toFixed(2)} · CBM {r.cbm ?? '-'}</div>
                 ) : (
-                  <div>카톤 {r.totals.cartonCount}개({r.totals.lineCount}라인) · 수량 {r.totals.totalQty} · 중량 {r.totals.totalWeightKg?.toFixed(2) ?? '-'}kg</div>
+                  <div>카톤 {r.totals.cartonCount}개({r.totals.lineCount}라인) · 수량 {r.totals.totalQty} · 중량 {r.totals.totalWeightKg?.toFixed(2) ?? '-'}kg · CBM {r.cbm ?? '-'}</div>
                 )}
               </div>
             ))}
@@ -173,12 +177,16 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
               <label className="text-xs text-gray-600 mb-1">비고</label>
               <input type="text" className="border p-2 rounded w-full" value={remark} onChange={(e) => setRemark(e.target.value)} />
             </div>
+            <div className="flex flex-col">
+              <label className="text-xs text-gray-600 mb-1">CBM (공급업체 제공값, 없으면 비워둠)</label>
+              <input type="number" step="0.01" placeholder="예: 12.5" className="border p-2 rounded w-28" value={cbm} onChange={(e) => setCbm(e.target.value)} />
+            </div>
           </div>
 
           {category === 'FABRIC' ? (
             <div className="space-y-2">
               {rolls.map((r, idx) => (
-                <div key={idx} className="grid grid-cols-7 gap-2">
+                <div key={idx} className="grid grid-cols-8 gap-2">
                   <input placeholder="롤No" className="border p-1 rounded text-sm" value={r.rollNo} onChange={(e) => updateRoll(idx, 'rollNo', e.target.value)} />
                   <input placeholder="컬러" className="border p-1 rounded text-sm" value={r.color ?? ''} onChange={(e) => updateRoll(idx, 'color', e.target.value)} />
                   <input placeholder="폭(cm)" type="number" className="border p-1 rounded text-sm" value={r.widthCm ?? ''} onChange={(e) => updateRoll(idx, 'widthCm', e.target.value)} />
@@ -186,6 +194,7 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
                   <input placeholder="Gross" type="number" className="border p-1 rounded text-sm" value={r.grossWeight ?? ''} onChange={(e) => updateRoll(idx, 'grossWeight', e.target.value)} />
                   <input placeholder="Net" type="number" className="border p-1 rounded text-sm" value={r.netWeight ?? ''} onChange={(e) => updateRoll(idx, 'netWeight', e.target.value)} />
                   <input placeholder="두께" type="number" className="border p-1 rounded text-sm" value={r.thickness ?? ''} onChange={(e) => updateRoll(idx, 'thickness', e.target.value)} />
+                  <input placeholder="길이(YD)" aria-label="길이(YD)" type="number" className="border p-1 rounded text-sm" value={r.lengthYd ?? ''} onChange={(e) => updateRoll(idx, 'lengthYd', e.target.value)} />
                 </div>
               ))}
               <button type="button" onClick={() => setRolls([...rolls, { ...emptyRoll }])} className="text-blue-600 text-sm">+ 롤 추가</button>

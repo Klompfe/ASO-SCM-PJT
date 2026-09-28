@@ -209,6 +209,48 @@ describe('자재명세 업로드/커밋 회귀 테스트 (PR-025/026/028/029/031
       expect(updatedItem.composition).toBe('COTTON 100%');
       expect(updatedItem.hsCode).toBe('5208.11');
     });
+
+    // PR-157: 실(THREAD) 콘가격 환산에 쓰는 실 종류 — 자재명 텍스트로 자동 분류할 수
+    // 없어(실 데이터 조사 결과) 사람이 직접 고른다. 값이 없으면(미지정) 그대로 null.
+    it('PATCH /boms/items/:id로 threadType(실 종류)을 지정/수정할 수 있고, 보내지 않으면 기존 값이 유지된다', async () => {
+      const bomRes = await request(app.getHttpServer())
+        .get('/boms')
+        .query({ styleNo })
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .expect(200);
+      const bomItem = bomRes.body.data.items[0];
+      expect(bomItem.threadType ?? null).toBeNull(); // 기본은 미지정
+
+      const patchRes = await request(app.getHttpServer())
+        .patch(`/boms/items/${bomItem.id}`)
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({ threadType: 'OBA_SA_SKU_I_SA' })
+        .expect(200);
+      expect(patchRes.body.data.threadType).toBe('OBA_SA_SKU_I_SA');
+
+      // composition만 보내고 threadType은 안 보내면(undefined) 기존 값이 유지되어야 한다.
+      const patchRes2 = await request(app.getHttpServer())
+        .patch(`/boms/items/${bomItem.id}`)
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({ composition: 'WOOL 100%' })
+        .expect(200);
+      expect(patchRes2.body.data.threadType).toBe('OBA_SA_SKU_I_SA');
+    });
+
+    it('잘못된 threadType 값은 400으로 거부되어야 한다', async () => {
+      const bomRes = await request(app.getHttpServer())
+        .get('/boms')
+        .query({ styleNo })
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .expect(200);
+      const bomItem = bomRes.body.data.items[0];
+
+      await request(app.getHttpServer())
+        .patch(`/boms/items/${bomItem.id}`)
+        .set('Authorization', `Bearer ${jwtToken}`)
+        .send({ threadType: 'NOT_A_REAL_TYPE' })
+        .expect(400);
+    });
   });
 
   // PR-098: 같은 styleNo로 작업지시서/매핑이 두 번째로 들어와도 기존 자재명세를

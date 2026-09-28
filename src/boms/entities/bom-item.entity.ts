@@ -2,6 +2,15 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
 import { Bom } from './bom.entity';
 import { Item } from '../../items/entities/item.entity';
 
+// PR-157: 콘(cone) 길이는 실 종류마다 다르다(사용자 확인 자료 기준). 향후 종류가
+// 늘거나 콘길이가 바뀔 수 있어 화면에서 고칠 수 있는 설정값으로 관리하는 게 이상적이지만,
+// 이번 PR은 우선 상수로 시작한다(완료 보고에서 별도 설정 테이블 필요 여부를 다시 제안).
+export enum ThreadType {
+  COA_SA = 'COA_SA', // 코아사
+  OBA_SA_SKU_I_SA = 'OBA_SA_SKU_I_SA', // 오바사 / 스쿠이사
+  POLY_JINUIDO = 'POLY_JINUIDO', // 폴리지누이도
+}
+
 @Entity('bom_item_details')
 export class BomItem {
   @PrimaryGeneratedColumn()
@@ -49,4 +58,13 @@ export class BomItem {
 
   @Column({ nullable: true })
   hsCode?: string;
+
+  // PR-157: 실(THREAD) 자재의 콘(cone) 단가 환산에 쓰는 실 종류. category/자재명 텍스트
+  // 만으로는 신뢰성 있게 자동 분류할 수 없다는 게 실 데이터 조사로 확인되었다(코아사/
+  // 오바사/스쿠이사/지누이도/QQ사/곤타사/노카사/오파사/화나사/여기사/토바사/스파시사 등
+  // 이 사양에 없는 이름까지 섞여 있고, "스쿠이사...지누이도"처럼 두 이름이 한 자재명에
+  // 같이 나오는 경우도 있음) — 그래서 자동 분류 대신 사람이 직접 고르는 필드로 둔다.
+  // 실이 아닌 자재는 항상 null. 값이 없는 실 자재는 콘가격을 계산하지 않고 경고만 띄운다.
+  @Column({ type: 'varchar', enum: ThreadType, nullable: true })
+  threadType?: ThreadType | null;
 }

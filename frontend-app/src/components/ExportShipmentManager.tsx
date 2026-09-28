@@ -6,10 +6,14 @@ import {
   generateExportShipment,
   updateExportShipmentStatus,
   updateExportShipmentLine,
+  updateExportShipmentExchangeRate,
+  confirmExportShipmentLinePrice,
   importExportShipmentFromFile,
   type ExportShipment,
+  type ExportShipmentLine,
   type GenerateExportShipment,
 } from '../api/exportShipments.service';
+import { findMidoPriceCandidates, type MidoPriceItem } from '../api/midoPriceTable.service';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { getCurrentUser, type CurrentUser } from '../api/auth.service';
 import { getExportShipmentDefaults } from '../api/exportShipmentDefaults.service';
@@ -33,6 +37,10 @@ export const ExportShipmentManager: React.FC = () => {
   const [selectedPoIds, setSelectedPoIds] = useState<number[]>([]);
   const [header, setHeader] = useState<GenerateExportShipment>(emptyHeader);
   const [generating, setGenerating] = useState(false);
+  // PR-157: 환율(USD/KRW) 수동 입력 — unipass.customs.go.kr 크롤링은 robots.txt로
+  // 막혀 있어(/csp/ 전체 차단) 구현하지 않았다. 문자열로 따로 관리하는 이유는
+  // GenerateExportShipment.exchangeRateUsdKrw가 number라 빈 입력을 그대로 두기 위함.
+  const [exchangeRateInput, setExchangeRateInput] = useState('');
 
   const [shipments, setShipments] = useState<ExportShipment[]>([]);
   const [selected, setSelected] = useState<ExportShipment | null>(null);
@@ -131,6 +139,7 @@ export const ExportShipmentManager: React.FC = () => {
       const payload = Object.fromEntries(
         Object.entries(header).filter(([, v]) => v !== ''),
       ) as GenerateExportShipment;
+      if (exchangeRateInput.trim() !== '') payload.exchangeRateUsdKrw = Number(exchangeRateInput);
       const res = await generateExportShipment(selectedPoIds, payload);
       const warnings: string[] = res.warnings ?? [];
       setGenerateWarnings(warnings);
@@ -141,6 +150,7 @@ export const ExportShipmentManager: React.FC = () => {
       );
       setSelectedPoIds([]);
       setHeader(emptyHeader);
+      setExchangeRateInput('');
       applyDefaultsToHeader();
       await loadShipments();
       setSelected(res);
@@ -212,6 +222,57 @@ export const ExportShipmentManager: React.FC = () => {
     }
   };
 
+  // PR-157: 문서 상세에서도 환율을 나중에 입력/수정할 수 있다 — PurchaseOrder 기준
+  // 자동계산 라인만 새 환율로 재계산되고, 이미 확정(MANUAL/MIDO_PRICE_TABLE)한 라인은 유지된다.
+  const [detailExchangeRateInput, setDetailExchangeRateInput] = useState('');
+  const handleUpdateExchangeRate = async () => {
+    if (!selected || detailExchangeRateInput.trim() === '') return;
+    try {
+      const res = await updateExportShipmentExchangeRate(selected.id, Number(detailExchangeRateInput));
+      toast.success('환율이 저장되었습니다.');
+      setSelected(res);
+      setDetailExchangeRateInput('');
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '환율 저장에 실패했습니다.'));
+    }
+  };
+
+  // PurchaseOrder 단가가 없는 라인의 USD 단가를 사람이 확정한다. 미도 단가표 후보는
+  // 참고용으로 보여주기만 하고(범위값/실 콘가격은 담당자가 직접 계산해 최종 숫자를
+  // 입력), 서버는 그 숫자를 그대로 저장한다 — 자동으로 하나를 고르지 않는다.
+  const [priceEditingLineId, setPriceEditingLineId] = useState<number | null>(null);
+  const [priceCandidates, setPriceCandidates] = useState<MidoPriceItem[]>([]);
+  const [manualUsdInput, setManualUsdInput] = useState('');
+
+  const openPriceEditor = async (line: ExportShipmentLine) => {
+    setPriceEditingLineId(line.id);
+    setManualUsdInput('');
+    try {
+      setPriceCandidates(await findMidoPriceCandidates(line.description));
+    } catch {
+      setPriceCandidates([]);
+    }
+  };
+
+  const handleConfirmLinePrice = async (source: 'MIDO_PRICE_TABLE' | 'MANUAL', midoPriceItemId?: number) => {
+    if (!selected || priceEditingLineId == null || manualUsdInput.trim() === '') {
+      toast.error('USD 단가를 입력해 주세요.');
+      return;
+    }
+    try {
+      const res = await confirmExportShipmentLinePrice(selected.id, priceEditingLineId, {
+        source,
+        unitPriceUsd: Number(manualUsdInput),
+        midoPriceItemId,
+      });
+      toast.success('USD 단가가 확정되었습니다.');
+      setSelected(res.exportShipmentId ? await getExportShipment(res.exportShipmentId) : selected);
+      setPriceEditingLineId(null);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, 'USD 단가 확정에 실패했습니다.'));
+    }
+  };
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-semibold text-gray-800">수출선적서류 (INVOICE / Packing List)</h2>
@@ -237,6 +298,15 @@ export const ExportShipmentManager: React.FC = () => {
           <input className="border p-2 rounded text-sm" placeholder="Carrier" value={header.carrier} onChange={(e) => setHeader({ ...header, carrier: e.target.value })} />
           <input type="date" className="border p-2 rounded text-sm" placeholder="Sailing Date" value={header.sailingDate} onChange={(e) => setHeader({ ...header, sailingDate: e.target.value })} />
           <input type="date" className="border p-2 rounded text-sm" placeholder="Invoice Date" value={header.invoiceDate} onChange={(e) => setHeader({ ...header, invoiceDate: e.target.value })} />
+          <input
+            type="number"
+            step="0.01"
+            className="border p-2 rounded text-sm"
+            placeholder="환율(USD/KRW, 수동 입력)"
+            aria-label="환율(USD/KRW)"
+            value={exchangeRateInput}
+            onChange={(e) => setExchangeRateInput(e.target.value)}
+          />
         </div>
         <button onClick={handleGenerate} disabled={generating} className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50">
           {generating ? '생성 중...' : '수출선적서류 생성'}
@@ -340,6 +410,27 @@ export const ExportShipmentManager: React.FC = () => {
               Invoice Date: {selected.invoiceDate ? selected.invoiceDate.slice(0, 10) : '-'} · Sailing Date: {selected.sailingDate ? selected.sailingDate.slice(0, 10) : '-'}
             </div>
 
+            <div className="flex items-end gap-2 mb-4 bg-gray-50 p-2 rounded text-sm">
+              <div>
+                환율(USD/KRW): <b>{selected.exchangeRateUsdKrw ?? '미입력'}</b>
+                {selected.exchangeRateDate && <span className="text-gray-400"> ({selected.exchangeRateDate.slice(0, 10)} 기준)</span>}
+              </div>
+              {selected.status !== 'FINALIZED' && (
+                <>
+                  <input
+                    type="number"
+                    step="0.01"
+                    aria-label="환율 수정"
+                    className="border p-1 rounded w-28"
+                    placeholder="새 환율"
+                    value={detailExchangeRateInput}
+                    onChange={(e) => setDetailExchangeRateInput(e.target.value)}
+                  />
+                  <button onClick={handleUpdateExchangeRate} className="bg-gray-700 text-white px-2 py-1 rounded text-xs hover:bg-gray-800">환율 저장</button>
+                </>
+              )}
+            </div>
+
             <div className="flex gap-2 mb-4">
               {selected.status === 'DRAFT' && (
                 <button onClick={() => handleStatusChange('REVIEWED')} className="bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600">검토완료로 전환</button>
@@ -356,14 +447,18 @@ export const ExportShipmentManager: React.FC = () => {
               <thead className="bg-gray-100 text-left">
                 <tr>
                   <th className="p-2">스타일</th>
+                  <th className="p-2">색상</th>
                   <th className="p-2">DESCRIPTION</th>
                   <th className="p-2">HS코드</th>
                   <th className="p-2 text-right">수량</th>
                   <th className="p-2">단위</th>
                   <th className="p-2 text-right">단가</th>
                   <th className="p-2 text-right">금액</th>
+                  <th className="p-2 text-right">USD 단가</th>
+                  <th className="p-2 text-right">USD 금액</th>
                   <th className="p-2 text-right">N.W(KG)</th>
                   <th className="p-2 text-right">G.W(KG)</th>
+                  <th className="p-2 text-right">CBM</th>
                   <th className="p-2">포장</th>
                 </tr>
               </thead>
@@ -371,6 +466,7 @@ export const ExportShipmentManager: React.FC = () => {
                 {selected.lines.map((l) => (
                   <tr key={l.id}>
                     <td className="p-2">{l.styleNo}</td>
+                    <td className="p-2">{l.color ?? '-'}</td>
                     <td className="p-2">{l.description}</td>
                     <td className="p-2">{l.hsCode ?? '-'}</td>
                     <td className="p-2 text-right">{l.qty}</td>
@@ -387,8 +483,24 @@ export const ExportShipmentManager: React.FC = () => {
                       />
                     </td>
                     <td className="p-2 text-right">{l.amount != null ? Number(l.amount).toFixed(2) : '-'}</td>
+                    <td className="p-2 text-right">
+                      {l.unitPriceUsd != null ? (
+                        <span>
+                          {Number(l.unitPriceUsd).toFixed(4)}
+                          <span className="block text-xs text-gray-400">{l.priceSource === 'PURCHASE_ORDER' ? '발주단가+환율' : l.priceSource === 'MIDO_PRICE_TABLE' ? '미도단가표' : '수동입력'}</span>
+                        </span>
+                      ) : selected.status !== 'FINALIZED' ? (
+                        <button onClick={() => openPriceEditor(l)} className="text-blue-600 text-xs underline" data-testid={`confirm-usd-price-${l.id}`}>
+                          USD단가 확정
+                        </button>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+                    <td className="p-2 text-right">{l.amountUsd != null ? Number(l.amountUsd).toFixed(2) : '-'}</td>
                     <td className="p-2 text-right">{l.netWeight != null ? Number(l.netWeight).toFixed(2) : '-'}</td>
                     <td className="p-2 text-right">{l.grossWeight != null ? Number(l.grossWeight).toFixed(2) : '-'}</td>
+                    <td className="p-2 text-right">{l.cbm != null ? Number(l.cbm).toFixed(2) : '-'}</td>
                     <td className="p-2">{l.packageCount ?? '-'} {l.packageType ?? ''}</td>
                   </tr>
                 ))}
@@ -396,6 +508,50 @@ export const ExportShipmentManager: React.FC = () => {
             </table>
 
             <button onClick={() => setSelected(null)} className="bg-gray-500 text-white px-4 py-2 rounded">닫기</button>
+          </div>
+        </div>
+      )}
+
+      {priceEditingLineId != null && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" role="dialog" aria-label="USD 단가 확정">
+          <div className="bg-white p-5 rounded w-full max-w-lg">
+            <h4 className="font-semibold mb-2">USD 단가 확정</h4>
+            <p className="text-xs text-gray-500 mb-3">
+              아래는 미도 단가표에서 찾은 참고 후보입니다(범위값/실(THREAD)은 콘길이를 곱해 직접 계산해 주세요 —
+              코아사 2500M, 오바사·스쿠이사 4000M, 폴리지누이도 500M 콘 기준). 서버는 자동으로 하나를 고르지 않으니
+              최종 숫자를 아래 입력란에 직접 넣어 확정해 주세요.
+            </p>
+            {priceCandidates.length > 0 ? (
+              <ul className="text-sm mb-3 space-y-1 max-h-40 overflow-y-auto">
+                {priceCandidates.map((c) => (
+                  <li key={c.id} className="flex items-center justify-between border rounded px-2 py-1">
+                    <span>{c.itemName} — ${c.priceUsdMin}{c.priceUsdMax !== c.priceUsdMin ? `~$${c.priceUsdMax}` : ''} / {c.unit}{c.note ? ` (${c.note})` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-gray-400 mb-3">일치하는 단가표 후보가 없습니다 — 직접 입력해 주세요.</p>
+            )}
+            <div className="flex items-center gap-2 mb-4">
+              <input
+                type="number"
+                step="0.0001"
+                aria-label="확정 USD 단가"
+                className="border p-2 rounded flex-1"
+                placeholder="확정할 USD 단가"
+                value={manualUsdInput}
+                onChange={(e) => setManualUsdInput(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setPriceEditingLineId(null)} className="px-3 py-2 rounded border">취소</button>
+              <button
+                onClick={() => handleConfirmLinePrice(priceCandidates.length > 0 ? 'MIDO_PRICE_TABLE' : 'MANUAL', priceCandidates[0]?.id)}
+                className="bg-blue-600 text-white px-3 py-2 rounded"
+              >
+                확정
+              </button>
+            </div>
           </div>
         </div>
       )}
