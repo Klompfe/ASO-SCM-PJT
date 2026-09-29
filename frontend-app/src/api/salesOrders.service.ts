@@ -15,6 +15,10 @@ export interface AiOverview {
   buyer: string | null;
   totalQty: number | null;
   targetRdd: string | null;
+  // PR-158: 문서 상단 작성일(targetRdd와 서로 다른 필드) + 서버가 계산해 내려주는
+  // "납기가 작성일/오늘보다 이르거나 같아 의심스러운지" 플래그.
+  documentDate: string | null;
+  targetRddSuspicious?: boolean;
 }
 
 export interface AiBomItem {

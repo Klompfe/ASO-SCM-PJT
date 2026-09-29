@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { ProductionType } from '../../styles/entities/style-overview.entity';
 
 // 작업지시서 한 건(=오더개요) 정보. AI 분석은 문서에서 읽지 못한 값은 null로 둔다.
@@ -14,6 +14,15 @@ export class AiOverviewDto {
   @ApiPropertyOptional() @IsOptional() @IsString() buyer: string | null;
   @ApiPropertyOptional() @IsOptional() @IsNumber() totalQty: number | null;
   @ApiPropertyOptional({ description: '납기(YYYY-MM-DD)' }) @IsOptional() @IsString() targetRdd: string | null;
+  // PR-158: 문서 상단에 적힌 작성일 — targetRdd(계획DELI 하위 '납기')와 서로 다른
+  // 필드로 AI가 독립적으로 인식하게 해서, 둘을 혼동했는지 코드로 검증할 수 있게 한다.
+  @ApiPropertyOptional({ description: '문서 상단 작성일(YYYY-MM-DD)' }) @IsOptional() @IsString() documentDate: string | null;
+  // 서버가 계산해 내려주는 값 — AI가 채우는 필드가 아니다(analyzeSalesOrder에서 덮어씀).
+  // 저장 요청(commit-analysis) 바디에도 포함될 수 있으나 commitAnalysis()가 무시한다.
+  @ApiPropertyOptional({ description: '납기가 문서작성일/오늘보다 이르거나 같아 의심스러운지(서버 계산)' })
+  @IsOptional()
+  @IsBoolean()
+  targetRddSuspicious?: boolean;
 }
 
 export class AiBomItemDto {

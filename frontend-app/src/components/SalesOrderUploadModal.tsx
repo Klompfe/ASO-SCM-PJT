@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { uploadSalesOrderImage, commitSalesOrderAnalysis, getAiUsageSummary, type AiSalesOrderResult, type AiUsageSummary } from '../api/salesOrders.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { updateOverviewField as updateOverviewFieldPure } from '../utils/salesOrderOverviewEdit';
 
 interface Props {
   isOpen: boolean;
@@ -80,6 +81,17 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     } finally {
       setLoading(false);
     }
+  };
+
+  // PR-158: 검토 화면(저장 전)에서 오더개요 값을 바로 고칠 수 있게 한다 — AI가 납기를
+  // 작성일로 잘못 인식하는 등 다른 필드에서도 오인식이 생길 수 있는데, 지금까지는
+  // 전부 읽기전용이라 일단 저장한 뒤 오더관리 화면에서 다시 고쳐야 했다.
+  const updateOverviewField = <K extends keyof AiSalesOrderResult['overview']>(
+    index: number,
+    field: K,
+    value: AiSalesOrderResult['overview'][K],
+  ) => {
+    setResults((prev) => updateOverviewFieldPure(prev, index, field, value));
   };
 
   const handleSave = async (index: number) => {
@@ -249,15 +261,96 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                   </div>
 
                   <div>
-                    <h5 className="text-sm font-semibold text-gray-700 mb-1">1) 오더개요</h5>
+                    <h5 className="text-sm font-semibold text-gray-700 mb-1">1) 오더개요 (저장 전 직접 수정 가능)</h5>
                     <div className="grid grid-cols-4 gap-2 text-sm bg-gray-50 p-2 rounded">
-                      <div><span className="text-gray-500">품목:</span> {result.overview.itemType ?? '-'}</div>
-                      <div><span className="text-gray-500">브랜드:</span> {result.overview.brand ?? '-'}</div>
-                      <div><span className="text-gray-500">생산유형:</span> {result.overview.productionType ?? '-'}</div>
-                      <div><span className="text-gray-500">공장:</span> {result.overview.factory ?? '-'}</div>
-                      <div><span className="text-gray-500">바이어:</span> {result.overview.buyer ?? '-'}</div>
-                      <div><span className="text-gray-500">총수량:</span> {result.overview.totalQty ?? '-'}</div>
-                      <div><span className="text-gray-500">납기:</span> {result.overview.targetRdd ?? '-'}</div>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">Style No.</span>
+                        <input
+                          className="border rounded px-2 py-1"
+                          value={result.overview.styleNo ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'styleNo', e.target.value || null)}
+                        />
+                      </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">스타일명</span>
+                        <input
+                          className="border rounded px-2 py-1"
+                          value={result.overview.styleName ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'styleName', e.target.value || null)}
+                        />
+                      </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">품목</span>
+                        <input
+                          className="border rounded px-2 py-1"
+                          value={result.overview.itemType ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'itemType', e.target.value || null)}
+                        />
+                      </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">브랜드</span>
+                        <input
+                          className="border rounded px-2 py-1"
+                          value={result.overview.brand ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'brand', e.target.value || null)}
+                        />
+                      </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">생산유형</span>
+                        <select
+                          className="border rounded px-2 py-1"
+                          value={result.overview.productionType ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'productionType', (e.target.value || null) as 'FOB' | 'CMT' | null)}
+                        >
+                          <option value="">-</option>
+                          <option value="FOB">FOB</option>
+                          <option value="CMT">CMT</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">공장</span>
+                        <input
+                          className="border rounded px-2 py-1"
+                          value={result.overview.factory ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'factory', e.target.value || null)}
+                        />
+                      </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">바이어</span>
+                        <input
+                          className="border rounded px-2 py-1"
+                          value={result.overview.buyer ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'buyer', e.target.value || null)}
+                        />
+                      </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">총수량</span>
+                        <input
+                          type="number"
+                          className="border rounded px-2 py-1"
+                          value={result.overview.totalQty ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'totalQty', e.target.value === '' ? null : Number(e.target.value))}
+                        />
+                      </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">
+                          납기
+                          {result.overview.documentDate && <span className="text-gray-400"> (작성일: {result.overview.documentDate}, 참고)</span>}
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="YYYY-MM-DD"
+                          data-testid={`target-rdd-input-${index}`}
+                          className={`border rounded px-2 py-1 ${result.overview.targetRddSuspicious ? 'border-red-500 bg-red-50' : ''}`}
+                          value={result.overview.targetRdd ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'targetRdd', e.target.value || null)}
+                        />
+                        {result.overview.targetRddSuspicious && (
+                          <span className="text-xs text-red-600 mt-0.5" data-testid={`target-rdd-warning-${index}`}>
+                            ⚠ 납기가 문서 작성일보다 빠르거나 과거 날짜입니다 — 확인해주세요
+                          </span>
+                        )}
+                      </label>
                     </div>
                   </div>
 
