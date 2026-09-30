@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, QueryRunner } from 'typeorm';
+import { Repository, DataSource, QueryRunner, SelectQueryBuilder } from 'typeorm';
 import { WorkOrder, WorkOrderStatus } from './entities/work-order.entity';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
 import { Item } from '../items/entities/item.entity';
@@ -49,14 +49,9 @@ export class WorkOrdersService {
     return await this.woRepository.save(wo);
   }
 
-  async findAll(filter?: GetWorkOrdersFilterDto) {
-    const page = filter?.page || 1;
-    const limit = filter?.limit || 10;
-    const skip = (page - 1) * limit;
-
-    const queryBuilder = this.woRepository.createQueryBuilder('wo')
-      .leftJoinAndSelect('wo.item', 'item');
-
+  // findAll()/findAllByStyle()이 공유하는 필터 조건. PR-159에서 findAll()의 기존 동작을
+  // 하나도 바꾸지 않고 그대로 뽑아냈다(WHERE 절 문자열까지 동일).
+  private applyWorkOrderFilters(queryBuilder: SelectQueryBuilder<WorkOrder>, filter?: GetWorkOrdersFilterDto) {
     if (filter?.status) {
       queryBuilder.andWhere('wo.status = :status', { status: filter.status });
     }
@@ -84,9 +79,18 @@ export class WorkOrdersService {
     if (itemCode) {
       queryBuilder.andWhere('LOWER(item.code) LIKE LOWER(:itemCode)', { itemCode: `%${itemCode}%` });
     }
-    const styleNo = filter?.styleNo?.trim();
-    if (styleNo) {
-      queryBuilder.andWhere('LOWER(item.styleNo) LIKE LOWER(:styleNo)', { styleNo: `%${styleNo}%` });
+    // PR-159: noStyleNo=true면 "스타일 미지정" 그룹 전용 조회라 styleNo LIKE 조건은
+    // 의미가 없다(무시) — item.styleNo IS NULL만 적용한다.
+    const styleNoExact = filter?.styleNoExact?.trim();
+    if (filter?.noStyleNo === 'true') {
+      queryBuilder.andWhere('item.styleNo IS NULL');
+    } else if (styleNoExact) {
+      queryBuilder.andWhere('item.styleNo = :styleNoExact', { styleNoExact });
+    } else {
+      const styleNo = filter?.styleNo?.trim();
+      if (styleNo) {
+        queryBuilder.andWhere('LOWER(item.styleNo) LIKE LOWER(:styleNo)', { styleNo: `%${styleNo}%` });
+      }
     }
 
     if (filter?.startDate) {
@@ -96,6 +100,19 @@ export class WorkOrdersService {
     if (filter?.endDate) {
       queryBuilder.andWhere('wo.createdAt <= :endDate', { endDate: filter.endDate });
     }
+
+    return queryBuilder;
+  }
+
+  async findAll(filter?: GetWorkOrdersFilterDto) {
+    const page = filter?.page || 1;
+    const limit = filter?.limit || 10;
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.applyWorkOrderFilters(
+      this.woRepository.createQueryBuilder('wo').leftJoinAndSelect('wo.item', 'item'),
+      filter,
+    );
 
     queryBuilder
       .orderBy('wo.id', 'DESC')
@@ -107,6 +124,67 @@ export class WorkOrdersService {
 
     return {
       items,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    };
+  }
+
+  // PR-159: 조회 화면을 "스타일번호 목록 → 클릭 시 세부 작업지시" 2단계로 개편하면서 생긴
+  // 집계 엔드포인트. findAll()과 같은 필터(상태/품목명/품목코드/스타일번호/기간)를 받아
+  // item.styleNo 단위로 묶어 건수/상태별 건수를 계산한다. 페이지네이션은 작업지시 낱개가
+  // 아니라 "스타일번호(그룹)" 단위로 적용한다. styleNo가 없는(품목이 스타일에 연결 안 된)
+  // 건은 "스타일 미지정" 그룹으로 묶어 항상 목록 맨 뒤에 둔다(그룹 자체가 스타일 최신순
+  // 정렬 기준이 없어 혼자만 특별 취급). 운영 데이터 규모(실측 0건, 완료 보고 참고)에서는
+  // 전체를 메모리에 올려 그룹핑해도 무리가 없다 — 규모가 커지면(수만 건) DB 레벨 GROUP BY로
+  // 바꾸는 후속 작업이 필요할 수 있다.
+  async findAllByStyle(filter?: GetWorkOrdersFilterDto) {
+    const page = filter?.page || 1;
+    const limit = filter?.limit || 10;
+
+    const queryBuilder = this.applyWorkOrderFilters(
+      this.woRepository.createQueryBuilder('wo').leftJoinAndSelect('wo.item', 'item'),
+      filter,
+    );
+    const all = await queryBuilder.orderBy('wo.id', 'DESC').getMany();
+
+    interface StyleGroup {
+      styleNo: string | null;
+      itemName: string | null;
+      itemCode: string | null;
+      count: number;
+      statusCounts: Record<string, number>;
+      maxId: number;
+    }
+    const groups = new Map<string, StyleGroup>();
+    for (const wo of all) {
+      const styleNo = wo.item?.styleNo ?? null;
+      const key = styleNo ?? '\0__NO_STYLE__';
+      let group = groups.get(key);
+      if (!group) {
+        group = { styleNo, itemName: wo.item?.name ?? null, itemCode: wo.item?.code ?? null, count: 0, statusCounts: {}, maxId: wo.id };
+        groups.set(key, group);
+      }
+      group.count += 1;
+      group.statusCounts[wo.status] = (group.statusCounts[wo.status] ?? 0) + 1;
+      if (wo.id > group.maxId) group.maxId = wo.id;
+    }
+
+    const withStyle = [...groups.values()].filter((g) => g.styleNo !== null).sort((a, b) => b.maxId - a.maxId);
+    const withoutStyle = [...groups.values()].filter((g) => g.styleNo === null);
+    const ordered = [...withStyle, ...withoutStyle].map(({ maxId, ...rest }) => rest);
+
+    const total = ordered.length;
+    const totalPages = Math.ceil(total / limit);
+    const skip = (page - 1) * limit;
+
+    return {
+      items: ordered.slice(skip, skip + limit),
       meta: {
         total,
         page,

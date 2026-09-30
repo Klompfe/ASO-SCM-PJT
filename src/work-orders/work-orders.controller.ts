@@ -37,6 +37,13 @@ export class WorkOrdersController {
     return this.woService.getStyleRequirements(styleNo, quantity ? Number(quantity) : undefined);
   }
 
+  // PR-159: ':id'보다 먼저 선언해야 "by-style"이 id로 해석되지 않는다(style-requirements와 동일한 이유).
+  @Get('by-style')
+  @ApiOperation({ summary: '작업지시를 스타일번호 단위로 집계 — 2단계(스타일 목록→세부) 화면 1단계용. findAll()과 같은 필터' })
+  findAllByStyle(@Query() filter: GetWorkOrdersFilterDto) {
+    return this.woService.findAllByStyle(filter);
+  }
+
   @Post()
   @ApiOperation({ summary: '작업 지시 생성' })
   @ApiResponse({ status: 201, type: WorkOrder })
