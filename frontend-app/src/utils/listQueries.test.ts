@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../api/workOrders.service', () => ({ getWorkOrders: vi.fn() }));
+vi.mock('../api/workOrders.service', () => ({ getWorkOrders: vi.fn(), getWorkOrdersByStyle: vi.fn() }));
 vi.mock('../api/items.service', () => ({ getItems: vi.fn() }));
 
-import { getWorkOrders } from '../api/workOrders.service';
+import { getWorkOrders, getWorkOrdersByStyle } from '../api/workOrders.service';
 import { getItems } from '../api/items.service';
-import { buildItemsQuery, buildWorkOrdersQuery, fetchItemPage, fetchWorkOrderPage, hasAnySearchCondition } from './listQueries';
+import { buildItemsQuery, buildWorkOrdersQuery, fetchItemPage, fetchWorkOrderByStylePage, fetchWorkOrderPage, hasAnySearchCondition } from './listQueries';
 
 const mocked = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 const meta = (page: number) => ({ total: 25, page, limit: 10, totalPages: 3, hasNextPage: page < 3, hasPreviousPage: page > 1 });
@@ -69,6 +69,26 @@ describe('listQueries — 목록 조회 파라미터 / 페이지 재조회 (PR-1
       const r = await fetchWorkOrderPage({ page: 1, keyword: 'zzz' });
       expect(r.items).toEqual([]);
       expect(r.meta.totalPages).toBe(0);
+    });
+  });
+
+  // PR-159: 1단계(스타일번호 목록) — 같은 필터 파라미터로 집계 엔드포인트를 부른다.
+  describe('fetchWorkOrderByStylePage', () => {
+    it('필터를 그대로 실어 by-style 엔드포인트를 호출하고 그룹 목록/meta를 돌려준다', async () => {
+      mocked(getWorkOrdersByStyle).mockResolvedValue({
+        items: [{ styleNo: 'MB62SLM103Z', itemName: '품목', itemCode: 'C1', count: 3, statusCounts: { PENDING: 3 } }],
+        meta: meta(1),
+      });
+      const r = await fetchWorkOrderByStylePage({ page: 1, styleNo: ' MB6 ' });
+      expect(getWorkOrdersByStyle).toHaveBeenCalledWith({ page: 1, limit: 10, status: undefined, keyword: undefined, itemName: undefined, itemCode: undefined, styleNo: 'MB6' });
+      expect(r.items).toHaveLength(1);
+      expect(r.items[0].count).toBe(3);
+    });
+
+    it('결과가 없으면 빈 목록', async () => {
+      mocked(getWorkOrdersByStyle).mockResolvedValue({ items: [], meta: { total: 0, page: 1, limit: 10, totalPages: 0, hasNextPage: false, hasPreviousPage: false } });
+      const r = await fetchWorkOrderByStylePage({ page: 1 });
+      expect(r.items).toEqual([]);
     });
   });
 
