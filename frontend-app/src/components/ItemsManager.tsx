@@ -17,6 +17,11 @@ import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagina
 
 interface ItemsManagerProps {
   onOrderItem?: (itemId: number) => void;
+  // 오더관리(수주 등록/오더 목록)에서 "자재명세 보기"를 누르면 넘어오는 styleNo —
+  // App.tsx의 poPrefillItemId/StylesManager의 initialStyleNo와 동일한 cross-tab 패턴.
+  // 이 값이 오면 검색 없이 바로 그 스타일의 BOM을 연다.
+  initialStyleNo?: string | null;
+  onInitialStyleNoConsumed?: () => void;
 }
 
 // PR-103: 백엔드 ItemType enum(item-type.enum.ts)과 동일한 값 — 구분 드롭다운 옵션.
@@ -26,7 +31,7 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   FINISHED_GOOD: '완제품',
 };
 
-export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
+export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initialStyleNo, onInitialStyleNoConsumed }) => {
   // 스타일별 자재명세(BOM) 조회
   const [searchStyleNo, setSearchStyleNo] = useState('');
   const [searchRddFrom, setSearchRddFrom] = useState('');
@@ -108,6 +113,18 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
       setBomError(getErrorMessage(err, '자재명세를 불러오는 데 실패했습니다.'));
     }
   };
+
+  // 오더관리에서 "자재명세 보기"로 넘어온 styleNo가 있으면 검색창 입력 없이 바로 그
+  // 스타일의 BOM을 연다. 한 번 처리하면 부모에게 소비했다고 알려 반복 오픈을 막는다
+  // (StylesManager의 initialStyleNo 처리와 동일한 패턴).
+  useEffect(() => {
+    if (!initialStyleNo) return;
+    setSearchStyleNo(initialStyleNo);
+    setSearched(true);
+    handleSelectStyleNo(initialStyleNo);
+    onInitialStyleNoConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialStyleNo]);
 
   const loadItems = useCallback(async () => {
     setLoading(true);

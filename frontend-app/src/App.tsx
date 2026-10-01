@@ -81,6 +81,16 @@ function App() {
     setOrderManagementSubTab('list');
   };
 
+  // 오더관리(수주 등록/오더 목록)에서 "자재명세 보기"를 누르면 Items(자재·BOM) 탭으로
+  // 전환하고 그 styleNo의 BOM을 바로 연다 — poPrefillItemId(Items→PurchaseOrders)와
+  // 동일한 cross-tab 패턴.
+  const [bomStyleNoToOpen, setBomStyleNoToOpen] = useState<string | null>(null);
+  const handleViewBom = (styleNo: string) => {
+    setBomStyleNoToOpen(styleNo);
+    setItemsSubTab('items');
+    setActiveTab('items');
+  };
+
   // PR-076: 상단 "Shipments" 탭을 "선적관리"로 개명하고 하위에 "수출"/"수입" 두 서브탭을
   // 둔다. "수출"은 PR-073~075에서 구축한 수출 선적서류(Invoice/Packing List) 자동생성
   // 기능(ExportShipmentManager, 옛 최상단 "수출선적서류" 탭)이고, "수입"은 완제품
@@ -158,7 +168,13 @@ function App() {
                 onClick={() => setItemsSubTab('bomDuplicates')}
               >BOM 중복 검토</button>
             </div>
-            {itemsSubTab === 'items' ? <ItemsManager onOrderItem={handleOrderItem} /> : <BomDuplicateReview />}
+            {itemsSubTab === 'items' ? (
+              <ItemsManager
+                onOrderItem={handleOrderItem}
+                initialStyleNo={bomStyleNoToOpen}
+                onInitialStyleNoConsumed={() => setBomStyleNoToOpen(null)}
+              />
+            ) : <BomDuplicateReview />}
           </div>
         );
         case 'workOrders': return (
@@ -193,7 +209,11 @@ function App() {
               >발주·입고·출고 현황</button>
             </div>
             {orderManagementSubTab === 'list' ? (
-              <StylesManager initialStyleNo={styleNoToOpen} onInitialStyleNoConsumed={() => setStyleNoToOpen(null)} />
+              <StylesManager
+                initialStyleNo={styleNoToOpen}
+                onInitialStyleNoConsumed={() => setStyleNoToOpen(null)}
+                onViewBom={handleViewBom}
+              />
             ) : orderManagementSubTab === 'summary' ? (
               <OrderProgressSummary onSelectStyle={handleSelectStyleFromSummary} />
             ) : (
