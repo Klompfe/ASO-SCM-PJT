@@ -370,7 +370,7 @@ export const CashVouchersManager: React.FC = () => {
           <p className="text-sm text-gray-500">등록된 입출금전표가 없습니다.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
+            <table className="border-collapse text-sm">
               <thead>
                 <tr className="bg-gray-100 text-left">
                   <th className="p-2">일자</th>

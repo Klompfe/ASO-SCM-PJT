@@ -299,7 +299,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-        <table className="w-full">
+        <table>
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="px-4 py-2 text-left">품목</th>

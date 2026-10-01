@@ -20,7 +20,8 @@ export const HsCodeMappingReport: React.FC<Props> = ({ items, total, filters }) 
 
   return (
     <PrintableReport title="HS코드 매핑 현황" subtitle={subtitle} columns={hsCodeReportColumns} rows={rows} fileName="HS코드_매핑_현황">
-      <table className="w-full text-sm border-collapse">
+      <div className="overflow-x-auto">
+      <table className="text-sm border-collapse">
         <thead>
           <tr className="text-left border-b border-gray-300 bg-gray-100">
             <th className="p-2">품종</th>
@@ -58,6 +59,7 @@ export const HsCodeMappingReport: React.FC<Props> = ({ items, total, filters }) 
           )}
         </tbody>
       </table>
+      </div>
     </PrintableReport>
   );
 };

@@ -75,7 +75,7 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
 
       {/* BOM Table */}
       <div className="overflow-x-auto">
-        <table className="w-full border text-sm">
+        <table className="border text-sm">
           <thead className="bg-gray-100">
             <tr>
               <th className="border p-2">카테고리</th>
