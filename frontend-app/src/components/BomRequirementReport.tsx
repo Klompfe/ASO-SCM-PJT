@@ -180,10 +180,10 @@ export const BomRequirementReport: React.FC = () => {
               <tr>
                 <th className={th}>자재명</th>
                 <th className={th}>카테고리</th>
-                <th className={`${th} text-right`}>제품 1개당 소요량</th>
-                <th className={`${th} text-right`}>필요 총수량</th>
-                <th className={`${th} text-right`}>이미 발주 수량</th>
-                <th className={`${th} text-right`}>부족 수량</th>
+                <th className={`${th} text-right whitespace-normal`}>제품 1개당<br />소요량</th>
+                <th className={`${th} text-right whitespace-normal`}>필요<br />총수량</th>
+                <th className={`${th} text-right whitespace-normal`}>이미 발주<br />수량</th>
+                <th className={`${th} text-right whitespace-normal`}>부족<br />수량</th>
               </tr>
             </thead>
             <tbody>
