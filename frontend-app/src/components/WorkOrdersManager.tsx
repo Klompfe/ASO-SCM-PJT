@@ -321,7 +321,8 @@ export const WorkOrdersManager: React.FC = () => {
                   ) : visibleExpandedOrders.length === 0 ? (
                     <p className="text-sm text-gray-400 py-2" data-testid="style-detail-empty">표시할 작업지시가 없습니다.</p>
                   ) : (
-                    <table className="w-full text-sm bg-white">
+                    <div className="overflow-x-auto">
+                    <table className="text-sm bg-white">
                       <thead className="bg-gray-100">
                         <tr>
                           <th className="px-3 py-1 text-left">ID</th>
@@ -355,6 +356,7 @@ export const WorkOrdersManager: React.FC = () => {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   )}
                 </div>
               )}

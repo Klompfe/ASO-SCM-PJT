@@ -585,10 +585,11 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
         <button type="button" onClick={handleResetFilters} className="bg-gray-200 text-gray-700 px-4 py-2 rounded font-medium hover:bg-gray-300">필터 초기화</button>
       </form>
 
-      <table className="w-full border-collapse border">
+      <div className="overflow-x-auto">
+      <table className="border-collapse border text-sm">
         <thead>
           <tr className="bg-gray-100">
-            <th>Style</th><th>Brand</th><th>Type</th><th>Factory</th><th>Buyer</th><th>RDD</th><th>D-Day</th><th>상태</th><th>출고율</th><th>납기상태</th>
+            <th className="px-2 py-1">Style</th><th className="px-2 py-1">Brand</th><th className="px-2 py-1">Type</th><th className="px-2 py-1">Factory</th><th className="px-2 py-1">Buyer</th><th className="px-2 py-1">RDD</th><th className="px-2 py-1">D-Day</th><th className="px-2 py-1">상태</th><th className="px-2 py-1">출고율</th><th className="px-2 py-1">납기상태</th>
           </tr>
         </thead>
         <tbody>
@@ -600,21 +601,22 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
             const { label: deliveryStatus, colorClass } = computeDeliveryStatus(orderQty, shippedQty, s.overview?.targetRdd);
             return (
               <tr key={s.styleNo} onClick={() => handleSelectStyle(s)} className="cursor-pointer hover:bg-gray-50">
-                <td>{s.styleNo}</td>
-                <td>{s.brand ?? '-'}</td>
-                <td>{s.overview?.productionType ?? '-'}</td>
-                <td>{s.overview?.factory ?? '-'}</td>
-                <td>{s.overview?.buyer ?? '-'}</td>
-                <td>{s.overview?.targetRdd ?? '-'}</td>
-                <td className={dday !== null && dday <= 7 ? 'text-red-500' : ''}>{dday ?? '-'}</td>
-                <td>{s.overview?.status ?? '-'}</td>
-                <td>{shipRate !== null ? `${shipRate}% (${shippedQty}/${orderQty})` : '-'}</td>
-                <td className={colorClass}>{deliveryStatus}</td>
+                <td className="px-2 py-1">{s.styleNo}</td>
+                <td className="px-2 py-1">{s.brand ?? '-'}</td>
+                <td className="px-2 py-1">{s.overview?.productionType ?? '-'}</td>
+                <td className="px-2 py-1">{s.overview?.factory ?? '-'}</td>
+                <td className="px-2 py-1">{s.overview?.buyer ?? '-'}</td>
+                <td className="px-2 py-1">{s.overview?.targetRdd ?? '-'}</td>
+                <td className={`px-2 py-1 ${dday !== null && dday <= 7 ? 'text-red-500' : ''}`}>{dday ?? '-'}</td>
+                <td className="px-2 py-1">{s.overview?.status ?? '-'}</td>
+                <td className="px-2 py-1">{shipRate !== null ? `${shipRate}% (${shippedQty}/${orderQty})` : '-'}</td>
+                <td className={`px-2 py-1 ${colorClass}`}>{deliveryStatus}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      </div>
 
       {selectedStyle && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
@@ -824,7 +826,8 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
             {shipments.length === 0 ? (
               <p className="text-sm text-gray-500 mb-3">등록된 출고가 없습니다.</p>
             ) : (
-              <table className="w-full text-sm mb-3 border-collapse">
+              <div className="overflow-x-auto">
+              <table className="text-sm mb-3 border-collapse">
                 <thead>
                   <tr className="bg-gray-100 text-left">
                     <th className="p-1">차수</th><th className="p-1">계획일</th><th className="p-1">실제일</th><th className="p-1">수량</th><th className="p-1">메모</th><th className="p-1"></th>
@@ -847,6 +850,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
             <div className="grid grid-cols-4 gap-2 mb-6">
               <input type="date" className="border p-2" aria-label="계획출고일" value={shipmentForm.plannedShipDate}

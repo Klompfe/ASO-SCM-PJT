@@ -132,7 +132,8 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
               <h4 className="text-sm font-semibold text-gray-700 mb-1">상태별 집계</h4>
-              <table className="w-full text-sm border-collapse" data-testid="status-summary">
+              <div className="overflow-x-auto">
+              <table className="text-sm border-collapse" data-testid="status-summary">
                 <thead><tr><th className={th}>상태</th><th className={`${th} text-right`}>건수</th><th className={`${th} text-right`}>금액 합계</th></tr></thead>
                 <tbody>
                   {byStatus.map((s) => (
@@ -144,10 +145,12 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
             <div>
               <h4 className="text-sm font-semibold text-gray-700 mb-1">공급업체별 발주 금액 <span className="font-normal text-xs text-gray-400">(취소 제외)</span></h4>
-              <table className="w-full text-sm border-collapse" data-testid="supplier-summary">
+              <div className="overflow-x-auto">
+              <table className="text-sm border-collapse" data-testid="supplier-summary">
                 <thead><tr><th className={th}>공급업체</th><th className={`${th} text-right`}>건수</th><th className={`${th} text-right`}>금액 합계</th></tr></thead>
                 <tbody>
                   {bySupplier.length === 0 && <tr><td className={`${td} text-gray-400`} colSpan={3}>해당 발주 없음</td></tr>}
@@ -163,6 +166,7 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
 
@@ -170,7 +174,8 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
           {orders.length === 0 ? (
             <p className="text-sm text-gray-500">조건에 맞는 발주가 없습니다.</p>
           ) : (
-            <table className="w-full text-sm border-collapse" data-testid="order-list">
+            <div className="overflow-x-auto">
+            <table className="text-sm border-collapse" data-testid="order-list">
               <thead>
                 <tr>
                   {['발주번호', '발주일', '품목', '수량', '단가', '금액', '공급업체', '상태', '비고'].map((h, i) => (
@@ -194,6 +199,7 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </PrintableReport>
       )}

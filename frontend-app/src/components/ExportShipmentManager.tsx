@@ -301,7 +301,7 @@ export const ExportShipmentManager: React.FC = () => {
       </form>
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-        <table className="w-full">
+        <table>
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="px-4 py-2 text-left">ID</th>
@@ -352,7 +352,7 @@ export const ExportShipmentManager: React.FC = () => {
               )}
             </div>
 
-            <table className="w-full text-sm mb-4">
+            <table className="text-sm mb-4">
               <thead className="bg-gray-100 text-left">
                 <tr>
                   <th className="p-2">스타일</th>

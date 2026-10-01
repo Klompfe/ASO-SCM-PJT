@@ -574,7 +574,8 @@ export const ImportShipmentManager: React.FC = () => {
 
                   <ImportShipmentVoyagePanel shipment={s} onSaved={() => load(appliedFilter)} />
 
-                  <table className="w-full text-sm">
+                  <div className="overflow-x-auto">
+                  <table className="text-sm">
                     <thead>
                       <tr className="text-left text-gray-500 border-b border-gray-100">
                         <th className="py-1 pr-2">품종</th>
@@ -616,6 +617,7 @@ export const ImportShipmentManager: React.FC = () => {
                       ))}
                     </tbody>
                   </table>
+                  </div>
 
                   {expandedShipmentId === s.id && <GoodsReceiptPanel importShipmentId={s.id} />}
                 </div>

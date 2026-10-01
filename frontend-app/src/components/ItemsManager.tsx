@@ -465,7 +465,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
 
       {searched && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <table className="w-full">
+          <table>
             <thead className="bg-gray-100 text-gray-700">
               <tr>
                 <th className="px-4 py-2 text-left">스타일 번호</th>
@@ -514,7 +514,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
           {bomError && <div className="p-4 bg-yellow-50 text-yellow-800 rounded-lg">{bomError}</div>}
           {bom && (
             <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-              <table className="w-full">
+              <table>
                 <thead className="bg-gray-100 text-gray-700">
                   <tr>
                     <th className="px-4 py-2 text-left">자재코드</th>
@@ -680,7 +680,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
           </form>
 
           <div className="overflow-x-auto">
-          <table className="w-full">
+          <table>
             <thead className="bg-gray-100 text-gray-700">
               <tr>
                 <th className="px-4 py-2 text-left">Code</th>

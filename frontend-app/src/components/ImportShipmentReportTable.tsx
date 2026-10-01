@@ -6,7 +6,8 @@ const fmt = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 2 
 
 // PR-114: 인쇄 전용 평면 표(화면에서는 기존 카드 목록을 그대로 쓰고 이 표는 숨긴다).
 export const ImportShipmentReportTable: React.FC<{ shipments: ImportShipment[] }> = ({ shipments }) => (
-  <table className="w-full text-sm border-collapse">
+  <div className="overflow-x-auto">
+  <table className="text-sm border-collapse">
     <thead>
       <tr className="bg-gray-100 text-left">
         {['스타일번호', '브랜드', 'INVOICE 번호', 'INVOICE 일자', 'POD(도착항)', 'ETD', 'ETA', '상태', '통관일', '수량', '금액'].map((h) => (
@@ -32,4 +33,5 @@ export const ImportShipmentReportTable: React.FC<{ shipments: ImportShipment[] }
       ))}
     </tbody>
   </table>
+  </div>
 );

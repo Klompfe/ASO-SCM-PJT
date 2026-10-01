@@ -22,7 +22,8 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick }) =>
   const td = 'px-2 py-1 text-sm border border-gray-200';
   return (
     <div className="max-h-96 overflow-y-auto">
-      <table className="w-full border-collapse" data-testid="shortage-table">
+      <div className="overflow-x-auto">
+      <table className="border-collapse" data-testid="shortage-table">
         <thead className="sticky top-0">
           <tr>
             <th className={th}>자재</th>
@@ -48,6 +49,7 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick }) =>
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 };

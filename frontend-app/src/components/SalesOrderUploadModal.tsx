@@ -277,7 +277,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                   <div>
                     <h5 className="text-sm font-semibold text-gray-700 mb-1">2) 자재명세 ({result.bomItems.length}건)</h5>
                     <div className="overflow-x-auto max-h-48 overflow-y-auto">
-                      <table className="w-full border text-sm">
+                      <table className="border text-sm">
                         <thead className="bg-gray-100"><tr><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">비고</th></tr></thead>
                         <tbody>
                           {result.bomItems.map((item, i) => (
@@ -298,7 +298,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                     <h5 className="text-sm font-semibold text-gray-700 mb-1">3) 작업명세</h5>
                     {result.sizeSpecs.length > 0 && (
                       <div className="overflow-x-auto max-h-40 overflow-y-auto mb-2">
-                        <table className="w-full border text-sm">
+                        <table className="border text-sm">
                           <thead className="bg-gray-100"><tr><th className="border p-1">부위</th><th className="border p-1">사이즈</th><th className="border p-1">지시서</th><th className="border p-1">견본</th><th className="border p-1">완성</th></tr></thead>
                           <tbody>
                             {result.sizeSpecs.map((row, i) => (
