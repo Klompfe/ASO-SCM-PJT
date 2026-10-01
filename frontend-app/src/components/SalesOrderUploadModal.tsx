@@ -7,11 +7,16 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  // 저장된 항목의 "자재명세 보기"를 누르면 호출된다 — StylesManager를 거쳐 App.tsx가
+  // Items(자재·BOM) 탭으로 전환하고 그 styleNo의 BOM을 바로 열어준다. 여기서 보여주는
+  // 자재명세는 AI 분석 결과 미리보기일 뿐이라, 실제 저장된(병합 규칙이 적용된) 값은
+  // 이 버튼으로 BOM 조회 화면에서 따로 확인해야 한다.
+  onViewBom?: (styleNo: string) => void;
 }
 
 // PR-134: 수주(고객사로부터 받은 주문) 등록 — 작업지시서 문서를 올려 AI로 분석하고 오더개요/자재명세/작업명세/계약으로 저장한다.
 // 예전에는 "작업지시" 탭(WorkOrdersManager)에 있었지만 이 흐름은 생산 실행 지시(WorkOrder)를 만들지 않는다 — 오더관리 탭으로 옮겼다.
-export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
+export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, onViewBom }) => {
   const [file, setFile] = useState<File | null>(null);
   const [results, setResults] = useState<AiSalesOrderResult[]>([]);
   const [step, setStep] = useState(1);
@@ -239,13 +244,21 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                       {index + 1}. {result.overview.styleNo ?? '(Style No. 인식 실패)'}
                       {result.overview.styleName ? ` — ${result.overview.styleName}` : ''}
                     </h4>
-                    <button
-                      onClick={() => handleSave(index)}
-                      disabled={savingIndex === index || savedIndexes.has(index) || isMock}
-                      className={`px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50 ${savedIndexes.has(index) ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
-                    >
-                      {savedIndexes.has(index) ? '저장됨' : savingIndex === index ? '저장 중...' : '저장'}
-                    </button>
+                    <div className="flex gap-2">
+                      {savedIndexes.has(index) && onViewBom && result.overview.styleNo && (
+                        <button
+                          onClick={() => onViewBom(result.overview.styleNo!)}
+                          className="px-4 py-2 rounded text-sm font-medium text-white bg-purple-600 hover:bg-purple-700"
+                        >자재명세 보기</button>
+                      )}
+                      <button
+                        onClick={() => handleSave(index)}
+                        disabled={savingIndex === index || savedIndexes.has(index) || isMock}
+                        className={`px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50 ${savedIndexes.has(index) ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
+                      >
+                        {savedIndexes.has(index) ? '저장됨' : savingIndex === index ? '저장 중...' : '저장'}
+                      </button>
+                    </div>
                   </div>
 
                   <div>

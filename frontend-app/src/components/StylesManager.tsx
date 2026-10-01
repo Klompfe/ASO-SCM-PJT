@@ -67,9 +67,12 @@ interface StylesManagerProps {
   // 연다 — App.tsx의 poPrefillItemId(Items→PurchaseOrders)와 동일한 패턴.
   initialStyleNo?: string | null;
   onInitialStyleNoConsumed?: () => void;
+  // 상세 모달의 "자재명세 보기"를 누르면 호출된다 — App.tsx가 Items(자재·BOM) 탭으로
+  // 전환하고 그 styleNo의 BOM을 바로 열어준다.
+  onViewBom?: (styleNo: string) => void;
 }
 
-export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, onInitialStyleNoConsumed }) => {
+export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, onInitialStyleNoConsumed, onViewBom }) => {
   const [formData, setFormData] = useState<CreateMasterStyle>(initialFormData);
   const [styles, setStyles] = useState<MasterStyle[]>([]);
   const [selectedStyle, setSelectedStyle] = useState<MasterStyle | null>(null);
@@ -475,6 +478,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
         isOpen={salesOrderModalOpen}
         onClose={() => setSalesOrderModalOpen(false)}
         onSuccess={() => loadStyles(buildFilter())}
+        onViewBom={onViewBom}
       />
       <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow mb-6">
         <div className="grid grid-cols-4 gap-4 mb-4">
@@ -617,13 +621,22 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
           <div className="bg-white p-6 rounded w-1/2 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-bold">{selectedStyle.styleNo} 상세</h3>
-              {canApprove && !editingStyle && (
-                <button
-                  type="button"
-                  onClick={() => setEditingStyle(true)}
-                  className="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
-                >수정</button>
-              )}
+              <div className="flex gap-2">
+                {onViewBom && (
+                  <button
+                    type="button"
+                    onClick={() => onViewBom(selectedStyle.styleNo)}
+                    className="text-sm px-3 py-1.5 rounded bg-purple-600 text-white hover:bg-purple-700"
+                  >자재명세 보기</button>
+                )}
+                {canApprove && !editingStyle && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingStyle(true)}
+                    className="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                  >수정</button>
+                )}
+              </div>
             </div>
 
             {editingStyle ? (
