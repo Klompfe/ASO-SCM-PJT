@@ -15,6 +15,12 @@ export class BrandPrefixRule {
   @Column({ default: false })
   isNumericStart: boolean;
 
+  // PR-165: 숫자로 시작하는 브랜드가 둘 이상(에잇세컨즈/뮤트)일 수 있어, 그중 더
+  // 구체적인 패턴을 가진 규칙을 구분하는 정규식 문자열(예: '^\\d{2}[FS]'). 비어
+  // 있으면(null) "숫자로 시작하면 다 이 브랜드"인 기존의 catch-all 규칙이다.
+  @Column({ nullable: true })
+  numericPattern?: string | null;
+
   @Column()
   brandName: string;
 
