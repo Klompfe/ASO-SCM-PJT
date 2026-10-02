@@ -243,10 +243,17 @@ export const ExportShipmentManager: React.FC = () => {
   const [priceEditingLineId, setPriceEditingLineId] = useState<number | null>(null);
   const [priceCandidates, setPriceCandidates] = useState<MidoPriceItem[]>([]);
   const [manualUsdInput, setManualUsdInput] = useState('');
+  // 버그 수정: 예전엔 후보가 하나라도 있으면 사용자가 실제로 어떤 값을 썼든 무조건
+  // priceCandidates[0]을 "미도단가표 출처"로 저장했다 — 감사 추적(어떤 근거로 이
+  // 단가를 썼는지)이 실제와 다르게 남는 문제였다. 이제 후보의 "이 값 사용" 버튼을
+  // 눌렀을 때만 그 후보 id를 출처로 기록하고, 입력값을 직접 고치면 선택이 풀려서
+  // MANUAL로 저장된다 — 실제로 쓴 값과 출처가 항상 일치한다.
+  const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
 
   const openPriceEditor = async (line: ExportShipmentLine) => {
     setPriceEditingLineId(line.id);
     setManualUsdInput('');
+    setSelectedCandidateId(null);
     try {
       setPriceCandidates(await findMidoPriceCandidates(line.description));
     } catch {
@@ -254,16 +261,22 @@ export const ExportShipmentManager: React.FC = () => {
     }
   };
 
-  const handleConfirmLinePrice = async (source: 'MIDO_PRICE_TABLE' | 'MANUAL', midoPriceItemId?: number) => {
+  const useCandidateValue = (c: MidoPriceItem) => {
+    setManualUsdInput(String(c.priceUsdMin));
+    setSelectedCandidateId(c.id);
+  };
+
+  const handleConfirmLinePrice = async () => {
     if (!selected || priceEditingLineId == null || manualUsdInput.trim() === '') {
       toast.error('USD 단가를 입력해 주세요.');
       return;
     }
+    const source = selectedCandidateId != null ? 'MIDO_PRICE_TABLE' : 'MANUAL';
     try {
       const res = await confirmExportShipmentLinePrice(selected.id, priceEditingLineId, {
         source,
         unitPriceUsd: Number(manualUsdInput),
-        midoPriceItemId,
+        midoPriceItemId: selectedCandidateId ?? undefined,
       });
       toast.success('USD 단가가 확정되었습니다.');
       setSelected(res.exportShipmentId ? await getExportShipment(res.exportShipmentId) : selected);
@@ -271,6 +284,14 @@ export const ExportShipmentManager: React.FC = () => {
     } catch (err: any) {
       toast.error(getErrorMessage(err, 'USD 단가 확정에 실패했습니다.'));
     }
+  };
+
+  // 미도 단가표(USD) 후보를 현재 환율로 원화 환산해 보여준다 — 환율을 거꾸로 적용해
+  // 담당자가 "이 USD 범위가 원화로 얼마인지" 바로 판단할 수 있게 한다.
+  const krwEquivalent = (usd: number): string | null => {
+    const rate = selected?.exchangeRateUsdKrw;
+    if (!rate || rate <= 0) return null;
+    return Math.round(usd * rate).toLocaleString('ko-KR');
   };
 
   return (
@@ -523,11 +544,23 @@ export const ExportShipmentManager: React.FC = () => {
             </p>
             {priceCandidates.length > 0 ? (
               <ul className="text-sm mb-3 space-y-1 max-h-40 overflow-y-auto">
-                {priceCandidates.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between border rounded px-2 py-1">
-                    <span>{c.itemName} — ${c.priceUsdMin}{c.priceUsdMax !== c.priceUsdMin ? `~$${c.priceUsdMax}` : ''} / {c.unit}{c.note ? ` (${c.note})` : ''}</span>
-                  </li>
-                ))}
+                {priceCandidates.map((c) => {
+                  const minKrw = krwEquivalent(c.priceUsdMin);
+                  const maxKrw = c.priceUsdMax !== c.priceUsdMin ? krwEquivalent(c.priceUsdMax) : null;
+                  return (
+                    <li key={c.id} className={`flex items-center justify-between border rounded px-2 py-1 ${selectedCandidateId === c.id ? 'border-blue-500 bg-blue-50' : ''}`}>
+                      <span>
+                        {c.itemName} — ${c.priceUsdMin}{c.priceUsdMax !== c.priceUsdMin ? `~$${c.priceUsdMax}` : ''} / {c.unit}{c.note ? ` (${c.note})` : ''}
+                        {minKrw && <span className="text-gray-400"> (약 {minKrw}{maxKrw ? `~${maxKrw}` : ''}원)</span>}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => useCandidateValue(c)}
+                        className="text-xs text-blue-600 border border-blue-300 rounded px-2 py-0.5 ml-2 shrink-0 hover:bg-blue-50"
+                      >이 값 사용</button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-xs text-gray-400 mb-3">일치하는 단가표 후보가 없습니다 — 직접 입력해 주세요.</p>
@@ -540,13 +573,16 @@ export const ExportShipmentManager: React.FC = () => {
                 className="border p-2 rounded flex-1"
                 placeholder="확정할 USD 단가"
                 value={manualUsdInput}
-                onChange={(e) => setManualUsdInput(e.target.value)}
+                onChange={(e) => { setManualUsdInput(e.target.value); setSelectedCandidateId(null); }}
               />
             </div>
+            <p className="text-xs text-gray-400 mb-3">
+              출처: {selectedCandidateId != null ? '미도단가표(후보 선택됨)' : '직접입력'}
+            </p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setPriceEditingLineId(null)} className="px-3 py-2 rounded border">취소</button>
               <button
-                onClick={() => handleConfirmLinePrice(priceCandidates.length > 0 ? 'MIDO_PRICE_TABLE' : 'MANUAL', priceCandidates[0]?.id)}
+                onClick={handleConfirmLinePrice}
                 className="bg-blue-600 text-white px-3 py-2 rounded"
               >
                 확정

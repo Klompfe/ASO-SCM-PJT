@@ -122,8 +122,8 @@ describe('ExportShipmentsService.updateExchangeRate / confirmLinePrice (PR-157)'
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ExportShipmentsService,
-        { provide: getRepositoryToken(PurchaseOrder), useValue: { findOne: jest.fn() } },
-        { provide: getRepositoryToken(PackingReceipt), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(PurchaseOrder), useValue: { findOne: jest.fn(), find: jest.fn() } },
+        { provide: getRepositoryToken(PackingReceipt), useValue: { findOne: jest.fn(), find: jest.fn() } },
         { provide: getRepositoryToken(BomItem), useValue: {} },
         { provide: getRepositoryToken(ExportShipment), useValue: { findOne: jest.fn(), save: jest.fn((x) => x) } },
         { provide: getRepositoryToken(ExportShipmentLine), useValue: { findOne: jest.fn(), save: jest.fn((x) => x) } },
@@ -146,8 +146,8 @@ describe('ExportShipmentsService.updateExchangeRate / confirmLinePrice (PR-157)'
         { id: 2, qty: 50, packingReceiptId: 11, priceSource: 'MANUAL', unitPriceUsd: 9.99 },
       ];
       (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, status: 'DRAFT', invoiceDate: null, lines });
-      (receiptRepo.findOne as jest.Mock).mockResolvedValue({ id: 10, purchaseOrderId: 100 });
-      (poRepo.findOne as jest.Mock).mockResolvedValue({ id: 100, unitPrice: 1300 });
+      (receiptRepo.find as jest.Mock).mockResolvedValue([{ id: 10, purchaseOrderId: 100 }]);
+      (poRepo.find as jest.Mock).mockResolvedValue([{ id: 100, unitPrice: 1300 }]);
 
       await service.updateExchangeRate(1, { exchangeRateUsdKrw: 1300 });
 
@@ -155,7 +155,10 @@ describe('ExportShipmentsService.updateExchangeRate / confirmLinePrice (PR-157)'
       expect((lines[0] as any).amountUsd).toBe(100); // 1 × qty(100)
       expect(lines[0].priceSource).toBe('PURCHASE_ORDER');
       expect(lines[1].unitPriceUsd).toBe(9.99); // 그대로 유지
-      expect(poRepo.findOne).toHaveBeenCalledTimes(1); // MANUAL 라인은 조회조차 안 함
+      // 버그 수정(N+1): 라인마다 조회하지 않고 IN절로 한 번에 배치 조회한다 — MANUAL
+      // 라인(line 2)의 receipt/po는 애초에 조회 대상에 안 들어간다(receiptId 11 제외).
+      expect(receiptRepo.find).toHaveBeenCalledTimes(1);
+      expect(poRepo.find).toHaveBeenCalledTimes(1);
     });
 
     it('FINALIZED 상태면 수정할 수 없다', async () => {

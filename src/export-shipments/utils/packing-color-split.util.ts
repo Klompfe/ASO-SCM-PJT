@@ -68,3 +68,13 @@ export function splitTrimByColor(cartons: CartonLike[]): TrimColorLine[] {
     packageCount: new Set(group.map((c) => c.cartonNo)).size,
   }));
 }
+
+// 색상별로 라인을 나눈 뒤에도 PackingReceipt 하나의 CBM(부피)은 그대로 하나의 값이다 —
+// 각 색상 라인에 전체 CBM을 그대로 복사하면 합계가 라인 수만큼 부풀려져 통관 신고
+// 서류(INVOICE)의 CBM 합계가 실제보다 몇 배로 찍힌다. qty(색상 라인의 수량) 비중만큼
+// 비례 배분한다 — 라인이 하나뿐이면(분리가 안 일어난 경우) 전체 CBM을 그대로 받는다.
+export function allocateCbm(receiptCbm: number | null | undefined, lineQty: number, totalQty: number): number | null {
+  if (receiptCbm == null || totalQty <= 0) return null;
+  const allocated = (Number(receiptCbm) * lineQty) / totalQty;
+  return Math.round(allocated * 10000) / 10000;
+}

@@ -1,4 +1,4 @@
-import { splitFabricByColor, splitTrimByColor } from './packing-color-split.util';
+import { splitFabricByColor, splitTrimByColor, allocateCbm } from './packing-color-split.util';
 
 describe('splitFabricByColor (PR-157)', () => {
   it('색상이 다르면 별도 라인으로 분리하고 야드/중량을 색상별로 합산한다(샘플의 BE:293Y, BK:183Y 방식)', () => {
@@ -58,5 +58,32 @@ describe('splitTrimByColor (PR-157)', () => {
   it('색상이 없으면 하나의 라인으로 합쳐진다', () => {
     const cartons = [{ color: null, qty: 3, cartonNo: 'CT-9' }];
     expect(splitTrimByColor(cartons)).toEqual([{ color: null, qty: 3, grossWeight: null, packageCount: 1 }]);
+  });
+});
+
+// 버그 수정: 색상별로 라인을 나눠도 CBM은 포장내역(PackingReceipt) 하나당 한 값이다.
+// 각 라인에 전체 CBM을 그대로 복사하면(기존 버그) INVOICE의 CBM 합계가 라인 수만큼
+// 부풀려진다 — qty 비중으로 비례 배분해야 한다.
+describe('allocateCbm (CBM 중복 계산 수정)', () => {
+  it('색상 2개로 나뉘면 qty 비중만큼 CBM을 나눠 갖는다(합계는 원래 CBM과 같다)', () => {
+    // BE:293Y, BK:183Y, 전체 476Y, 원래 CBM 10
+    const be = allocateCbm(10, 293, 476);
+    const bk = allocateCbm(10, 183, 476);
+    expect(be).toBeCloseTo((10 * 293) / 476, 4);
+    expect(bk).toBeCloseTo((10 * 183) / 476, 4);
+    expect(be! + bk!).toBeCloseTo(10, 4);
+  });
+
+  it('라인이 하나뿐이면(분리가 안 일어난 경우) 전체 CBM을 그대로 받는다', () => {
+    expect(allocateCbm(10, 100, 100)).toBe(10);
+  });
+
+  it('receiptCbm이 없으면 null이다', () => {
+    expect(allocateCbm(null, 50, 100)).toBeNull();
+    expect(allocateCbm(undefined, 50, 100)).toBeNull();
+  });
+
+  it('totalQty가 0 이하이면 null이다(0으로 나누기 방지)', () => {
+    expect(allocateCbm(10, 0, 0)).toBeNull();
   });
 });

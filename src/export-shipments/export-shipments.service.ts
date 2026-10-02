@@ -6,7 +6,7 @@ import { PackingReceipt, PackingMaterialCategory } from '../purchase-orders/enti
 import { BomItem } from '../boms/entities/bom-item.entity';
 import { ExportShipment, ExportShipmentStatus, ExportShipmentSource } from './entities/export-shipment.entity';
 import { ExportShipmentLine, ExportShipmentLinePriceSource } from './entities/export-shipment-line.entity';
-import { splitFabricByColor, splitTrimByColor } from './utils/packing-color-split.util';
+import { splitFabricByColor, splitTrimByColor, allocateCbm } from './utils/packing-color-split.util';
 import { calculateUsdValueFromKrw } from './utils/invoice-value.util';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
 import { FindExportShipmentsDto } from './dto/find-export-shipments.dto';
@@ -135,6 +135,7 @@ export class ExportShipmentsService {
         // "안감(BE:293Y, BK:183Y)" 표기 방식). 색상이 없는 구버전 데이터는 하나로 합쳐진다.
         if (receipt.materialCategory === PackingMaterialCategory.FABRIC) {
           const colorLines = splitFabricByColor(receipt.rolls ?? []);
+          const receiptTotalQty = colorLines.reduce((acc, cl) => acc + cl.qty, 0);
           for (const cl of colorLines) {
             const usd = calculateUsdValueFromKrw(po.unitPrice, cl.qty, dto.exchangeRateUsdKrw);
             linesToCreate.push({
@@ -149,7 +150,7 @@ export class ExportShipmentsService {
               grossWeight: cl.grossWeight,
               packageCount: cl.packageCount,
               packageType: null,
-              cbm: receipt.cbm ?? null,
+              cbm: allocateCbm(receipt.cbm, cl.qty, receiptTotalQty),
               unitPriceUsd: usd?.unitPriceUsd ?? null,
               amountUsd: usd?.amountUsd ?? null,
               priceSource: usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null,
@@ -163,6 +164,7 @@ export class ExportShipmentsService {
           }
         } else {
           const colorLines = splitTrimByColor(receipt.cartons ?? []);
+          const receiptTotalQty = colorLines.reduce((acc, cl) => acc + cl.qty, 0);
           for (const cl of colorLines) {
             const usd = calculateUsdValueFromKrw(po.unitPrice, cl.qty, dto.exchangeRateUsdKrw);
             linesToCreate.push({
@@ -177,7 +179,7 @@ export class ExportShipmentsService {
               grossWeight: cl.grossWeight,
               packageCount: cl.packageCount,
               packageType: 'CARTON',
-              cbm: receipt.cbm ?? null,
+              cbm: allocateCbm(receipt.cbm, cl.qty, receiptTotalQty),
               unitPriceUsd: usd?.unitPriceUsd ?? null,
               amountUsd: usd?.amountUsd ?? null,
               priceSource: usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null,
@@ -421,19 +423,35 @@ export class ExportShipmentsService {
     shipment.exchangeRateDate = shipment.invoiceDate ?? new Date();
     await this.exportShipmentRepository.save(shipment);
 
-    for (const line of shipment.lines ?? []) {
-      if (line.priceSource === ExportShipmentLinePriceSource.MANUAL || line.priceSource === ExportShipmentLinePriceSource.MIDO_PRICE_TABLE) {
-        continue;
-      }
-      if (!line.packingReceiptId) continue; // IMPORTED 라인은 연결된 발주가 없어 재계산 불가
+    // 재계산 대상 라인만 추려 receipt/발주를 한 번에(IN절) 가져온다 — 라인마다 매번
+    // findOne을 두 번씩 부르면(N+1) 라인이 많을수록 저장이 느려진다.
+    const recalculable = (shipment.lines ?? []).filter(
+      (line) =>
+        line.priceSource !== ExportShipmentLinePriceSource.MANUAL &&
+        line.priceSource !== ExportShipmentLinePriceSource.MIDO_PRICE_TABLE &&
+        !!line.packingReceiptId,
+    );
 
-      const receipt = await this.packingReceiptRepository.findOne({ where: { id: line.packingReceiptId } });
-      const po = receipt ? await this.purchaseOrderRepository.findOne({ where: { id: receipt.purchaseOrderId } }) : null;
+    const receiptIds = [...new Set(recalculable.map((l) => l.packingReceiptId!))];
+    const receipts = receiptIds.length ? await this.packingReceiptRepository.find({ where: { id: In(receiptIds) } }) : [];
+    const receiptById = new Map(receipts.map((r) => [r.id, r]));
+
+    const poIds = [...new Set(receipts.map((r) => r.purchaseOrderId).filter((id): id is number => id != null))];
+    const pos = poIds.length ? await this.purchaseOrderRepository.find({ where: { id: In(poIds) } }) : [];
+    const poById = new Map(pos.map((p) => [p.id, p]));
+
+    const linesToSave: ExportShipmentLine[] = [];
+    for (const line of recalculable) {
+      const receipt = receiptById.get(line.packingReceiptId!);
+      const po = receipt ? poById.get(receipt.purchaseOrderId) : null;
       const usd = calculateUsdValueFromKrw(po?.unitPrice, Number(line.qty), dto.exchangeRateUsdKrw);
       line.unitPriceUsd = usd?.unitPriceUsd ?? null;
       line.amountUsd = usd?.amountUsd ?? null;
       line.priceSource = usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null;
-      await this.exportShipmentLineRepository.save(line);
+      linesToSave.push(line);
+    }
+    if (linesToSave.length) {
+      await this.exportShipmentLineRepository.save(linesToSave);
     }
 
     return this.findOneOrFail(id);
