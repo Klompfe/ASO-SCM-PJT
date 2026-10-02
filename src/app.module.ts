@@ -34,6 +34,7 @@ import { CashVouchersModule } from './cash-vouchers/cash-vouchers.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { BrandPrefixRulesModule } from './brand-prefix-rules/brand-prefix-rules.module';
 import { StatusCodesModule } from './status-codes/status-codes.module';
+import { MidoPriceTableModule } from './mido-price-table/mido-price-table.module';
 import { HealthController } from './health/health.controller';
 import { getPostgresConnectionOptions } from './common/database/postgres-connection-options';
 
@@ -82,6 +83,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     InventoriesModule,
     PurchaseOrdersModule,
     StatusCodesModule,
+    MidoPriceTableModule,
     WorkOrdersModule,
     SalesOrdersModule,
     SuppliersModule,

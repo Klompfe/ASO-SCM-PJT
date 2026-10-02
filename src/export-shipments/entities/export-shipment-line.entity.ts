@@ -8,6 +8,15 @@ import { PackingReceipt } from '../../purchase-orders/entities/packing-receipt.e
 // 라인은 다시 계산하지 않는다 — 특히 FINALIZED 이후에는 명시적으로 수정도 막는다(9.2절
 // 계약 스냅샷과 동일 원칙). hsCode는 문서 출력 시에만 "(HS CODE: ...)"로 붙이는 용도라
 // description과 분리해서 저장한다.
+// PR-157: PurchaseOrder.unitPrice(원화)가 있으면 그 값 기준, 없으면 미도 단가표에서
+// 담당자가 후보 중 하나를 골라 연결한 값 기준, 둘 다 아니면 사람이 화면에서 직접 입력한
+// 값 기준 — 어느 경로로 USD 단가가 채워졌는지 화면에 표시해 검산할 수 있게 한다.
+export enum ExportShipmentLinePriceSource {
+  PURCHASE_ORDER = 'PURCHASE_ORDER',
+  MIDO_PRICE_TABLE = 'MIDO_PRICE_TABLE',
+  MANUAL = 'MANUAL',
+}
+
 @Entity('export_shipment_lines')
 export class ExportShipmentLine {
   @PrimaryGeneratedColumn()
@@ -65,4 +74,25 @@ export class ExportShipmentLine {
 
   @Column({ nullable: true })
   packageType?: string | null;
+
+  // PR-157: 같은 스타일+자재라도 색상이 다르면 별도 라인으로 분리한다(샘플 파일의
+  // "안감(BE:293Y, BK:183Y)" 표기 방식 참고). 색상 구분이 없던(IMPORTED 등) 라인은 null.
+  @Column({ nullable: true })
+  color?: string | null;
+
+  // 포장내역(PackingReceipt.cbm)의 생성 시점 스냅샷 — netWeight/grossWeight와 동일하게
+  // FINALIZED 이후에도 값이 바뀌지 않도록 라인에 그대로 저장한다. 값이 없으면 null(0 아님).
+  @Column({ type: 'decimal', nullable: true })
+  cbm?: number | null;
+
+  // unitPrice/amount(기존 필드, 통화 불명 — 수동 입력/IMPORTED 문서에서 그대로 사용)와
+  // 별개로, 이번 PR의 자동계산 결과는 USD 전용 필드에 담는다. amountUsd는 unitPriceUsd*qty.
+  @Column({ type: 'decimal', nullable: true })
+  unitPriceUsd?: number | null;
+
+  @Column({ type: 'decimal', nullable: true })
+  amountUsd?: number | null;
+
+  @Column({ type: 'varchar', enum: ExportShipmentLinePriceSource, nullable: true })
+  priceSource?: ExportShipmentLinePriceSource | null;
 }

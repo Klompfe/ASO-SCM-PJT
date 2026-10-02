@@ -11,6 +11,7 @@ export interface PackingReceiptRoll {
   grossWeight?: number;
   netWeight?: number;
   thickness?: number;
+  lengthYd?: number;
 }
 
 export interface PackingReceiptCarton {
@@ -30,6 +31,7 @@ export interface PackingReceipt {
   materialCategory: PackingMaterialCategory;
   receivedDate?: string;
   remark?: string;
+  cbm?: number;
   createdAt: string;
   rolls?: PackingReceiptRoll[];
   cartons?: PackingReceiptCarton[];
@@ -37,6 +39,7 @@ export interface PackingReceipt {
     rollCount?: number;
     totalGrossWeight?: number;
     totalNetWeight?: number;
+    totalLengthYd?: number;
     cartonCount?: number;
     lineCount?: number;
     totalQty?: number;
@@ -52,6 +55,7 @@ export interface CreatePackingReceiptRoll {
   grossWeight?: number;
   netWeight?: number;
   thickness?: number;
+  lengthYd?: number;
 }
 
 export interface CreatePackingReceiptCarton {
@@ -68,6 +72,7 @@ export interface CreatePackingReceipt {
   materialCategory: PackingMaterialCategory;
   receivedDate?: string;
   remark?: string;
+  cbm?: number;
   rolls?: CreatePackingReceiptRoll[];
   cartons?: CreatePackingReceiptCarton[];
 }

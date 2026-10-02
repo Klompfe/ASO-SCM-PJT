@@ -75,6 +75,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
     category: 'FABRIC' | 'TRIM';
     unit?: string;
     quantity?: number;
+    rollLengthsYd?: [number, number];
   }) => {
     const supplierRes = await request(app.getHttpServer())
       .post('/suppliers')
@@ -124,7 +125,9 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
       })
       .expect(201);
 
-    // 포장내역 직접입력(PR-074)
+    // 포장내역 직접입력(PR-074). PR-157: qty는 이제 롤 개수가 아니라 lengthYd 합계라
+    // 기본값(150+143=293)을 두고, 발주수량 비교 테스트는 rollLengthsYd로 정확히 맞춘다.
+    const [len1, len2] = opts.rollLengthsYd ?? [150, 143];
     if (opts.category === 'FABRIC') {
       await request(app.getHttpServer())
         .post(`/purchase-orders/${purchaseOrderId}/packing-receipts`)
@@ -132,8 +135,8 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .send({
           materialCategory: 'FABRIC',
           rolls: [
-            { rollNo: '1', color: '4', widthCm: 133, widthInch: 52.36, grossWeight: 83, netWeight: 82, thickness: 22.7 },
-            { rollNo: '2', color: '4', widthCm: 133, widthInch: 52.36, grossWeight: 85, netWeight: 84, thickness: 23.2 },
+            { rollNo: '1', color: '4', widthCm: 133, widthInch: 52.36, grossWeight: 83, netWeight: 82, thickness: 22.7, lengthYd: len1 },
+            { rollNo: '2', color: '4', widthCm: 133, widthInch: 52.36, grossWeight: 85, netWeight: 84, thickness: 23.2, lengthYd: len2 },
           ],
         })
         .expect(201);
@@ -186,10 +189,11 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
       expect(line.hsCode).toBe('6202.20.1000');
       expect(line.styleNo).toBe(styleNo);
       // qty의 직렬화 타입은 DB 드라이버에 따라 다르다(Postgres pg 드라이버는 numeric을
-      // 문자열로, SQLite는 숫자로 반환) — 값 자체(2, 롤 2개)만 확인한다.
-      expect(Number(line.qty)).toBe(2);
-      // Item.unit을 지정하지 않았으므로(PR-078) 기존 하드코딩 폴백('ROLL')이 적용되어야 한다.
-      expect(line.unit).toBe('ROLL');
+      // 문자열로, SQLite는 숫자로 반환) — 값 자체(PR-157: 롤 개수가 아니라 실제 야드
+      // 길이 합계, 기본 픽스처는 150+143=293)만 확인한다.
+      expect(Number(line.qty)).toBe(293);
+      // Item.unit을 지정하지 않았으므로(PR-078) 기존 하드코딩 폴백('YD', PR-157부터)이 적용되어야 한다.
+      expect(line.unit).toBe('YD');
       expect(Number(line.netWeight)).toBeCloseTo(82 + 84);
       expect(Number(line.grossWeight)).toBeCloseTo(83 + 85);
       expect(line.unitPrice).toBeNull();
@@ -217,10 +221,13 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .send({})
         .expect(201);
 
+      // PR-157: 카톤이 색상 4/5로 나뉘어 있어 2라인으로 분리된다 — 합계로 확인한다.
+      expect(res.body.data.lines).toHaveLength(2);
+      const totalQty = res.body.data.lines.reduce((sum: number, l: any) => sum + Number(l.qty), 0);
+      expect(totalQty).toBe(250 + 100);
       const line = res.body.data.lines[0];
       // Item.unit을 지정하지 않았으므로(PR-078) 기존 하드코딩 폴백('EA')이 적용되어야 한다.
       expect(line.unit).toBe('EA');
-      expect(Number(line.qty)).toBe(250 + 100);
       // spec을 빈 문자열로 보내면 mapping-commit.service.ts의 기존 로직(PR-073 이전부터
       // 존재)이 'N/A'로 대체해 저장한다 — description 조합도 그 값을 그대로 반영한다.
       expect(line.description).toBe('N/A MAIN LABEL POLYESTER 100%');
@@ -305,7 +312,9 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .expect(201);
 
       expect(res.body.data.styleNos.sort()).toEqual([styleNoA, styleNoB].sort());
-      expect(res.body.data.lines).toHaveLength(2);
+      // PR-157: FABRIC(A)은 두 롤이 같은 색상(4)이라 1라인, TRIM(B)은 카톤이 색상
+      // 4/5로 나뉘어 있어 2라인으로 분리된다 — 합쳐서 3라인.
+      expect(res.body.data.lines).toHaveLength(3);
     });
 
     it('BOM에 연결되지 않은 발주로 생성을 시도하면 조용히 넘어가지 않고 400으로 안내해야 한다', async () => {
@@ -348,7 +357,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
   describe('발주수량 vs 실제 포장수량 비교 (PR-086)', () => {
     it('발주수량과 실제 포장수량이 같으면 warnings가 비어 있어야 한다', async () => {
       const styleNo = `EXPORT-E2E-QTYMATCH-${Date.now()}`;
-      // FABRIC 롤 2개 등록 → 포장수량 2, 발주수량도 2로 맞춰 일치시킨다.
+      // FABRIC 롤 2개(야드 합계 100+100=200) 등록 → 발주수량도 200으로 맞춰 일치시킨다.
       const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
         itemName: `E2E Qty Match Material ${Date.now()}`,
         englishName: 'FOR THE FACE',
@@ -357,7 +366,8 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         composition: 'WOOL 98%',
         hsCode: '6202.20.1000',
         category: 'FABRIC',
-        quantity: 2,
+        quantity: 200,
+        rollLengthsYd: [100, 100],
       });
 
       const res = await request(app.getHttpServer())
@@ -408,7 +418,8 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         composition: 'WOOL 98%',
         hsCode: '6202.20.1000',
         category: 'FABRIC',
-        quantity: 2, // 롤 2개와 정확히 일치
+        quantity: 200, // 야드 합계(100+100)와 정확히 일치
+        rollLengthsYd: [100, 100],
       });
       const diffPoId = await setupPurchaseOrderWithBomAndPackingReceipt({
         itemName: `E2E Multi Diff Material ${Date.now()}`,
@@ -466,7 +477,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .send({ unitPrice: 1.5 })
         .expect(200);
       expect(Number(res.body.data.unitPrice)).toBe(1.5);
-      expect(Number(res.body.data.amount)).toBeCloseTo(1.5 * 2); // qty=2(롤 2개)
+      expect(Number(res.body.data.amount)).toBeCloseTo(1.5 * 293); // qty=293(기본 픽스처 야드 합계, PR-157)
     });
 
     it('DRAFT -> REVIEWED는 일반 사용자도 가능해야 한다', async () => {

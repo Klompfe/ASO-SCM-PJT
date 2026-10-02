@@ -64,6 +64,17 @@ export class ExportShipment {
   @Column({ type: 'date', nullable: true })
   sailingDate?: Date | null;
 
+  // PR-157: USD 환율은 unipass.customs.go.kr 크롤링을 시도했으나 robots.txt가
+  // "/csp/"(요청된 페이지 경로 전체)를 명시적으로 차단하고 있어(User-agent: * /
+  // Disallow: /csp/) 구현하지 않았다(사용자가 이미 "크롤링이 어려우면 수동 입력"으로
+  // 허용). 문서 저장 시점에 담당자가 직접 입력하고, 그 값을 재사용한다(매번 다시
+  // 입력하지 않도록 문서에 저장).
+  @Column({ type: 'decimal', nullable: true })
+  exchangeRateUsdKrw?: number | null;
+
+  @Column({ type: 'date', nullable: true })
+  exchangeRateDate?: Date | null;
+
   @OneToMany(() => ExportShipmentLine, (line) => line.exportShipment, { cascade: true })
   lines?: ExportShipmentLine[];
 

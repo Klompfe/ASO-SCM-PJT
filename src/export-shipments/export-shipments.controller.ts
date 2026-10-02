@@ -20,6 +20,8 @@ import { FindExportShipmentsDto } from './dto/find-export-shipments.dto';
 import { FindExportPerformanceDto } from './dto/find-export-performance.dto';
 import { UpdateExportShipmentStatusDto } from './dto/update-export-shipment-status.dto';
 import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.dto';
+import { UpdateExportShipmentExchangeRateDto } from './dto/update-export-shipment-exchange-rate.dto';
+import { ConfirmExportShipmentLinePriceDto } from './dto/confirm-export-shipment-line-price.dto';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 
 // PR-075: PackingReceipt(PR-074)+BomItem.composition/hsCode(PR-073)를 합쳐
@@ -97,5 +99,23 @@ export class ExportShipmentsController {
     @Body() dto: UpdateExportShipmentLineDto,
   ) {
     return this.exportShipmentsService.updateLineUnitPrice(id, lineId, dto);
+  }
+
+  // PR-157: 환율 수동 입력/수정 — unipass.customs.go.kr 크롤링은 robots.txt로 막혀
+  // 있어(User-agent: * / Disallow: /csp/) 구현하지 않았다.
+  @Patch(':id/exchange-rate')
+  @ApiOperation({ summary: 'USD/KRW 환율 입력/수정 — PurchaseOrder 기준으로 자동계산된 라인만 새 값으로 재계산' })
+  updateExchangeRate(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateExportShipmentExchangeRateDto) {
+    return this.exportShipmentsService.updateExchangeRate(id, dto);
+  }
+
+  @Patch(':id/lines/:lineId/price')
+  @ApiOperation({ summary: 'PurchaseOrder 단가가 없는 라인의 USD 단가를 사람이 확정(미도 단가표 후보 선택 또는 수동 입력)' })
+  confirmLinePrice(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('lineId', ParseIntPipe) lineId: number,
+    @Body() dto: ConfirmExportShipmentLinePriceDto,
+  ) {
+    return this.exportShipmentsService.confirmLinePrice(id, lineId, dto);
   }
 }

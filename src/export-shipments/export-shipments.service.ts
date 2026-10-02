@@ -5,10 +5,14 @@ import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity
 import { PackingReceipt, PackingMaterialCategory } from '../purchase-orders/entities/packing-receipt.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
 import { ExportShipment, ExportShipmentStatus, ExportShipmentSource } from './entities/export-shipment.entity';
-import { ExportShipmentLine } from './entities/export-shipment-line.entity';
+import { ExportShipmentLine, ExportShipmentLinePriceSource } from './entities/export-shipment-line.entity';
+import { splitFabricByColor, splitTrimByColor, allocateCbm } from './utils/packing-color-split.util';
+import { calculateUsdValueFromKrw } from './utils/invoice-value.util';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
 import { FindExportShipmentsDto } from './dto/find-export-shipments.dto';
 import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.dto';
+import { UpdateExportShipmentExchangeRateDto } from './dto/update-export-shipment-exchange-rate.dto';
+import { ConfirmExportShipmentLinePriceDto } from './dto/confirm-export-shipment-line-price.dto';
 import { UserRole } from '../users/entities/user.entity';
 import { ExportShipmentDefaultsService } from '../export-shipment-defaults/export-shipment-defaults.service';
 import { ExportShipmentImportParser } from './utils/export-shipment-import-parser.util';
@@ -57,15 +61,13 @@ export class ExportShipmentsService {
   //
   // PR-078: unit은 자재마스터(Item.unit)를 우선 사용한다 — 기존 데이터 중에는
   // Item.unit이 비어있는 경우도 있어(과거 등록분 등), 비어 있으면 이전처럼
-  // 원단은 'ROLL', 부자재는 'EA'로 폴백한다.
+  // 부자재는 'EA'로 폴백한다(원단은 PR-157부터 실제 야드 합계를 쓰므로 'YD'로 폴백).
   //
-  // 알려진 한계(원본 PackingReceiptRoll 모델에 실측 길이(야드/미터) 필드가 없어):
-  // 원단(FABRIC) 라인의 qty는 실제 INVOICE의 "YDS/MTS" 수치가 아니라 롤 개수로
-  // 집계한다 — Item.unit이 'MTS' 등으로 지정돼 있어도 표시 단위만 그렇게 보일 뿐,
-  // qty 값 자체는 여전히 롤 개수라는 점에 주의. 부자재(TRIM)는 카톤 내 qty 합계를
-  // 그대로 쓴다. 실제 운영에 맞추려면 PackingReceiptRoll에 길이 필드를 추가하는
-  // 후속 작업이 필요하다 — 이번 PR은 description 자동생성과 상태관리 흐름이
-  // 핵심이라 이 부분은 명시적으로 근사치로 남겨둔다.
+  // PR-157: PackingReceiptRoll.lengthYd가 생기면서 원단(FABRIC) 라인의 qty는 이제
+  // 실제 롤 길이(야드) 합계다(이전에는 롤 개수로 근사했었음 — 그 한계는 해소됨).
+  // 다만 과거에 등록된 포장내역은 lengthYd가 없을 수 있어, 그런 롤이 섞여 있으면
+  // 합계가 불완전하다는 경고를 띄운다(0으로 취급하되 "일부 롤은 길이 미입력"으로
+  // 알림 — 조용히 틀린 값을 내보내지 않는다).
   //
   // PR-079: shipperInfo/consigneeInfo/portOfLoading/finalDestination/carrier는
   // 건마다 거의 바뀌지 않는 회사 고정정보라 ExportShipmentDefaults(싱글턴)에서
@@ -129,37 +131,61 @@ export class ExportShipmentsService {
 
       let packedQty = 0;
       for (const receipt of receipts) {
+        // PR-157: 스타일+자재가 같아도 색상이 다르면 별도 라인으로 분리한다(샘플의
+        // "안감(BE:293Y, BK:183Y)" 표기 방식). 색상이 없는 구버전 데이터는 하나로 합쳐진다.
         if (receipt.materialCategory === PackingMaterialCategory.FABRIC) {
-          const rolls = receipt.rolls ?? [];
-          linesToCreate.push({
-            styleNo,
-            packingReceiptId: receipt.id,
-            description,
-            hsCode: bomItem.hsCode ?? null,
-            qty: rolls.length,
-            unit: itemUnit || 'ROLL',
-            netWeight: sum(rolls, 'netWeight') || null,
-            grossWeight: sum(rolls, 'grossWeight') || null,
-            packageCount: rolls.length,
-            packageType: null,
-          });
-          packedQty += rolls.length;
+          const colorLines = splitFabricByColor(receipt.rolls ?? []);
+          const receiptTotalQty = colorLines.reduce((acc, cl) => acc + cl.qty, 0);
+          for (const cl of colorLines) {
+            const usd = calculateUsdValueFromKrw(po.unitPrice, cl.qty, dto.exchangeRateUsdKrw);
+            linesToCreate.push({
+              styleNo,
+              packingReceiptId: receipt.id,
+              description,
+              hsCode: bomItem.hsCode ?? null,
+              color: cl.color,
+              qty: cl.qty,
+              unit: itemUnit || 'YD',
+              netWeight: cl.netWeight,
+              grossWeight: cl.grossWeight,
+              packageCount: cl.packageCount,
+              packageType: null,
+              cbm: allocateCbm(receipt.cbm, cl.qty, receiptTotalQty),
+              unitPriceUsd: usd?.unitPriceUsd ?? null,
+              amountUsd: usd?.amountUsd ?? null,
+              priceSource: usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null,
+            });
+            packedQty += cl.qty;
+            if (cl.hasMissingLength) {
+              warnings.push(
+                `발주 ID ${po.id}(스타일 ${styleNo}${cl.color ? `, 색상 ${cl.color}` : ''}): 일부 롤은 길이 미입력 — 수량이 불완전할 수 있음`,
+              );
+            }
+          }
         } else {
-          const cartons = receipt.cartons ?? [];
-          const cartonQty = sum(cartons, 'qty');
-          linesToCreate.push({
-            styleNo,
-            packingReceiptId: receipt.id,
-            description,
-            hsCode: bomItem.hsCode ?? null,
-            qty: cartonQty,
-            unit: itemUnit || 'EA',
-            netWeight: null,
-            grossWeight: sum(cartons, 'weightKg') || null,
-            packageCount: new Set(cartons.map((c) => c.cartonNo)).size,
-            packageType: 'CARTON',
-          });
-          packedQty += cartonQty;
+          const colorLines = splitTrimByColor(receipt.cartons ?? []);
+          const receiptTotalQty = colorLines.reduce((acc, cl) => acc + cl.qty, 0);
+          for (const cl of colorLines) {
+            const usd = calculateUsdValueFromKrw(po.unitPrice, cl.qty, dto.exchangeRateUsdKrw);
+            linesToCreate.push({
+              styleNo,
+              packingReceiptId: receipt.id,
+              description,
+              hsCode: bomItem.hsCode ?? null,
+              color: cl.color,
+              qty: cl.qty,
+              unit: itemUnit || 'EA',
+              netWeight: null,
+              grossWeight: cl.grossWeight,
+              packageCount: cl.packageCount,
+              packageType: 'CARTON',
+              cbm: allocateCbm(receipt.cbm, cl.qty, receiptTotalQty),
+              unitPriceUsd: usd?.unitPriceUsd ?? null,
+              amountUsd: usd?.amountUsd ?? null,
+              priceSource: usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null,
+            });
+            packedQty += cl.qty;
+          }
         }
       }
 
@@ -188,6 +214,10 @@ export class ExportShipmentsService {
         finalDestination: dto.finalDestination ?? defaults?.finalDestination ?? null,
         carrier: dto.carrier ?? defaults?.carrier ?? null,
         sailingDate: dto.sailingDate ? new Date(dto.sailingDate) : null,
+        // PR-157: 환율은 INVOICE 작성일 기준으로 조회한다는 가정으로 그 날짜에 맞춰
+        // 저장한다(선적일 대신 — 어느 쪽이 맞는지 애매해 완료 보고에서 확인을 요청한다).
+        exchangeRateUsdKrw: dto.exchangeRateUsdKrw ?? null,
+        exchangeRateDate: dto.exchangeRateUsdKrw != null ? (dto.invoiceDate ? new Date(dto.invoiceDate) : new Date()) : null,
       }),
     );
 
@@ -376,6 +406,78 @@ export class ExportShipmentsService {
 
     line.unitPrice = dto.unitPrice ?? null;
     line.amount = line.unitPrice != null ? line.unitPrice * Number(line.qty) : null;
+    return this.exportShipmentLineRepository.save(line);
+  }
+
+  // PR-157: 환율을 입력/수정하고, PurchaseOrder.unitPrice 기준으로 자동계산되던
+  // 라인(priceSource가 PURCHASE_ORDER이거나 아직 미확정인 라인)만 새 환율로 다시
+  // 계산한다 — 사람이 미도 단가표/수동으로 이미 확정한 라인(MANUAL/MIDO_PRICE_TABLE)은
+  // 건드리지 않는다(안전모드: 사람이 확정한 값을 조용히 덮어쓰지 않음).
+  async updateExchangeRate(id: number, dto: UpdateExportShipmentExchangeRateDto): Promise<ExportShipment> {
+    const shipment = await this.findOneOrFail(id);
+    if (shipment.status === ExportShipmentStatus.FINALIZED) {
+      throw new BadRequestException('FINALIZED 상태의 문서는 더 이상 수정할 수 없습니다.');
+    }
+
+    shipment.exchangeRateUsdKrw = dto.exchangeRateUsdKrw;
+    shipment.exchangeRateDate = shipment.invoiceDate ?? new Date();
+    await this.exportShipmentRepository.save(shipment);
+
+    // 재계산 대상 라인만 추려 receipt/발주를 한 번에(IN절) 가져온다 — 라인마다 매번
+    // findOne을 두 번씩 부르면(N+1) 라인이 많을수록 저장이 느려진다.
+    const recalculable = (shipment.lines ?? []).filter(
+      (line) =>
+        line.priceSource !== ExportShipmentLinePriceSource.MANUAL &&
+        line.priceSource !== ExportShipmentLinePriceSource.MIDO_PRICE_TABLE &&
+        !!line.packingReceiptId,
+    );
+
+    const receiptIds = [...new Set(recalculable.map((l) => l.packingReceiptId!))];
+    const receipts = receiptIds.length ? await this.packingReceiptRepository.find({ where: { id: In(receiptIds) } }) : [];
+    const receiptById = new Map(receipts.map((r) => [r.id, r]));
+
+    const poIds = [...new Set(receipts.map((r) => r.purchaseOrderId).filter((id): id is number => id != null))];
+    const pos = poIds.length ? await this.purchaseOrderRepository.find({ where: { id: In(poIds) } }) : [];
+    const poById = new Map(pos.map((p) => [p.id, p]));
+
+    const linesToSave: ExportShipmentLine[] = [];
+    for (const line of recalculable) {
+      const receipt = receiptById.get(line.packingReceiptId!);
+      const po = receipt ? poById.get(receipt.purchaseOrderId) : null;
+      const usd = calculateUsdValueFromKrw(po?.unitPrice, Number(line.qty), dto.exchangeRateUsdKrw);
+      line.unitPriceUsd = usd?.unitPriceUsd ?? null;
+      line.amountUsd = usd?.amountUsd ?? null;
+      line.priceSource = usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null;
+      linesToSave.push(line);
+    }
+    if (linesToSave.length) {
+      await this.exportShipmentLineRepository.save(linesToSave);
+    }
+
+    return this.findOneOrFail(id);
+  }
+
+  // PR-157: PurchaseOrder.unitPrice가 없는 라인의 USD 단가를 사람이 최종 확정한다
+  // (미도 단가표 후보 중 하나를 고르거나 완전 수동 입력) — 서버는 범위값 중 하나를
+  // 자동으로 고르지 않는다(화면에서 이미 고른 최종 숫자만 받는다).
+  async confirmLinePrice(
+    exportShipmentId: number,
+    lineId: number,
+    dto: ConfirmExportShipmentLinePriceDto,
+  ): Promise<ExportShipmentLine> {
+    const shipment = await this.findOneOrFail(exportShipmentId);
+    if (shipment.status === ExportShipmentStatus.FINALIZED) {
+      throw new BadRequestException('FINALIZED 상태의 문서는 더 이상 수정할 수 없습니다.');
+    }
+
+    const line = await this.exportShipmentLineRepository.findOne({ where: { id: lineId } });
+    if (!line || line.exportShipmentId !== exportShipmentId) {
+      throw new NotFoundException(`ID가 ${lineId}인 라인을 찾을 수 없습니다.`);
+    }
+
+    line.unitPriceUsd = dto.unitPriceUsd;
+    line.amountUsd = dto.unitPriceUsd * Number(line.qty);
+    line.priceSource = dto.source;
     return this.exportShipmentLineRepository.save(line);
   }
 }
