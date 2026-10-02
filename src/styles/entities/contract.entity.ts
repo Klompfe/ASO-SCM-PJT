@@ -61,6 +61,16 @@ export class Contract {
   @Column({ type: 'decimal', nullable: true })
   fobPrice: number | null;
 
+  // PR-166: 계약서 발행 시 CMT매입단가 표준가격(SALES CONTRACT 통합본 기준)을
+  // 자동 조회해 cmtPrice를 채웠다면 그 근거를, 자동으로 못 채웠다면("수동 확인
+  // 필요") 그 이유를 남긴다. productionType이 FOB이거나 CMT 표준가격 조회
+  // 자체를 안 한 계약(기존 데이터, 수주 등록 경로 등)은 둘 다 null.
+  @Column({ nullable: true })
+  cmtPriceConfidence: 'EXACT_STYLE_MATCH' | 'BRAND_CATEGORY_AVERAGE' | 'NEEDS_REVIEW' | null;
+
+  @Column({ type: 'text', nullable: true })
+  cmtPriceNote: string | null;
+
   @Column({ nullable: true })
   approvedByUserId: number | null;
 

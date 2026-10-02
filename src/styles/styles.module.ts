@@ -19,6 +19,7 @@ import { OrderShipmentsController } from './order-shipments.controller';
 import { OrderProgressSummaryService } from './order-progress-summary.service';
 import { OrderProgressSummaryController } from './order-progress-summary.controller';
 import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules.module';
+import { SalesContractPricesModule } from '../sales-contract-prices/sales-contract-prices.module';
 
 @Module({
   imports: [
@@ -34,6 +35,8 @@ import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules
     ]),
     // PR-111: 스타일번호 접두사로 브랜드를 분류하기 위해 규칙 목록이 필요하다.
     BrandPrefixRulesModule,
+    // PR-166: 계약서 발행 시 CMT매입단가 표준가격을 자동 조회하기 위해 필요하다.
+    SalesContractPricesModule,
   ],
   controllers: [
     StylesController,

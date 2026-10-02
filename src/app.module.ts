@@ -28,6 +28,7 @@ import { BuyersModule } from './buyers/buyers.module';
 import { ExportShipmentsModule } from './export-shipments/export-shipments.module';
 import { ExportShipmentDefaultsModule } from './export-shipment-defaults/export-shipment-defaults.module';
 import { HsCodeClassificationsModule } from './hs-code-classifications/hs-code-classifications.module';
+import { SalesContractPricesModule } from './sales-contract-prices/sales-contract-prices.module';
 import { ImportShipmentsModule } from './import-shipments/import-shipments.module';
 import { ProductionContractsModule } from './production-contracts/production-contracts.module';
 import { CashVouchersModule } from './cash-vouchers/cash-vouchers.module';
@@ -96,6 +97,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     ExportShipmentsModule,
     ExportShipmentDefaultsModule,
     HsCodeClassificationsModule,
+    SalesContractPricesModule,
     ImportShipmentsModule,
     ProductionContractsModule,
     CashVouchersModule,
