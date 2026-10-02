@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ProductionType } from '../../styles/entities/style-overview.entity';
 
 // suppliers(PR-037)와 동일한 CRUD 마스터 패턴이다(PR-069). StyleOverview.buyer/
 // Contract.buyer는 여전히 자유입력 문자열로 남겨둔다 — Contract는 "등록 시점
@@ -44,6 +45,12 @@ export class Buyer {
   // 저장해둔다 — 같은 브랜드로 추가 등록할 때 참고할 수 있게.
   @Column({ nullable: true })
   brandCode?: string;
+
+  // PR-167: 바이어(브랜드)별 계약방식 기본값(미도=CMT, W컨셉/킴마틴=FOB, 뮤트=CMT 등).
+  // 빈폴/에잇세컨즈처럼 판매시장(국내/중국)에 따라 갈리는 브랜드는 null로 둔다 —
+  // 그 경우는 계약 승인 시점에 StyleOverview/Contract.salesMarket으로 결정한다.
+  @Column({ type: 'varchar', enum: ProductionType, nullable: true })
+  defaultProductionType?: ProductionType | null;
 
   @CreateDateColumn()
   createdAt: Date;

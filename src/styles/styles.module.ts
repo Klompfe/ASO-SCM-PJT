@@ -8,6 +8,7 @@ import { OrderShipment } from './entities/order-shipment.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { ExportShipmentLine } from '../export-shipments/entities/export-shipment-line.entity';
+import { Buyer } from '../buyers/entities/buyer.entity';
 import { StylesService } from './styles.service';
 import { StylesController } from './styles.controller';
 import { ContractsService } from './contracts.service';
@@ -32,6 +33,7 @@ import { SalesContractPricesModule } from '../sales-contract-prices/sales-contra
       Bom,
       PurchaseOrder,
       ExportShipmentLine,
+      Buyer,
     ]),
     // PR-111: 스타일번호 접두사로 브랜드를 분류하기 위해 규칙 목록이 필요하다.
     BrandPrefixRulesModule,

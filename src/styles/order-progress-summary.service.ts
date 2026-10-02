@@ -48,13 +48,17 @@ export class OrderProgressSummaryService {
   // 목록 화면 하나 그리는 데 스타일당 N번씩 조회하면 스타일 수만큼 쿼리가 느는
   // N+1이 되므로, 4개 테이블을 각각 한 번에 전부 읽어 메모리에서 styleNo로
   // 묶은 뒤 조합한다.
-  async getSummary(): Promise<OrderProgressSummaryRow[]> {
-    const [styles, contracts, stages, shipments] = await Promise.all([
+  // PR-167: factory를 주면(화면 기본값은 "태일") 그 생산처 스타일만 보여준다 —
+  // 완전히 숨기는 게 아니라 필터일 뿐이므로, 생략하면 기존처럼 전부 보여준다.
+  async getSummary(factory?: string): Promise<OrderProgressSummaryRow[]> {
+    const [allStyles, contracts, stages, shipments] = await Promise.all([
       this.masterStyleRepository.find({ relations: ['overview'] }),
       this.contractRepository.find(),
       this.stageRepository.find(),
       this.shipmentRepository.find(),
     ]);
+
+    const styles = factory ? allStyles.filter((s) => s.overview?.factory === factory) : allStyles;
 
     const contractsByStyle = groupBy(contracts, (c) => c.styleNo);
     const stagesByStyle = groupBy(stages, (s) => s.styleNo);

@@ -24,15 +24,21 @@ const calculateDDay = (targetRdd: string | null): number | null => {
 
 const pct = (rate: number) => `${Math.round(rate)}%`;
 
+// PR-167: 오더개요.factory에 태일/재원/삼정 등 여러 생산처가 섞여 들어올 수 있지만,
+// 이 화면(계약 일괄승인의 입구)은 기본적으로 "태일" 건만 다룬다 — 완전히 숨기는
+// 게 아니라 필터일 뿐이라, 드롭다운에서 "전체"를 고르면 재원/삼정 건도 그대로 보인다.
+const DEFAULT_FACTORY_FILTER = '태일';
+
 export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
   const [rows, setRows] = useState<OrderProgressSummaryRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [bulkApproving, setBulkApproving] = useState(false);
+  const [factoryFilter, setFactoryFilter] = useState(DEFAULT_FACTORY_FILTER);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await getOrderProgressSummary();
+      const res = await getOrderProgressSummary(factoryFilter || undefined);
       setRows(Array.isArray(res) ? res : []);
     } catch (err: any) {
       toast.error(getErrorMessage(err, '진행현황 요약을 불러오는 데 실패했습니다.'));
@@ -40,7 +46,7 @@ export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [factoryFilter]);
 
   useEffect(() => {
     load();
@@ -53,12 +59,13 @@ export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
   // 현재 PENDING_APPROVAL 전체를 대상으로 하게 한다.
   const handleBulkApprove = async () => {
     if (pendingCount === 0) return;
-    const confirmed = window.confirm(`현재 미승인 상태인 계약 ${pendingCount}건을 모두 승인하시겠습니까?`);
+    const scope = factoryFilter ? `생산처 "${factoryFilter}"의 ` : '';
+    const confirmed = window.confirm(`현재 ${scope}미승인 상태인 계약 ${pendingCount}건을 모두 승인하시겠습니까?`);
     if (!confirmed) return;
 
     setBulkApproving(true);
     try {
-      const result = await bulkApproveContracts();
+      const result = await bulkApproveContracts(undefined, factoryFilter || undefined);
       if (result.failed.length > 0) {
         toast.error(`${result.approvedCount}건 승인, ${result.failed.length}건 실패`);
       } else {
@@ -109,7 +116,27 @@ export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
       rows={sortedRows}
       fileName="오더_진행현황_요약"
     >
-      <div className="flex justify-end items-center mb-3 print:hidden">
+      <div className="flex justify-between items-center mb-3 print:hidden">
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">생산처</label>
+          <input
+            aria-label="생산처 필터"
+            className="border border-gray-300 rounded px-2 py-1 text-sm w-28"
+            placeholder="전체"
+            value={factoryFilter}
+            onChange={(e) => setFactoryFilter(e.target.value)}
+          />
+          {factoryFilter !== DEFAULT_FACTORY_FILTER && (
+            <button type="button" onClick={() => setFactoryFilter(DEFAULT_FACTORY_FILTER)} className="text-xs text-blue-600 hover:underline">
+              기본값(태일)으로
+            </button>
+          )}
+          {factoryFilter !== '' && (
+            <button type="button" onClick={() => setFactoryFilter('')} className="text-xs text-gray-500 hover:underline">
+              전체 보기
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           {pendingCount > 0 && (
             <button

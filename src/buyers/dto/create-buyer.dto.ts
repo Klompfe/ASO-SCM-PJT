@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { ProductionType } from '../../styles/entities/style-overview.entity';
 
 // PR-085: code는 더 이상 클라이언트가 넘기지 않는다 — 서버가 "TY-{브랜드약칭}-
 // {YY}{일련번호4자리}"(예: TY-MB-260001) 형식으로 자동채번한다(BuyersService.create()
@@ -50,4 +51,11 @@ export class CreateBuyerDto {
   @IsOptional()
   @IsString()
   brandCode?: string;
+
+  // PR-167: 빈폴/에잇세컨즈처럼 판매시장(국내/중국)에 따라 계약방식이 갈리는
+  // 브랜드는 비워둔다 — 그 경우는 계약 승인 시점에 담당자가 직접 정한다.
+  @ApiPropertyOptional({ description: '기본 계약방식(FOB/CMT) — 판매시장에 따라 갈리는 브랜드는 비워둠', enum: ProductionType, example: ProductionType.CMT })
+  @IsOptional()
+  @IsEnum(ProductionType)
+  defaultProductionType?: ProductionType;
 }

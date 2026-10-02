@@ -5,7 +5,8 @@ import { getBrandPrefixRules } from '../api/brandPrefixRules.service';
 import { getSeasonDateRange, YEAR_OPTIONS, type Season } from '../utils/season';
 import {
   issueContract, getContractsByStyleNo, approveContract, rejectContract, deleteContract,
-  type Contract, type ContractStatus,
+  getContractApprovalContext,
+  type Contract, type ContractStatus, type ContractApprovalContext, type SalesMarket, type ProductionType as ContractProductionType,
 } from '../api/contracts.service';
 import {
   upsertProcessStage, getProcessStagesByStyle, getMaterialReadiness,
@@ -78,6 +79,12 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
   const [selectedStyle, setSelectedStyle] = useState<MasterStyle | null>(null);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [contractNotes, setContractNotes] = useState('');
+  // PR-167: 빈폴/에잇세컨즈는 판매시장(국내/중국) 선택이 승인 전 필수고, 그 외
+  // 브랜드는 Buyer.defaultProductionType 제안값을 보여준다 — PENDING_APPROVAL
+  // 계약마다 서버에 approval-context를 물어봐서 채운다.
+  const [approvalContextByContractId, setApprovalContextByContractId] = useState<Record<number, ContractApprovalContext>>({});
+  const [salesMarketDraft, setSalesMarketDraft] = useState<Record<number, SalesMarket | ''>>({});
+  const [productionTypeDraft, setProductionTypeDraft] = useState<Record<number, ContractProductionType | ''>>({});
 
   const [processStages, setProcessStages] = useState<OrderProcessStage[]>([]);
   const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness | null>(null);
@@ -237,10 +244,34 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
   const loadContracts = async (styleNo: string) => {
     try {
       const res = await getContractsByStyleNo(styleNo);
-      setContracts(Array.isArray(res) ? res : []);
+      const list: Contract[] = Array.isArray(res) ? res : [];
+      setContracts(list);
+      await loadApprovalContexts(list);
     } catch (err: any) {
       toast.error(getErrorMessage(err, '계약 이력을 불러오는 데 실패했습니다.'));
       setContracts([]);
+    }
+  };
+
+  // PENDING_APPROVAL 건만 조회한다 — 이미 처리된 계약은 더 이상 승인 입력이 필요 없다.
+  const loadApprovalContexts = async (list: Contract[]) => {
+    const pending = list.filter((c) => c.status === 'PENDING_APPROVAL');
+    if (pending.length === 0) return;
+    try {
+      const contexts = await Promise.all(pending.map((c) => getContractApprovalContext(c.id)));
+      const byId: Record<number, ContractApprovalContext> = {};
+      const marketDraft: Record<number, SalesMarket | ''> = {};
+      const productionDraft: Record<number, ContractProductionType | ''> = {};
+      contexts.forEach((ctx) => {
+        byId[ctx.contractId] = ctx;
+        marketDraft[ctx.contractId] = ctx.currentSalesMarket ?? '';
+        productionDraft[ctx.contractId] = ctx.suggestedProductionType ?? '';
+      });
+      setApprovalContextByContractId((prev) => ({ ...prev, ...byId }));
+      setSalesMarketDraft((prev) => ({ ...prev, ...marketDraft }));
+      setProductionTypeDraft((prev) => ({ ...prev, ...productionDraft }));
+    } catch {
+      // 승인 화면의 보조 정보일 뿐이라(제안값 표시), 실패해도 토스트로 승인 자체를 막지 않는다.
     }
   };
 
@@ -354,9 +385,20 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
 
   const handleApproveContract = async (contract: Contract) => {
     if (!selectedStyle) return;
+    const ctx = approvalContextByContractId[contract.id];
+    const salesMarket = salesMarketDraft[contract.id] || undefined;
+    const productionType = productionTypeDraft[contract.id] || undefined;
+
+    // 서버도 동일하게 막지만(안전모드 이중 방어), 화면에서 먼저 막아 불필요한
+    // 요청/에러 토스트 없이 바로 알려준다.
+    if (ctx?.requiresSalesMarket && !salesMarket) {
+      toast.error(`${ctx.brand}은(는) 판매시장(국내/중국)을 선택해야 승인할 수 있습니다.`);
+      return;
+    }
+
     setContractActionId(contract.id);
     try {
-      await approveContract(contract.id);
+      await approveContract(contract.id, { salesMarket: salesMarket as SalesMarket | undefined, productionType: productionType as ContractProductionType | undefined });
       toast.success('계약이 승인되었습니다.');
       loadContracts(selectedStyle.styleNo);
     } catch (err: any) {
@@ -496,8 +538,8 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
           <label className="mr-4"><input type="radio" value="FOB" checked={formData.productionType === 'FOB'} onChange={() => setFormData({...formData, productionType: 'FOB'})} /> FOB</label>
           <label><input type="radio" value="CMT" checked={formData.productionType === 'CMT'} onChange={() => setFormData({...formData, productionType: 'CMT'})} /> CMT</label>
         </div>
-        {formData.productionType === 'CMT' && <input className="border p-2 mb-4 w-full" placeholder="CMT Price" type="number" step="0.01" value={formData.cmtPrice} onChange={e => setFormData({...formData, cmtPrice: Number(e.target.value)})} />}
-        {formData.productionType === 'FOB' && <input className="border p-2 mb-4 w-full" placeholder="FOB Price" type="number" step="0.01" value={formData.fobPrice} onChange={e => setFormData({...formData, fobPrice: Number(e.target.value)})} />}
+        {formData.productionType === 'CMT' && <input className="border p-2 mb-4 w-full" placeholder="CMT매출단가" type="number" step="0.01" value={formData.cmtPrice} onChange={e => setFormData({...formData, cmtPrice: Number(e.target.value)})} />}
+        {formData.productionType === 'FOB' && <input className="border p-2 mb-4 w-full" placeholder="FOB매출단가" type="number" step="0.01" value={formData.fobPrice} onChange={e => setFormData({...formData, fobPrice: Number(e.target.value)})} />}
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">스타일 등록</button>
       </form>
 
@@ -677,12 +719,12 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                   </div>
                   {editForm.productionType === 'FOB' ? (
                     <div className="flex flex-col">
-                      <label className="text-gray-600 mb-1">FOB 단가</label>
+                      <label className="text-gray-600 mb-1">FOB매출단가</label>
                       <input type="number" step="0.01" className="border p-2 rounded" value={editForm.fobPrice ?? 0} onChange={(e) => setEditForm({ ...editForm, fobPrice: Number(e.target.value) })} />
                     </div>
                   ) : (
                     <div className="flex flex-col">
-                      <label className="text-gray-600 mb-1">CMT 단가</label>
+                      <label className="text-gray-600 mb-1">CMT매출단가</label>
                       <input type="number" step="0.01" className="border p-2 rounded" value={editForm.cmtPrice ?? 0} onChange={(e) => setEditForm({ ...editForm, cmtPrice: Number(e.target.value) })} />
                     </div>
                   )}
@@ -705,8 +747,8 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                 <div><span className="text-gray-500">바이어:</span> {selectedStyle.overview?.buyer ?? '-'}</div>
                 <div><span className="text-gray-500">총수량:</span> {selectedStyle.overview?.totalQty ?? '-'}</div>
                 <div><span className="text-gray-500">목표출고일:</span> {selectedStyle.overview?.targetRdd ?? '-'}</div>
-                <div><span className="text-gray-500">FOB 단가:</span> {selectedStyle.overview?.fobPrice ?? '-'}</div>
-                <div><span className="text-gray-500">CMT 단가:</span> {selectedStyle.overview?.cmtPrice ?? '-'}</div>
+                <div><span className="text-gray-500">FOB매출단가:</span> {selectedStyle.overview?.fobPrice ?? '-'}</div>
+                <div><span className="text-gray-500">CMT매출단가:</span> {selectedStyle.overview?.cmtPrice ?? '-'}</div>
                 <div><span className="text-gray-500">상태:</span> {selectedStyle.overview?.status ?? '-'}</div>
               </div>
             )}
@@ -716,7 +758,10 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
               <p className="text-sm text-gray-500 mb-4">발행된 계약서가 없습니다.</p>
             ) : (
               <ul className="mb-4 space-y-2 text-sm">
-                {contracts.map((c) => (
+                {contracts.map((c) => {
+                  const ctx = approvalContextByContractId[c.id];
+                  const showApprovalInputs = canApprove && c.status === 'PENDING_APPROVAL' && !!ctx;
+                  return (
                   <li key={c.id} className="border-b border-gray-100 pb-2">
                     <div className="flex items-center justify-between gap-2">
                       <div>
@@ -748,8 +793,44 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                         >삭제</button>
                       )}
                     </div>
+                    {showApprovalInputs && ctx.requiresSalesMarket && (
+                      <div className="mt-1 flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded px-2 py-1" data-testid={`sales-market-picker-${c.id}`}>
+                        <span className="text-xs text-yellow-800">{ctx.brand} — 판매시장 선택 필수:</span>
+                        <select
+                          aria-label={`판매시장 선택 (계약 #${c.id})`}
+                          className="border rounded text-xs px-1 py-0.5"
+                          value={salesMarketDraft[c.id] ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value as SalesMarket | '';
+                            setSalesMarketDraft((prev) => ({ ...prev, [c.id]: v }));
+                            setProductionTypeDraft((prev) => ({ ...prev, [c.id]: v === 'DOMESTIC' ? 'CMT' : v === 'CHINA' ? 'FOB' : '' }));
+                          }}
+                        >
+                          <option value="">선택 안 함</option>
+                          <option value="DOMESTIC">국내</option>
+                          <option value="CHINA">중국</option>
+                        </select>
+                        {productionTypeDraft[c.id] && <span className="text-xs text-yellow-700">→ 제안 계약방식: {productionTypeDraft[c.id]}</span>}
+                      </div>
+                    )}
+                    {showApprovalInputs && !ctx.requiresSalesMarket && (
+                      <div className="mt-1 flex items-center gap-2 bg-gray-50 border border-gray-200 rounded px-2 py-1" data-testid={`production-type-picker-${c.id}`}>
+                        <span className="text-xs text-gray-600">계약방식{ctx.buyerDefaultProductionType ? ' (바이어 기본값 제안)' : ''}:</span>
+                        <select
+                          aria-label={`계약방식 선택 (계약 #${c.id})`}
+                          className="border rounded text-xs px-1 py-0.5"
+                          value={productionTypeDraft[c.id] ?? ''}
+                          onChange={(e) => setProductionTypeDraft((prev) => ({ ...prev, [c.id]: e.target.value as ContractProductionType | '' }))}
+                        >
+                          <option value="">미지정</option>
+                          <option value="CMT">CMT</option>
+                          <option value="FOB">FOB</option>
+                        </select>
+                      </div>
+                    )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
 

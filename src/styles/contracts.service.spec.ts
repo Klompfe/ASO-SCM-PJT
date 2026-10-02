@@ -5,8 +5,10 @@ import { DataSource, Repository } from 'typeorm';
 import { ContractsService } from './contracts.service';
 import { Contract, ContractStatus } from './entities/contract.entity';
 import { MasterStyle } from './entities/master-style.entity';
-import { ProductionType } from './entities/style-overview.entity';
+import { ProductionType, SalesMarket } from './entities/style-overview.entity';
 import { SalesContractPricesService } from '../sales-contract-prices/sales-contract-prices.service';
+import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
+import { Buyer } from '../buyers/entities/buyer.entity';
 
 // PR-090: bulkApprove()는 approve()를 건별로 그대로 재사용하므로, approve()가
 // queryRunner 트랜잭션으로 "같은 styleNo의 기존 APPROVED를 SUPERSEDED로 내린다"는
@@ -73,6 +75,10 @@ describe('ContractsService (PR-090 bulkApprove)', () => {
         },
         {
           provide: getRepositoryToken(MasterStyle),
+          useValue: { findOne: jest.fn(), find: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: getRepositoryToken(Buyer),
           useValue: { findOne: jest.fn() },
         },
         {
@@ -82,6 +88,13 @@ describe('ContractsService (PR-090 bulkApprove)', () => {
         {
           provide: SalesContractPricesService,
           useValue: { resolve: jest.fn() },
+        },
+        {
+          // 기본값: 아무 브랜드 규칙도 없음(classifyBrand가 항상 null) — 기존
+          // bulkApprove 테스트들은 브랜드/판매시장과 무관하므로 영향받지 않는다.
+          // 판매시장 분기를 직접 검증하는 테스트는 아래에서 개별적으로 override한다.
+          provide: BrandPrefixRulesService,
+          useValue: { findAll: jest.fn().mockResolvedValue([]) },
         },
       ],
     }).compile();
@@ -236,6 +249,109 @@ describe('ContractsService (PR-090 bulkApprove)', () => {
       expect(salesContractPricesService.resolve).not.toHaveBeenCalled();
       expect(result.cmtPrice).toBe(9.99);
       expect(result.cmtPriceConfidence).toBeNull();
+    });
+  });
+
+  // PR-167: 빈폴/에잇세컨즈는 판매시장(국내/중국)에 따라 계약방식이 갈려서
+  // 자동 추론이 금지되고(사용자 확인), 계약 승인 시점에 담당자가 직접 지정해야
+  // 한다 — 지정 없이는 승인 자체를 막는다.
+  describe('getApprovalContext / approve 판매시장 검증 (PR-167)', () => {
+    let masterStyleRepoForContext: { findOne: jest.Mock; find: jest.Mock };
+    let buyerRepo: { findOne: jest.Mock };
+    let brandRules: { findAll: jest.Mock };
+
+    const BF_RULE = [{ prefix: 'BF', isNumericStart: false, brandName: '빈폴' }];
+
+    beforeEach(() => {
+      masterStyleRepoForContext = testingModule.get(getRepositoryToken(MasterStyle));
+      buyerRepo = testingModule.get(getRepositoryToken(Buyer));
+      brandRules = testingModule.get(BrandPrefixRulesService);
+    });
+
+    it('빈폴 계약은 requiresSalesMarket=true이고, 판매시장 미지정이면 제안값도 없다', async () => {
+      brandRules.findAll.mockResolvedValue(BF_RULE);
+      (contractRepository.findOne as jest.Mock).mockResolvedValue({ id: 1, styleNo: 'BF1234', buyer: '빈폴', salesMarket: null });
+
+      const ctx = await service.getApprovalContext(1);
+
+      expect(ctx.brand).toBe('빈폴');
+      expect(ctx.requiresSalesMarket).toBe(true);
+      expect(ctx.suggestedProductionType).toBeNull();
+    });
+
+    it('빈폴 계약에 이미 국내 판매시장이 저장돼 있으면 CMT를 제안한다(중국이면 FOB)', async () => {
+      brandRules.findAll.mockResolvedValue(BF_RULE);
+      (contractRepository.findOne as jest.Mock).mockResolvedValue({ id: 1, styleNo: 'BF1234', buyer: '빈폴', salesMarket: SalesMarket.DOMESTIC });
+
+      const ctx = await service.getApprovalContext(1);
+      expect(ctx.suggestedProductionType).toBe(ProductionType.CMT);
+    });
+
+    it('빈폴이 아닌 브랜드는 requiresSalesMarket=false이고 Buyer.defaultProductionType을 제안값으로 쓴다', async () => {
+      brandRules.findAll.mockResolvedValue([]); // 어떤 규칙에도 안 걸림 -> brand null
+      (contractRepository.findOne as jest.Mock).mockResolvedValue({ id: 2, styleNo: 'XX1', buyer: '미도컴퍼니', salesMarket: null });
+      buyerRepo.findOne.mockResolvedValue({ name: '미도컴퍼니', defaultProductionType: ProductionType.CMT });
+
+      const ctx = await service.getApprovalContext(2);
+
+      expect(ctx.requiresSalesMarket).toBe(false);
+      expect(ctx.buyerDefaultProductionType).toBe(ProductionType.CMT);
+      expect(ctx.suggestedProductionType).toBe(ProductionType.CMT);
+    });
+
+    it('빈폴 계약은 판매시장을 지정하지 않으면(저장값도 overrides도 없음) 승인이 거부된다', async () => {
+      brandRules.findAll.mockResolvedValue(BF_RULE);
+      store.push(makeContract({ id: 10, styleNo: 'BF9999', salesMarket: null } as any));
+
+      await expect(service.approve(10, 99)).rejects.toThrow(BadRequestException);
+      await expect(service.approve(10, 99)).rejects.toThrow('판매시장');
+    });
+
+    it('빈폴 계약도 approve() 호출 시 salesMarket/productionType을 함께 보내면 승인되고 그대로 저장된다', async () => {
+      brandRules.findAll.mockResolvedValue(BF_RULE);
+      store.push(makeContract({ id: 11, styleNo: 'BF9999', salesMarket: null } as any));
+
+      const result = await service.approve(11, 99, { salesMarket: SalesMarket.CHINA, productionType: ProductionType.FOB });
+
+      expect(result.status).toBe(ContractStatus.APPROVED);
+      expect(result.salesMarket).toBe(SalesMarket.CHINA);
+      expect(result.productionType).toBe(ProductionType.FOB);
+    });
+
+    it('빈폴이 아닌 브랜드는 판매시장 없이도 평소대로 승인된다(요구사항 대상 아님)', async () => {
+      brandRules.findAll.mockResolvedValue([]);
+      store.push(makeContract({ id: 12, styleNo: 'ZZ1', salesMarket: null } as any));
+
+      const result = await service.approve(12, 99);
+      expect(result.status).toBe(ContractStatus.APPROVED);
+    });
+  });
+
+  describe('bulkApprove — 생산처(factory) 필터 (PR-167)', () => {
+    it('ids 없이 factory를 지정하면(기본값 "태일") 그 생산처 스타일 계약만 승인 대상이 된다', async () => {
+      const masterStyleRepoForFilter: { find: jest.Mock } = testingModule.get(getRepositoryToken(MasterStyle));
+      masterStyleRepoForFilter.find.mockResolvedValue([
+        { styleNo: 'A1', overview: { factory: '태일' } },
+        { styleNo: 'A2', overview: { factory: '재원' } },
+      ]);
+      store.push(makeContract({ id: 1, styleNo: 'A1' }));
+      store.push(makeContract({ id: 2, styleNo: 'A2' }));
+
+      const result = await service.bulkApprove(undefined, 99, '태일');
+
+      expect(result.approvedCount).toBe(1);
+      expect(store.find((c) => c.id === 1)!.status).toBe(ContractStatus.APPROVED);
+      // 재원 건은 숨겨진 게 아니라(삭제/변경 없음) 이번 일괄승인 대상에서만 빠진다.
+      expect(store.find((c) => c.id === 2)!.status).toBe(ContractStatus.PENDING_APPROVAL);
+    });
+
+    it('factory를 생략하면 기존처럼 전체 PENDING_APPROVAL이 대상이다(회귀 없음)', async () => {
+      store.push(makeContract({ id: 1, styleNo: 'A1' }));
+      store.push(makeContract({ id: 2, styleNo: 'A2' }));
+
+      const result = await service.bulkApprove(undefined, 99);
+
+      expect(result.approvedCount).toBe(2);
     });
   });
 });

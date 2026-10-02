@@ -55,3 +55,14 @@ describe('수주 등록 화면 위치 (PR-134)', () => {
     expect(modal(false)).toBe('');
   });
 });
+
+// PR-167: 생산계약(ProductionContract)의 매입단가와 구분하기 위해 StylesManager의
+// 단가 라벨을 "FOB/CMT매출단가"로 바꾼다 — 데이터(cmtPrice/fobPrice 컬럼)는 그대로,
+// 화면 문구만 수정(라벨 변경).
+describe('오더관리 단가 라벨 — FOB/CMT매출단가 (PR-167)', () => {
+  it('등록 폼의 단가 입력란이 "FOB매출단가"로 표시된다(기본 생산유형=FOB)', () => {
+    const html = renderToStaticMarkup(createElement(StylesManager, {}));
+    expect(html).toContain('FOB매출단가');
+    expect(html).not.toContain('placeholder="FOB Price"');
+  });
+});

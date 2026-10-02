@@ -1,6 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { MasterStyle } from './master-style.entity';
-import { ProductionType } from './style-overview.entity';
+import { ProductionType, SalesMarket } from './style-overview.entity';
 import { User } from '../../users/entities/user.entity';
 
 export enum ContractStatus {
@@ -54,6 +54,12 @@ export class Contract {
 
   @Column({ type: 'varchar', enum: ProductionType, nullable: true })
   productionType: ProductionType | null;
+
+  // PR-167: 계약 승인 시점 스냅샷 원칙(이 파일 상단 주석) 그대로 — StyleOverview와
+  // 별개로 "이 계약 건을 승인할 때 담당 관리자가 확정한 판매시장"을 여기에도
+  // 남긴다. 빈폴/에잇세컨즈가 아닌 브랜드는 null.
+  @Column({ type: 'varchar', enum: SalesMarket, nullable: true })
+  salesMarket: SalesMarket | null;
 
   @Column({ type: 'decimal', nullable: true })
   cmtPrice: number | null;

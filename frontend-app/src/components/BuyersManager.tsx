@@ -10,7 +10,12 @@ import {
 } from '../api/buyers.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
-const emptyForm: CreateBuyer = { name: '', contactPerson: '', contactPhone: '', email: '', country: '', address: '', brandCode: '' };
+const emptyForm: CreateBuyer = { name: '', contactPerson: '', contactPhone: '', email: '', country: '', address: '', brandCode: '', defaultProductionType: undefined };
+
+// PR-167: 빈 값("")을 보내면 전체 조회가 아니라 DTO 검증(@IsEnum)을 통과 못 하니,
+// 미지정은 항상 undefined로 다룬다.
+const toProductionTypeOrUndefined = (v: string): CreateBuyer['defaultProductionType'] =>
+  v === 'FOB' || v === 'CMT' ? v : undefined;
 
 export const BuyersManager: React.FC = () => {
   const [buyers, setBuyers] = useState<Buyer[]>([]);
@@ -62,6 +67,7 @@ export const BuyersManager: React.FC = () => {
       country: b.country || '',
       address: b.address || '',
       brandCode: b.brandCode || '',
+      defaultProductionType: b.defaultProductionType ?? undefined,
     });
   };
 
@@ -129,6 +135,18 @@ export const BuyersManager: React.FC = () => {
           <label className="text-sm text-gray-600 mb-1">주소</label>
           <input className="border border-gray-300 rounded px-3 py-2" value={newBuyer.address} onChange={(e) => setNewBuyer({ ...newBuyer, address: e.target.value })} />
         </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">기본 계약방식 (선택 — 판매시장에 따라 갈리는 브랜드는 비워둠)</label>
+          <select
+            className="border border-gray-300 rounded px-3 py-2"
+            value={newBuyer.defaultProductionType ?? ''}
+            onChange={(e) => setNewBuyer({ ...newBuyer, defaultProductionType: toProductionTypeOrUndefined(e.target.value) })}
+          >
+            <option value="">미지정</option>
+            <option value="CMT">CMT</option>
+            <option value="FOB">FOB</option>
+          </select>
+        </div>
         <div className="col-span-2 md:col-span-3">
           <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700" disabled={loading}>등록</button>
         </div>
@@ -145,6 +163,7 @@ export const BuyersManager: React.FC = () => {
               <th className="px-4 py-2 text-left">이메일</th>
               <th className="px-4 py-2 text-left">국가</th>
               <th className="px-4 py-2 text-left">주소</th>
+              <th className="px-4 py-2 text-left">기본 계약방식</th>
               <th className="px-4 py-2 text-left">Action</th>
             </tr>
           </thead>
@@ -159,6 +178,17 @@ export const BuyersManager: React.FC = () => {
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} /></td>
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.country} onChange={(e) => setEditForm({ ...editForm, country: e.target.value })} /></td>
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} /></td>
+                  <td className="px-4 py-2">
+                    <select
+                      className="border rounded px-2 py-1"
+                      value={editForm.defaultProductionType ?? ''}
+                      onChange={(e) => setEditForm({ ...editForm, defaultProductionType: toProductionTypeOrUndefined(e.target.value) })}
+                    >
+                      <option value="">미지정</option>
+                      <option value="CMT">CMT</option>
+                      <option value="FOB">FOB</option>
+                    </select>
+                  </td>
                   <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                     <button className="text-blue-600" onClick={() => handleUpdate(b.id)}>저장</button>
                     <button className="text-gray-500" onClick={cancelEdit}>취소</button>
@@ -173,6 +203,7 @@ export const BuyersManager: React.FC = () => {
                   <td className="px-4 py-2">{b.email}</td>
                   <td className="px-4 py-2">{b.country}</td>
                   <td className="px-4 py-2">{b.address}</td>
+                  <td className="px-4 py-2">{b.defaultProductionType ?? '-'}</td>
                   <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                     <button className="text-blue-600" onClick={() => startEdit(b)}>수정</button>
                     <button className="text-red-600" onClick={() => handleDelete(b.id)}>삭제</button>

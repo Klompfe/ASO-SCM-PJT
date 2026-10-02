@@ -1,5 +1,10 @@
 import apiClient from './client';
 
+// PR-167: 빈폴/에잇세컨즈처럼 판매시장(국내/중국)에 따라 계약방식이 갈리는
+// 브랜드는 비워둔다 — 그 외(미도/W컨셉/킴마틴/뮤트 등)는 기본 계약방식을
+// 미리 정해두면 계약 승인 화면에서 제안값으로 쓸 수 있다.
+export type DefaultProductionType = 'FOB' | 'CMT';
+
 export interface Buyer {
   id: number;
   code: string;
@@ -10,6 +15,7 @@ export interface Buyer {
   country?: string | null;
   address?: string;
   brandCode?: string | null;
+  defaultProductionType?: DefaultProductionType | null;
 }
 
 // PR-085: code는 더 이상 클라이언트가 보내지 않는다(서버가 "TY-{브랜드약칭}-
@@ -23,6 +29,7 @@ export interface CreateBuyer {
   country?: string;
   address?: string;
   brandCode?: string;
+  defaultProductionType?: DefaultProductionType;
 }
 
 export type UpdateBuyer = Partial<CreateBuyer>;

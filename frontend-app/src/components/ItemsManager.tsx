@@ -457,11 +457,11 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
           <input className="border border-gray-300 rounded px-3 py-2" placeholder="예: MB62SLM103Z" value={searchStyleNo} onChange={(e) => setSearchStyleNo(e.target.value)} />
         </div>
         <div className="flex flex-col">
-          <label className="text-sm text-gray-600 mb-1">목표출고일(From)</label>
+          <label className="text-sm text-gray-600 mb-1">납기일(From)</label>
           <input className="border border-gray-300 rounded px-3 py-2" type="date" value={searchRddFrom} onChange={(e) => setSearchRddFrom(e.target.value)} />
         </div>
         <div className="flex flex-col">
-          <label className="text-sm text-gray-600 mb-1">목표출고일(To)</label>
+          <label className="text-sm text-gray-600 mb-1">납기일(To)</label>
           <input className="border border-gray-300 rounded px-3 py-2" type="date" value={searchRddTo} onChange={(e) => setSearchRddTo(e.target.value)} />
         </div>
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">검색</button>
@@ -475,7 +475,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                 <th className="px-4 py-2 text-left">스타일 번호</th>
                 <th className="px-4 py-2 text-left">브랜드</th>
                 <th className="px-4 py-2 text-left">바이어</th>
-                <th className="px-4 py-2 text-left">목표출고일</th>
+                <th className="px-4 py-2 text-left">납기일</th>
                 <th className="px-4 py-2 text-left">상태</th>
               </tr>
             </thead>

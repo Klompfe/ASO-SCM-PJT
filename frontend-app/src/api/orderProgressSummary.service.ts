@@ -24,4 +24,6 @@ export interface OrderProgressSummaryRow {
   deliveryStatus: string;
 }
 
-export const getOrderProgressSummary = (): Promise<any> => apiClient.get('/order-progress-summary');
+// PR-167: factory를 생략하면 전체(기존 동작) — 화면이 기본값으로 "태일"을 넘긴다.
+export const getOrderProgressSummary = (factory?: string): Promise<any> =>
+  apiClient.get('/order-progress-summary', factory ? { params: { factory } } : undefined);

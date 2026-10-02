@@ -11,6 +11,15 @@ export enum ProductionType {
   CMT = 'CMT',
 }
 
+// PR-167: 빈폴/에잇세컨즈는 계약방식(CMT/FOB)이 생산을 맡기는 공급업체 소재지가
+// 아니라 "어느 시장에 판매할지"로 갈린다(국내 판매 -> CMT, 중국 판매 -> FOB).
+// 시스템이 자동으로 추론할 방법이 없어(사용자 확인) 계약 승인 시점에 담당
+// 관리자가 직접 지정하는 값이다 — 그 외 브랜드는 null로 둔다.
+export enum SalesMarket {
+  DOMESTIC = 'DOMESTIC',
+  CHINA = 'CHINA',
+}
+
 @Entity()
 export class StyleOverview {
   @PrimaryGeneratedColumn()
@@ -61,6 +70,9 @@ export class StyleOverview {
   // 스타일명(예: "울혼방 코튼 반소매재킷")이 원본 문서에 있어 추가.
   @Column({ nullable: true })
   styleName: string | null;
+
+  @Column({ type: 'varchar', enum: SalesMarket, nullable: true })
+  salesMarket: SalesMarket | null;
 
   @OneToOne(() => MasterStyle, (style) => style.overview)
   style: MasterStyle;
