@@ -3,7 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Contract, ContractStatus } from './entities/contract.entity';
 import { MasterStyle } from './entities/master-style.entity';
+import { ProductionType } from './entities/style-overview.entity';
 import { IssueContractDto } from './dto/issue-contract.dto';
+import { SalesContractPricesService } from '../sales-contract-prices/sales-contract-prices.service';
 
 @Injectable()
 export class ContractsService {
@@ -12,17 +14,49 @@ export class ContractsService {
     private readonly contractRepository: Repository<Contract>,
     @InjectRepository(MasterStyle)
     private readonly masterStyleRepository: Repository<MasterStyle>,
+    private readonly salesContractPricesService: SalesContractPricesService,
     private readonly dataSource: DataSource,
   ) {}
 
+  // PR-166 이전에는 수동 발행(여기)이 StyleOverview 값을 전혀 복사하지 않아,
+  // 같은 스타일이라도 수주 등록(AI 분석, sales-orders.service.ts commitAnalysis)
+  // 경로로 만들어진 계약과 달리 공장/바이어/단가 등이 전부 null이었다 — 두 경로의
+  // 결과물이 일관되도록 수동 발행도 그 시점 StyleOverview 스냅샷을 그대로 복사한다.
+  // CMT 계약이고 cmtPrice가 아직 없으면 CMT매입단가 표준가격을 추가로 조회해 채운다
+  // (정확매칭/브랜드품종평균이면 자동 입력, 그래도 못 찾으면 null로 두고 근거만 남겨
+  // 승인자가 수동으로 입력하게 한다 — 승인 자체를 막지는 않는다).
   async issue(dto: IssueContractDto): Promise<Contract> {
-    const style = await this.masterStyleRepository.findOne({ where: { styleNo: dto.styleNo } });
+    const style = await this.masterStyleRepository.findOne({ where: { styleNo: dto.styleNo }, relations: ['overview'] });
     if (!style) {
       throw new NotFoundException(`존재하지 않는 스타일입니다: ${dto.styleNo}`);
     }
+    const overview = style.overview;
+
+    let cmtPrice = overview?.cmtPrice ?? null;
+    let cmtPriceConfidence: Contract['cmtPriceConfidence'] = null;
+    let cmtPriceNote: string | null = null;
+
+    if (overview?.productionType === ProductionType.CMT && cmtPrice == null) {
+      const resolved = await this.salesContractPricesService.resolve(dto.styleNo, overview.itemType ?? undefined);
+      cmtPriceConfidence = resolved.confidence;
+      cmtPriceNote = resolved.note;
+      if (resolved.price != null) {
+        cmtPrice = resolved.price;
+      }
+    }
+
     const contract = this.contractRepository.create({
       styleNo: dto.styleNo,
       notes: dto.notes ?? null,
+      totalQty: overview?.totalQty ?? null,
+      targetRdd: overview?.targetRdd ?? null,
+      factory: overview?.factory ?? null,
+      buyer: overview?.buyer ?? null,
+      productionType: overview?.productionType ?? null,
+      cmtPrice,
+      fobPrice: overview?.fobPrice ?? null,
+      cmtPriceConfidence,
+      cmtPriceNote,
     });
     return this.contractRepository.save(contract);
   }

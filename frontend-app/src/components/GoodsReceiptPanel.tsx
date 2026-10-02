@@ -201,7 +201,8 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
         {details.length === 0 ? (
           <p className="text-xs text-gray-400 mb-2">등록된 상세내역이 없습니다.</p>
         ) : (
-          <table className="w-full text-sm mb-2">
+          <div className="overflow-x-auto">
+          <table className="text-sm mb-2">
             <thead>
               <tr className="text-left text-gray-500 border-b border-gray-200">
                 <th className="py-1 pr-2 w-8"></th>
@@ -260,6 +261,7 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
               ))}
             </tbody>
           </table>
+          </div>
         )}
 
         <div id="packing-detail-add-form" className="bg-white border border-gray-200 rounded p-2 space-y-2">
@@ -316,7 +318,8 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
       {reviewLines && (
         <div className="bg-indigo-50 border border-indigo-200 rounded p-3 space-y-2">
           <h4 className="text-sm font-semibold text-gray-700">완제품입고증 작성 확인</h4>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="text-sm">
             <thead>
               <tr className="text-left text-gray-500 border-b border-indigo-200">
                 <th className="py-1 pr-2">색상</th>
@@ -356,6 +359,7 @@ export const GoodsReceiptPanel: React.FC<GoodsReceiptPanelProps> = ({ importShip
               })}
             </tbody>
           </table>
+          </div>
           <div className="flex gap-2 items-end">
             <div className="flex flex-col flex-1">
               <label className="text-xs text-gray-500 mb-1">비고</label>

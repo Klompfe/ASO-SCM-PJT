@@ -1,4 +1,4 @@
-import { getWorkOrders, type GetWorkOrdersFilter, type WorkOrder } from '../api/workOrders.service';
+import { getWorkOrders, getWorkOrdersByStyle, type GetWorkOrdersFilter, type WorkOrder, type WorkOrderStyleGroup } from '../api/workOrders.service';
 import { getItems, type GetItemsFilter, type Item } from '../api/items.service';
 import { DEFAULT_PAGE_SIZE, toPageMeta, type PageMeta } from './pagination';
 
@@ -58,6 +58,12 @@ function toResult<T>(res: unknown, fallback: { page: number; limit: number }): P
 export async function fetchWorkOrderPage(q: WorkOrderListQuery): Promise<PagedResult<WorkOrder>> {
   const filter = buildWorkOrdersQuery(q);
   return toResult<WorkOrder>(await getWorkOrders(filter), { page: q.page, limit: DEFAULT_PAGE_SIZE });
+}
+
+// PR-159: 1단계(스타일번호 목록) — 같은 필터를 스타일 단위 집계 엔드포인트로 조회한다.
+export async function fetchWorkOrderByStylePage(q: WorkOrderListQuery): Promise<PagedResult<WorkOrderStyleGroup>> {
+  const filter = buildWorkOrdersQuery(q);
+  return toResult<WorkOrderStyleGroup>(await getWorkOrdersByStyle(filter), { page: q.page, limit: DEFAULT_PAGE_SIZE });
 }
 
 export async function fetchItemPage(q: ItemListQuery): Promise<PagedResult<Item>> {

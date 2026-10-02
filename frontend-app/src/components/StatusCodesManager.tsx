@@ -158,7 +158,8 @@ export const StatusCodesManager: React.FC = () => {
         <div className="text-sm text-gray-500">불러오는 중...</div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="text-sm">
             <thead className="bg-gray-100 text-gray-700">
               <tr>
                 <th className="px-4 py-2 text-left">코드</th>
@@ -223,6 +224,7 @@ export const StatusCodesManager: React.FC = () => {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

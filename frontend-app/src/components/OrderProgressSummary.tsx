@@ -127,7 +127,7 @@ export const OrderProgressSummary: React.FC<Props> = ({ onSelectStyle }) => {
         <p className="text-sm text-gray-500">등록된 오더가 없습니다.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
+          <table className="border-collapse text-sm">
             <thead>
               <tr className="bg-gray-100 text-left">
                 <th className="p-2">Style No</th>

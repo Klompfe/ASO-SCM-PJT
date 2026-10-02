@@ -17,6 +17,11 @@ import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagina
 
 interface ItemsManagerProps {
   onOrderItem?: (itemId: number) => void;
+  // 오더관리(수주 등록/오더 목록)에서 "자재명세 보기"를 누르면 넘어오는 styleNo —
+  // App.tsx의 poPrefillItemId/StylesManager의 initialStyleNo와 동일한 cross-tab 패턴.
+  // 이 값이 오면 검색 없이 바로 그 스타일의 BOM을 연다.
+  initialStyleNo?: string | null;
+  onInitialStyleNoConsumed?: () => void;
 }
 
 // PR-103: 백엔드 ItemType enum(item-type.enum.ts)과 동일한 값 — 구분 드롭다운 옵션.
@@ -26,7 +31,7 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   FINISHED_GOOD: '완제품',
 };
 
-export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
+export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initialStyleNo, onInitialStyleNoConsumed }) => {
   // 스타일별 자재명세(BOM) 조회
   const [searchStyleNo, setSearchStyleNo] = useState('');
   const [searchRddFrom, setSearchRddFrom] = useState('');
@@ -62,7 +67,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
   // PR-073: 자재명세(BOM) 상세 테이블의 혼용율/HS코드 인라인 수정.
   const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
-  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string }>({ composition: '', hsCode: '' });
+  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string }>({ composition: '', hsCode: '', threadType: '' });
   // PR-099: "라벨류 기본 세트 추가" 버튼 처리 중 표시.
   const [addingLabelSet, setAddingLabelSet] = useState(false);
 
@@ -108,6 +113,18 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
       setBomError(getErrorMessage(err, '자재명세를 불러오는 데 실패했습니다.'));
     }
   };
+
+  // 오더관리에서 "자재명세 보기"로 넘어온 styleNo가 있으면 검색창 입력 없이 바로 그
+  // 스타일의 BOM을 연다. 한 번 처리하면 부모에게 소비했다고 알려 반복 오픈을 막는다
+  // (StylesManager의 initialStyleNo 처리와 동일한 패턴).
+  useEffect(() => {
+    if (!initialStyleNo) return;
+    setSearchStyleNo(initialStyleNo);
+    setSearched(true);
+    handleSelectStyleNo(initialStyleNo);
+    onInitialStyleNoConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialStyleNo]);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -221,18 +238,22 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
   const startEditBomItem = (row: BomItemRow) => {
     setEditingBomItemId(row.id);
-    setEditBomItemForm({ composition: row.composition || '', hsCode: row.hsCode || '' });
+    setEditBomItemForm({ composition: row.composition || '', hsCode: row.hsCode || '', threadType: row.threadType || '' });
   };
 
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
-    setEditBomItemForm({ composition: '', hsCode: '' });
+    setEditBomItemForm({ composition: '', hsCode: '', threadType: '' });
   };
 
   const handleUpdateBomItem = async (id: number) => {
     try {
-      await updateBomItem(id, { composition: editBomItemForm.composition, hsCode: editBomItemForm.hsCode });
-      toast.success('혼용율/HS코드가 수정되었습니다.');
+      await updateBomItem(id, {
+        composition: editBomItemForm.composition,
+        hsCode: editBomItemForm.hsCode,
+        ...(editBomItemForm.threadType ? { threadType: editBomItemForm.threadType as any } : {}),
+      });
+      toast.success('혼용율/HS코드/실 종류가 수정되었습니다.');
       cancelEditBomItem();
       if (selectedStyleNo) {
         const res = await getBomByStyleNo(selectedStyleNo);
@@ -448,7 +469,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
 
       {searched && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <table className="w-full">
+          <table>
             <thead className="bg-gray-100 text-gray-700">
               <tr>
                 <th className="px-4 py-2 text-left">스타일 번호</th>
@@ -497,7 +518,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
           {bomError && <div className="p-4 bg-yellow-50 text-yellow-800 rounded-lg">{bomError}</div>}
           {bom && (
             <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-              <table className="w-full">
+              <table>
                 <thead className="bg-gray-100 text-gray-700">
                   <tr>
                     <th className="px-4 py-2 text-left">자재코드</th>
@@ -512,6 +533,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                     <th className="px-4 py-2 text-left">비고</th>
                     <th className="px-4 py-2 text-left">혼용율</th>
                     <th className="px-4 py-2 text-left">HS코드</th>
+                    <th className="px-4 py-2 text-left">실 종류</th>
                     <th className="px-4 py-2 text-left">Action</th>
                   </tr>
                 </thead>
@@ -545,6 +567,19 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                             onChange={(e) => setEditBomItemForm({ ...editBomItemForm, hsCode: e.target.value })}
                           />
                         </td>
+                        <td className="px-4 py-2">
+                          <select
+                            className="border rounded px-2 py-1"
+                            aria-label="실 종류"
+                            value={editBomItemForm.threadType}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, threadType: e.target.value })}
+                          >
+                            <option value="">해당없음/미지정</option>
+                            <option value="COA_SA">코아사 (2500M/콘)</option>
+                            <option value="OBA_SA_SKU_I_SA">오바사·스쿠이사 (4000M/콘)</option>
+                            <option value="POLY_JINUIDO">폴리지누이도 (500M/콘)</option>
+                          </select>
+                        </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                           <button className="text-blue-600" onClick={() => handleUpdateBomItem(it.id)}>저장</button>
                           <button className="text-gray-500" onClick={cancelEditBomItem}>취소</button>
@@ -564,6 +599,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
                         <td className="px-4 py-2">{it.remarks}</td>
                         <td className="px-4 py-2">{it.composition ?? '-'}</td>
                         <td className="px-4 py-2">{it.hsCode ?? '-'}</td>
+                        <td className="px-4 py-2">
+                          {it.threadType === 'COA_SA' ? '코아사' : it.threadType === 'OBA_SA_SKU_I_SA' ? '오바사·스쿠이사' : it.threadType === 'POLY_JINUIDO' ? '폴리지누이도' : '-'}
+                        </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                           <button className="text-blue-600" onClick={() => startEditBomItem(it)}>수정</button>
                           {onOrderItem && it.material?.id && (
@@ -663,7 +701,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem }) => {
           </form>
 
           <div className="overflow-x-auto">
-          <table className="w-full">
+          <table>
             <thead className="bg-gray-100 text-gray-700">
               <tr>
                 <th className="px-4 py-2 text-left">Code</th>

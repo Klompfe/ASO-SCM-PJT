@@ -64,7 +64,8 @@ const StyleCard: React.FC<StyleCardProps> = ({ style, selectedId, saving, onSele
                   {s.differingItemCount > 0 && <span className="text-red-600 font-semibold"> · 다른 행 {s.differingItemCount}개</span>}
                 </p>
                 <div className="max-h-96 overflow-y-auto">
-                  <table className="w-full border-collapse">
+                  <div className="overflow-x-auto">
+                  <table className="border-collapse">
                     <thead className="sticky top-0">
                       <tr>
                         <th className={th}>자재</th>
@@ -84,6 +85,7 @@ const StyleCard: React.FC<StyleCardProps> = ({ style, selectedId, saving, onSele
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               </div>
             );

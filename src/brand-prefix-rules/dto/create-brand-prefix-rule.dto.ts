@@ -17,6 +17,13 @@ export class CreateBrandPrefixRuleDto {
   @IsBoolean()
   isNumericStart?: boolean;
 
+  // PR-165: 숫자시작 규칙이 둘 이상(에잇세컨즈/뮤트)일 때, 더 구체적인 쪽을 구분하는
+  // 정규식 문자열. isNumericStart=false면 의미 없으므로 비워둔다.
+  @ApiPropertyOptional({ description: '숫자시작 규칙 중 더 구체적인 패턴(정규식 문자열, 비우면 catch-all)', example: '^\\d{2}[FS]' })
+  @IsOptional()
+  @IsString()
+  numericPattern?: string;
+
   @ApiProperty({ description: '브랜드명', example: '빈폴' })
   @IsNotEmpty()
   @IsString()

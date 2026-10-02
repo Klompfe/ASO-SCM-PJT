@@ -4,6 +4,8 @@ export type ExportShipmentStatus = 'DRAFT' | 'REVIEWED' | 'FINALIZED';
 
 export type ExportShipmentSource = 'GENERATED' | 'IMPORTED';
 
+export type ExportShipmentLinePriceSource = 'PURCHASE_ORDER' | 'MIDO_PRICE_TABLE' | 'MANUAL';
+
 export interface ExportShipmentLine {
   id: number;
   exportShipmentId: number;
@@ -11,6 +13,7 @@ export interface ExportShipmentLine {
   packingReceiptId?: number | null;
   description: string;
   hsCode?: string;
+  color?: string | null;
   qty: number;
   unit: string;
   unitPrice?: number | null;
@@ -19,6 +22,10 @@ export interface ExportShipmentLine {
   grossWeight?: number | null;
   packageCount?: number | null;
   packageType?: string | null;
+  cbm?: number | null;
+  unitPriceUsd?: number | null;
+  amountUsd?: number | null;
+  priceSource?: ExportShipmentLinePriceSource | null;
 }
 
 export interface ExportShipment {
@@ -34,6 +41,8 @@ export interface ExportShipment {
   finalDestination?: string;
   carrier?: string;
   sailingDate?: string;
+  exchangeRateUsdKrw?: number | null;
+  exchangeRateDate?: string | null;
   createdAt: string;
   lines: ExportShipmentLine[];
 }
@@ -47,6 +56,7 @@ export interface GenerateExportShipment {
   finalDestination?: string;
   carrier?: string;
   sailingDate?: string;
+  exchangeRateUsdKrw?: number;
 }
 
 // PR-102: 스타일번호/자재명/선적건번호 검색 — 셋 다 선택적, AND 결합.
@@ -119,6 +129,17 @@ export const updateExportShipmentLine = (
   unitPrice: number | null,
 ): Promise<any> =>
   apiClient.patch(`/export-shipments/${exportShipmentId}/lines/${lineId}`, { unitPrice });
+
+// PR-157: 환율 입력/수정 — PurchaseOrder 기준 자동계산 라인만 재계산된다(사람이 이미
+// 확정한 MANUAL/MIDO_PRICE_TABLE 라인은 그대로 유지).
+export const updateExportShipmentExchangeRate = (id: number, exchangeRateUsdKrw: number): Promise<any> =>
+  apiClient.patch(`/export-shipments/${id}/exchange-rate`, { exchangeRateUsdKrw });
+
+export const confirmExportShipmentLinePrice = (
+  exportShipmentId: number,
+  lineId: number,
+  data: { source: ExportShipmentLinePriceSource; unitPriceUsd: number; midoPriceItemId?: number },
+): Promise<any> => apiClient.patch(`/export-shipments/${exportShipmentId}/lines/${lineId}/price`, data);
 
 // PR-080: 기 작성된 INVOICE/Packing List 엑셀을 그대로 가져와 DRAFT로 즉시 등록한다.
 // 응답에는 warnings(단위 불일치 등 조용히 무시하지 않은 경고 목록)가 함께 온다.

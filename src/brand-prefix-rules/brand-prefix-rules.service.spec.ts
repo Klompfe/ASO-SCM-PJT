@@ -59,11 +59,29 @@ describe('BrandPrefixRulesService', () => {
       expect(mockRepository.save).not.toHaveBeenCalled();
     });
 
-    it('숫자시작 규칙이 이미 있으면 또 등록 시 400이다', async () => {
-      mockRepository.find.mockResolvedValue([{ id: 5, prefix: null, isNumericStart: true, brandName: '에잇세컨즈' }]);
+    it('숫자시작 규칙이 이미 있으면(둘 다 catch-all) 또 등록 시 400이다', async () => {
+      mockRepository.find.mockResolvedValue([{ id: 5, prefix: null, isNumericStart: true, numericPattern: null, brandName: '에잇세컨즈' }]);
 
       await expect(
         service.create({ isNumericStart: true, brandName: '다른브랜드' } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    // PR-165: 숫자시작 규칙이 numericPattern으로 구분되면(에잇세컨즈=catch-all, 뮤트=특정 패턴)
+    // 여러 개 등록 가능해야 한다 — 기존 "숫자시작은 하나만" 제약을 완화한 핵심 케이스.
+    it('기존 숫자시작 규칙과 numericPattern이 다르면 함께 등록된다', async () => {
+      mockRepository.find.mockResolvedValue([{ id: 5, prefix: null, isNumericStart: true, numericPattern: null, brandName: '에잇세컨즈' }]);
+      mockRepository.save.mockImplementation((r: any) => Promise.resolve({ id: 6, ...r }));
+
+      const result = await service.create({ isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트' } as any);
+      expect(result).toMatchObject({ isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트' });
+    });
+
+    it('같은 numericPattern의 숫자시작 규칙이 이미 있으면 400이다', async () => {
+      mockRepository.find.mockResolvedValue([{ id: 5, prefix: null, isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트' }]);
+
+      await expect(
+        service.create({ isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '다른브랜드' } as any),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 

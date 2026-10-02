@@ -17,7 +17,11 @@
   --heading: 'Noto Sans KR', system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
-  font: 18px/145% var(--sans);
+  /* PR-162: 랜딩페이지 템플릿에서 시작한 흔적으로 기본 폰트가 18px(표준 16px보다
+     큼)였다 — Tailwind의 모든 rem 기반 글자크기/여백이 이 값을 기준으로 계산되므로
+     앱 전체 글자·여백이 일괄 12.5% 부풀려져 있었다. 데이터 밀도가 중요한 관리자용
+     화면이라 14px로 낮춰 같은 화면에 더 많은 행/열이 보이게 한다. */
+  font: 14px/135% var(--sans);
   letter-spacing: 0.18px;
   color-scheme: light dark;
   color: var(--text);
@@ -28,7 +32,7 @@
   -moz-osx-font-smoothing: grayscale;
 
   @media (max-width: 1024px) {
-    font-size: 16px;
+    font-size: 13px;
   }
 }
 
@@ -52,12 +56,13 @@
   }
 }
 
+/* PR-162: 역시 랜딩페이지 템플릿 흔적 — width:1126px로 가운데 고정폭 칼럼을 만들고
+   text-align:center를 전역으로 걸어, 와이드 모니터에서도 테이블/목록이 좁은 가운데
+   칼럼에 갇히고 데이터 셀까지 가운데 정렬되던 원인이었다. 전체 너비를 쓰고 좌측
+   정렬을 기본으로 되돌린다(App.tsx가 이미 사이드바+flex 레이아웃을 직접 구성한다). */
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
+  width: 100%;
+  text-align: left;
   min-height: 100svh;
   display: flex;
   flex-direction: column;
@@ -68,33 +73,43 @@ body {
   margin: 0;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
+/* PR-162: 아래 h1/h2/p/code 기본 스타일은 원래 unlayered(@layer 밖) CSS였다.
+   Tailwind v4는 자신의 유틸리티를 "@layer theme, base, components, utilities;"
+   안에 선언하는데, CSS 캐스케이드 레이어 규칙상 unlayered CSS는 선택자 명시도와
+   무관하게 어떤 레이어보다도 항상 이긴다 — 그래서 각 화면이 <h2 className="text-2xl">
+   처럼 직접 지정한 크기가 전부 무시되고 여기 h2{font-size:24px}가 강제 적용되고
+   있었다(LoginPage.tsx가 이 문제를 피하려고 <h1>/<h2> 대신 <p>를 쓴 이유였음).
+   @layer base로 감싸 Tailwind의 레이어 순서(utilities가 base보다 나중 = 우선)를
+   그대로 따르게 하면, 각 컴포넌트가 지정한 더 작은 글자크기가 의도대로 적용된다. */
+@layer base {
+  h1,
+  h2 {
+    font-family: var(--heading);
+    font-weight: 500;
+    color: var(--text-h);
+  }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
+  h1 {
+    font-size: 56px;
+    letter-spacing: -1.68px;
+    margin: 32px 0;
+    @media (max-width: 1024px) {
+      font-size: 36px;
+      margin: 20px 0;
+    }
   }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
+  h2 {
+    font-size: 24px;
+    line-height: 118%;
+    letter-spacing: -0.24px;
+    margin: 0 0 8px;
+    @media (max-width: 1024px) {
+      font-size: 20px;
+    }
   }
-}
-p {
-  margin: 0;
+  p {
+    margin: 0;
+  }
 }
 
 code,

@@ -99,7 +99,8 @@ export const PackingReceiptSummaryReport: React.FC = () => {
           {bySupplier.length > 0 && (
             <div className="mb-4">
               <h4 className="text-sm font-semibold text-gray-700 mb-1">공급업체별 입고 합계</h4>
-              <table className="w-full text-sm border-collapse" data-testid="packing-supplier-summary">
+              <div className="overflow-x-auto">
+              <table className="text-sm border-collapse" data-testid="packing-supplier-summary">
                 <thead><tr><th className={th}>공급업체</th><th className={`${th} text-right`}>입고 건수</th><th className={`${th} text-right`}>수량</th><th className={`${th} text-right`}>중량(kg)</th></tr></thead>
                 <tbody>
                   {bySupplier.map((s) => (
@@ -112,6 +113,7 @@ export const PackingReceiptSummaryReport: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -122,6 +124,7 @@ export const PackingReceiptSummaryReport: React.FC = () => {
                 입고 #{g.receiptId} · 발주 #{g.purchaseOrderId} · {g.supplierName}
                 <span className="font-normal text-gray-500"> · 입고일 {g.receivedDate || '-'}{g.remark ? ` · ${g.remark}` : ''}</span>
               </h4>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse table-fixed">
                 <thead>
                   <tr>
@@ -150,6 +153,7 @@ export const PackingReceiptSummaryReport: React.FC = () => {
                   </tr>
                 </tbody>
               </table>
+              </div>
             </section>
           ))}
         </PrintableReport>

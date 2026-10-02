@@ -24,6 +24,20 @@ export interface GetWorkOrdersFilter {
   itemName?: string;
   itemCode?: string;
   styleNo?: string;
+  // PR-159: 2단계(스타일 클릭 후 세부 목록)에서 "스타일 미지정" 그룹 조회용.
+  noStyleNo?: boolean;
+  // PR-159: 2단계 세부 목록 전용 완전일치(1단계 집계가 묶은 정확한 styleNo를 그대로 펼침 —
+  // 부분일치 styleNo를 쓰면 "AB1"로 펼쳤을 때 "AB123"까지 섞여 나올 수 있어 별도로 둔다).
+  styleNoExact?: string;
+}
+
+// PR-159: 작업지시를 스타일번호 단위로 집계 — 1단계(스타일 목록) 화면용.
+export interface WorkOrderStyleGroup {
+  styleNo: string | null; // null = 스타일 미지정
+  itemName: string | null;
+  itemCode: string | null;
+  count: number;
+  statusCounts: Record<string, number>;
 }
 
 export interface UpdateWorkOrderStatus {
@@ -36,6 +50,7 @@ export interface CreateWorkOrder {
 }
 
 export const getWorkOrders = (filter: GetWorkOrdersFilter): Promise<any> => apiClient.get('/work-orders', { params: filter });
+export const getWorkOrdersByStyle = (filter: GetWorkOrdersFilter): Promise<any> => apiClient.get('/work-orders/by-style', { params: filter });
 export const createWorkOrder = (data: CreateWorkOrder): Promise<any> => apiClient.post('/work-orders', data);
 export const updateWorkOrderStatus = (id: number, data: UpdateWorkOrderStatus): Promise<any> => apiClient.patch(`/work-orders/${id}/status`, data);
 // PR-120: BOM 소요명세서(작업지시 물량 기준 자재 소요량/이미 발주 수량/부족 수량).

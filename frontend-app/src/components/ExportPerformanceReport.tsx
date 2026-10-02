@@ -86,7 +86,8 @@ export const ExportPerformanceReport: React.FC = () => {
           <h4 className="text-sm font-semibold text-gray-700 mt-4 mb-1">
             브랜드별 소계 <span className="font-normal text-xs text-gray-400">(라인 단위로 분류 · 건수는 해당 브랜드 라인이 있는 문서 수라 합이 전체와 다를 수 있음)</span>
           </h4>
-          <table className="w-full text-sm border-collapse mb-4" data-testid="perf-brand-table">
+          <div className="overflow-x-auto">
+          <table className="text-sm border-collapse mb-4" data-testid="perf-brand-table">
             <thead>
               <tr>
                 <th className={th}>브랜드</th>
@@ -109,11 +110,13 @@ export const ExportPerformanceReport: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
 
           <h4 className="text-sm font-semibold text-gray-700 mb-1">
             거래처별 소계 <span className="font-normal text-xs text-gray-400">(스타일의 거래처(StyleOverview.buyer)로 라인 단위 분류 · 거래처 정보가 없으면 미분류)</span>
           </h4>
-          <table className="w-full text-sm border-collapse mb-4" data-testid="perf-buyer-table">
+          <div className="overflow-x-auto">
+          <table className="text-sm border-collapse mb-4" data-testid="perf-buyer-table">
             <thead>
               <tr>
                 <th className={th}>거래처</th>
@@ -136,9 +139,11 @@ export const ExportPerformanceReport: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
 
           <h4 className="text-sm font-semibold text-gray-700 mb-1">확정 문서 목록 ({shipments.length}건)</h4>
-          <table className="w-full text-sm border-collapse" data-testid="perf-list">
+          <div className="overflow-x-auto">
+          <table className="text-sm border-collapse" data-testid="perf-list">
             <thead>
               <tr>
                 <th className={th}>INVOICE 일자</th>
@@ -168,6 +173,7 @@ export const ExportPerformanceReport: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
         </PrintableReport>
       )}
     </div>

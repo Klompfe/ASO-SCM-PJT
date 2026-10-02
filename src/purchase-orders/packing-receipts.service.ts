@@ -66,6 +66,7 @@ export class PackingReceiptsService {
         materialCategory: dto.materialCategory,
         receivedDate: dto.receivedDate ? new Date(dto.receivedDate) : null,
         remark: dto.remark ?? null,
+        cbm: dto.cbm ?? null,
       }),
     );
 
@@ -95,6 +96,7 @@ export class PackingReceiptsService {
         materialCategory: dto.materialCategory,
         receivedDate: dto.receivedDate ? new Date(dto.receivedDate) : null,
         remark: dto.remark ?? null,
+        cbm: dto.cbm ?? null,
       }),
     );
 
@@ -165,6 +167,7 @@ export class PackingReceiptsService {
           rollCount: rolls.length,
           totalGrossWeight: sum(rolls, 'grossWeight'),
           totalNetWeight: sum(rolls, 'netWeight'),
+          totalLengthYd: sum(rolls, 'lengthYd'),
         },
       };
     }

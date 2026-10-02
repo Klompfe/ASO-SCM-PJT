@@ -47,6 +47,11 @@ export class CreatePackingReceiptRollDto {
   @IsOptional()
   @IsNumber()
   thickness?: number;
+
+  @ApiPropertyOptional({ example: 143, description: 'PR-157: 실제 롤 길이(야드) — 공급업체 패킹리스트 값을 그대로 입력' })
+  @IsOptional()
+  @IsNumber()
+  lengthYd?: number;
 }
 
 export class CreatePackingReceiptCartonDto {
@@ -99,6 +104,11 @@ export class CreatePackingReceiptDto {
   @IsOptional()
   @IsString()
   remark?: string;
+
+  @ApiPropertyOptional({ example: 12.5, description: 'PR-157: 공급업체 제공 CBM(수동 입력) — 없는 업체는 비워둠' })
+  @IsOptional()
+  @IsNumber()
+  cbm?: number;
 
   @ApiPropertyOptional({ type: [CreatePackingReceiptRollDto] })
   @IsOptional()

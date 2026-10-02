@@ -8,6 +8,8 @@ export interface BomItemMaterial {
   unit?: string;
 }
 
+export type ThreadType = 'COA_SA' | 'OBA_SA_SKU_I_SA' | 'POLY_JINUIDO';
+
 export interface BomItemRow {
   id: number;
   category: string;
@@ -20,6 +22,7 @@ export interface BomItemRow {
   remarks: string;
   composition?: string;
   hsCode?: string;
+  threadType?: ThreadType | null;
   material: BomItemMaterial;
 }
 
@@ -33,6 +36,7 @@ export interface BomDetail {
 export interface UpdateBomItem {
   composition?: string;
   hsCode?: string;
+  threadType?: ThreadType;
 }
 
 export const getBomByStyleNo = (styleNo: string): Promise<any> =>

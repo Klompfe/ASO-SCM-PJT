@@ -267,7 +267,7 @@ export const ProductionContractsManager: React.FC = () => {
             <p className="text-sm text-gray-500">등록된 생산계약이 없습니다.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
+              <table className="border-collapse text-sm">
                 <thead>
                   <tr className="bg-gray-100 text-left">
                     <th className="p-2">스타일번호</th>

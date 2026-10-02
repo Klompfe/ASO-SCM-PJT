@@ -40,6 +40,11 @@ export class PackingReceipt {
   @Column({ nullable: true })
   remark?: string | null;
 
+  // PR-157: 공급업체가 포장내역 전체 단위로 알려주는 CBM 값(수동 입력). 표준 포장형태별
+  // 자동계산은 이번 범위 밖 — 값이 없으면 0이 아니라 null로 남겨 화면에 "-"로 표시한다.
+  @Column({ type: 'decimal', nullable: true })
+  cbm?: number | null;
+
   @OneToMany(() => PackingReceiptRoll, (roll) => roll.packingReceipt, { cascade: true })
   rolls?: PackingReceiptRoll[];
 

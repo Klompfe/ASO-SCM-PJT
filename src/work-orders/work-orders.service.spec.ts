@@ -506,6 +506,107 @@ describe('WorkOrdersService', () => {
       const clauses = qb.andWhere.mock.calls.map(([c]: [string]) => c);
       expect(clauses.some((c: string) => c.includes(':itemName') || c.includes(':itemCode') || c.includes(':styleNo'))).toBe(false);
     });
+
+    // PR-159: "스타일 미지정" 그룹(2단계 상세) 전용 조회 — styleNo LIKE 대신 IS NULL.
+    it('noStyleNo=true면 item.styleNo IS NULL 조건을 걸고, styleNo 값이 있어도 무시한다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ noStyleNo: 'true', styleNo: 'MB62SLM103Z', page: 1, limit: 10 } as any);
+      const clauses = qb.andWhere.mock.calls.map(([c]: [string]) => c);
+      expect(clauses).toContain('item.styleNo IS NULL');
+      expect(clauses.some((c: string) => c.includes(':styleNo'))).toBe(false);
+    });
+
+    // PR-159: 2단계 세부 목록(1단계 집계를 그대로 펼침) 전용 — 부분일치가 아니라 완전일치라야
+    // "AB1"로 펼쳤을 때 "AB123" 작업지시까지 섞여 들어오지 않는다.
+    it('styleNoExact가 있으면 완전일치(=) 조건을 걸고, 부분일치 styleNo는 무시한다', async () => {
+      const qb = buildQb([]);
+      await service.findAll({ styleNoExact: 'AB1', styleNo: '무시됨', page: 1, limit: 10 } as any);
+      const clauses = qb.andWhere.mock.calls.map(([c]: [string]) => c);
+      expect(clauses).toContain('item.styleNo = :styleNoExact');
+      const call = qb.andWhere.mock.calls.find(([c]: [string]) => c.includes(':styleNoExact'));
+      expect(call[1]).toEqual({ styleNoExact: 'AB1' });
+      expect(clauses.some((c: string) => c.includes('LIKE LOWER(:styleNo)'))).toBe(false);
+    });
+  });
+
+  // PR-159: 조회 화면을 "스타일번호 목록 → 세부 작업지시" 2단계로 개편하며 신설한 집계.
+  describe('findAllByStyle — 스타일번호 단위 집계 (PR-159)', () => {
+    const buildQb = (result: any[] = []) => {
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(result),
+        getManyAndCount: jest.fn().mockResolvedValue([result, result.length]),
+      };
+      (mockWoRepository as any).createQueryBuilder = jest.fn().mockReturnValue(qb);
+      return qb;
+    };
+
+    const wo = (id: number, styleNo: string | null, status: string, itemName = '품목', itemCode = 'C1') => ({
+      id,
+      status,
+      item: styleNo === undefined ? undefined : { name: itemName, code: itemCode, styleNo },
+    });
+
+    it('같은 스타일번호의 작업지시를 하나의 그룹으로 묶고 건수/상태별 건수를 정확히 센다', async () => {
+      buildQb([
+        wo(3, 'MB62SLM103Z', 'PENDING'),
+        wo(2, 'MB62SLM103Z', 'IN_PROGRESS'),
+        wo(1, 'MB62SLM103Z', 'COMPLETED'),
+      ]);
+      const result = await service.findAllByStyle({ page: 1, limit: 10 } as any);
+      expect(result.items).toEqual([
+        { styleNo: 'MB62SLM103Z', itemName: '품목', itemCode: 'C1', count: 3, statusCounts: { PENDING: 1, IN_PROGRESS: 1, COMPLETED: 1 } },
+      ]);
+      expect(result.meta.total).toBe(1); // 그룹(스타일) 1개 — 작업지시 3건이 아니라
+    });
+
+    it('styleNo가 null인(품목이 스타일에 연결 안 된) 작업지시는 "스타일 미지정" 그룹으로 묶여 맨 뒤에 온다', async () => {
+      buildQb([
+        wo(10, null, 'PENDING', '미지정품목'),
+        wo(20, 'MB62SLM103Z', 'PENDING'),
+      ]);
+      const result = await service.findAllByStyle({ page: 1, limit: 10 } as any);
+      expect(result.items.map((g: any) => g.styleNo)).toEqual(['MB62SLM103Z', null]);
+      expect(result.items[1]).toEqual({ styleNo: null, itemName: '미지정품목', itemCode: 'C1', count: 1, statusCounts: { PENDING: 1 } });
+    });
+
+    it('여러 스타일이 있으면 그 스타일의 가장 최근(id가 큰) 작업지시 기준 내림차순으로 정렬한다', async () => {
+      buildQb([
+        wo(5, 'STYLE-OLD', 'PENDING'),
+        wo(9, 'STYLE-NEW', 'PENDING'),
+        wo(1, 'STYLE-OLD', 'COMPLETED'),
+      ]);
+      const result = await service.findAllByStyle({ page: 1, limit: 10 } as any);
+      expect(result.items.map((g: any) => g.styleNo)).toEqual(['STYLE-NEW', 'STYLE-OLD']);
+    });
+
+    it('스타일(그룹) 단위로 페이지네이션한다(작업지시 낱개 단위가 아니라)', async () => {
+      buildQb([wo(1, 'A', 'PENDING'), wo(2, 'B', 'PENDING'), wo(3, 'C', 'PENDING')]);
+      const result = await service.findAllByStyle({ page: 1, limit: 2 } as any);
+      expect(result.items).toHaveLength(2);
+      expect(result.meta).toEqual({ total: 3, page: 1, limit: 2, totalPages: 2, hasNextPage: true, hasPreviousPage: false });
+    });
+
+    it('findAll()과 같은 필터(itemName/itemCode/styleNo/status)를 그대로 andWhere에 반영한다', async () => {
+      const qb = buildQb([]);
+      await service.findAllByStyle({ styleNo: 'MB62SLM103Z', itemName: '셔츠', status: 'PENDING', page: 1, limit: 10 } as any);
+      const clauses = qb.andWhere.mock.calls.map(([c]: [string]) => c);
+      expect(clauses).toContain('LOWER(item.styleNo) LIKE LOWER(:styleNo)');
+      expect(clauses).toContain('LOWER(item.name) LIKE LOWER(:itemName)');
+      expect(clauses).toContain('wo.status = :status');
+    });
+
+    it('결과가 없으면 빈 목록과 total 0을 반환한다', async () => {
+      buildQb([]);
+      const result = await service.findAllByStyle({ page: 1, limit: 10 } as any);
+      expect(result.items).toEqual([]);
+      expect(result.meta.total).toBe(0);
+    });
   });
 
   // PR-140: 상태값이 status-codes 마스터 테이블(domain='WORK_ORDER') 기준으로 바뀌어도

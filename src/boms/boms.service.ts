@@ -84,6 +84,7 @@ export class BomsService {
 
     if (dto.composition !== undefined) bomItem.composition = dto.composition;
     if (dto.hsCode !== undefined) bomItem.hsCode = dto.hsCode;
+    if (dto.threadType !== undefined) bomItem.threadType = dto.threadType;
 
     return await this.bomItemRepository.save(bomItem);
   }

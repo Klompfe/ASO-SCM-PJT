@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { createWorkOrder, updateWorkOrderStatus, type WorkOrder, type CreateWorkOrder } from '../api/workOrders.service';
+import { createWorkOrder, updateWorkOrderStatus, getWorkOrders, type WorkOrder, type CreateWorkOrder, type WorkOrderStyleGroup } from '../api/workOrders.service';
 import type { Item } from '../api/items.service';
 import { getStatusCodes, type StatusCode } from '../api/statusCodes.service';
 import { SearchSelectField } from './SearchSelectField';
@@ -9,34 +9,46 @@ import { masterLabel, searchItems } from '../utils/searchFetchers';
 import { useNavigate } from 'react-router-dom'; // Assumed react-router usage
 import { getErrorMessage } from '../utils/errorMessage';
 import { Pagination } from './Pagination';
-import { fetchWorkOrderPage, hasAnySearchCondition, type WorkOrderListQuery } from '../utils/listQueries';
+import { fetchWorkOrderByStylePage, hasAnySearchCondition, type WorkOrderListQuery } from '../utils/listQueries';
 import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
+import { buildFieldOnlyQuery, filterExpandedOrders, type TextField } from '../utils/workOrdersByStyleView';
 
 const emptyCreateForm: CreateWorkOrder = { itemId: 0, targetQuantity: 1 };
 
+// PR-159: "스타일 미지정"(item.styleNo가 null) 그룹을 펼침 상태(expandedKey)에서 구분하는
+// 용도의 프론트 전용 키 — 서버에는 절대 안 보낸다(대신 noStyleNo:true를 보냄).
+const NO_STYLE_KEY = '\0__NO_STYLE__';
+
+// PR-159: 목록 화면을 "스타일번호 목록(1단계) → 클릭 시 세부 작업지시(2단계)" 구조로
+// 개편했다. 예전엔 작업지시 1건=1행으로 낱개 나열이라, 같은 스타일에 여러 건이 있으면
+// 흐름을 파악하기 어려웠다(사용자 피드백).
 export const WorkOrdersManager: React.FC = () => {
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-  // PR-128: 메인 목록은 서버 페이지네이션({items, meta})을 그대로 따른다 — 예전엔 filter가 {}라 첫 10건만 보이고 이동 수단이 없었다.
+  // 1단계 — 스타일번호 집계 목록
+  const [styleGroups, setStyleGroups] = useState<WorkOrderStyleGroup[]>([]);
   const [query, setQuery] = useState<WorkOrderListQuery>({ page: 1 });
-  // PR-139: "검색(품목명/코드/스타일번호)" 통합 입력창을 항목별 개별 입력란으로 분리 — 각각 독립적으로 채워 조회할 수 있다.
   const [itemNameDraft, setItemNameDraft] = useState('');
   const [itemCodeDraft, setItemCodeDraft] = useState('');
   const [styleNoDraft, setStyleNoDraft] = useState('');
-  // PR-140: "Filter by Status" 옵션을 하드코딩 대신 상태코드 마스터 테이블(domain='WORK_ORDER')에서 가져온다.
   const [statusOptions, setStatusOptions] = useState<StatusCode[]>([]);
   const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE_META);
   const [listLoading, setListLoading] = useState(false);
-  // PR-127: 품목은 <select>(getItems limit 100 — 100개 넘는 품목은 선택 불가)가 아니라 서버 검색 선택이다.
+
+  // 2단계 — 펼쳐진 스타일의 세부 작업지시
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [expandedOrders, setExpandedOrders] = useState<WorkOrder[]>([]);
+  const [expandedLoading, setExpandedLoading] = useState(false);
+  const [showAllInExpanded, setShowAllInExpanded] = useState(false);
+
+  // 직접 입력으로 등록(변경 없음, 이번 PR 범위 밖)
   const [item, setItem] = useState<Item | null>(null);
   const [newWorkOrder, setNewWorkOrder] = useState<CreateWorkOrder>(emptyCreateForm);
   const [creating, setCreating] = useState(false);
-  const navigate = useNavigate(); // For redirecting on auth error
+  const navigate = useNavigate();
 
   const handleAuthError = (error: any) => {
-    // 401 Unauthorized handling
     if (error.response?.status === 401 || error.status === 401) {
       localStorage.removeItem('access_token');
-      localStorage.removeItem('token'); // Also check alternative key
+      localStorage.removeItem('token');
       toast.error('세션이 만료되었습니다. 다시 로그인해주세요.', { id: 'auth-error' });
       navigate('/login');
     } else {
@@ -52,24 +64,21 @@ export const WorkOrdersManager: React.FC = () => {
     return { Authorization: `Bearer ${token}` };
   };
 
-  const loadWorkOrders = useCallback(async () => {
+  const loadStyleGroups = useCallback(async () => {
     try {
-      // Explicit token check (though interceptor handles it, user asked for explicit handling)
       getAuthHeader();
-      
       setListLoading(true);
-      const res = await fetchWorkOrderPage(query);
-      // 마지막 페이지의 항목이 사라지는 등으로 요청 페이지가 전체 페이지를 넘으면 마지막 페이지로 되돌아가 다시 조회한다.
+      const res = await fetchWorkOrderByStylePage(query);
       const recover = pageToRecoverTo(res.meta, query.page);
       if (recover !== null) {
         setQuery((q) => ({ ...q, page: recover }));
         return;
       }
-      setWorkOrders(res.items);
+      setStyleGroups(res.items);
       setMeta(res.meta);
     } catch (error) {
       handleAuthError(error);
-      setWorkOrders([]);
+      setStyleGroups([]);
       setMeta(EMPTY_PAGE_META);
     } finally {
       setListLoading(false);
@@ -77,16 +86,56 @@ export const WorkOrdersManager: React.FC = () => {
   }, [query, navigate]);
 
   useEffect(() => {
-    loadWorkOrders();
-  }, [loadWorkOrders]);
+    loadStyleGroups();
+  }, [loadStyleGroups]);
 
-  // PR-140: 상태 필터 옵션 — 화면이 열릴 때(탭 재진입 포함, 이 컴포넌트가 다시 마운트되므로)
-  // 다시 불러온다. 관리 화면(상태코드 관리)에서 새 코드를 추가한 뒤 이 탭으로 돌아오면 반영된다.
   useEffect(() => {
     getStatusCodes('WORK_ORDER')
       .then((res) => setStatusOptions(Array.isArray(res) ? res : []))
       .catch(() => setStatusOptions([]));
   }, []);
+
+  const groupKey = (g: WorkOrderStyleGroup) => g.styleNo ?? NO_STYLE_KEY;
+
+  // 2단계 세부 목록 — 전체보기와 무관하게 항상 전부 불러온 뒤(운영 규모상 한 스타일의
+  // 건수가 많지 않다고 판단, limit을 서버 최대치로 둠 — PaginationQueryDto가 100을
+  // 넘으면 400을 던진다) 기본 노출은 화면에서 진행중만 걸러 보여준다. 그래야 "완료
+  // 처리" 직후 다시 서버를 안 불러도 즉시 화면에 반영하기 쉽다.
+  const loadExpandedOrders = useCallback(async (group: WorkOrderStyleGroup) => {
+    setExpandedLoading(true);
+    try {
+      getAuthHeader();
+      const filter = group.styleNo === null
+        ? { noStyleNo: true, page: 1, limit: 100 }
+        : { styleNoExact: group.styleNo, page: 1, limit: 100 };
+      const res = await getWorkOrders(filter);
+      const items: WorkOrder[] = Array.isArray(res) ? res : (res?.items ?? []);
+      setExpandedOrders(items);
+    } catch (error) {
+      handleAuthError(error);
+      setExpandedOrders([]);
+    } finally {
+      setExpandedLoading(false);
+    }
+  }, [navigate]);
+
+  const toggleExpand = (group: WorkOrderStyleGroup) => {
+    const key = groupKey(group);
+    if (expandedKey === key) {
+      setExpandedKey(null);
+      setExpandedOrders([]);
+      return;
+    }
+    setExpandedKey(key);
+    setShowAllInExpanded(false);
+    void loadExpandedOrders(group);
+  };
+
+  const refreshAfterStatusChange = async () => {
+    const group = styleGroups.find((g) => groupKey(g) === expandedKey);
+    if (group) await loadExpandedOrders(group);
+    await loadStyleGroups(); // 1단계 건수 집계도 갱신
+  };
 
   const handleCreateWorkOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +154,7 @@ export const WorkOrdersManager: React.FC = () => {
       toast.success('작업 지시가 등록되었습니다.');
       setNewWorkOrder(emptyCreateForm);
       setItem(null);
-      // 새 작업지시는 최신순 첫 페이지에 나타나므로 1페이지로 돌아가 다시 조회한다.
+      // 새 작업지시는 해당 스타일이 최신순 맨 위로 올라오므로 1페이지로 돌아가 다시 조회한다.
       setQuery((q) => ({ ...q, page: 1 }));
     } catch (error) {
       handleAuthError(error);
@@ -114,16 +163,43 @@ export const WorkOrdersManager: React.FC = () => {
     }
   };
 
-  const handleUpdateStatus = async (id: number) => {
+  const handleUpdateStatus = async (id: number, status: 'IN_PROGRESS' | 'COMPLETED') => {
     try {
       getAuthHeader();
-      await updateWorkOrderStatus(id, { status: 'COMPLETED' });
-      toast.success('작업 지시 상태가 변경되었습니다.');
-      loadWorkOrders();
+      await updateWorkOrderStatus(id, { status });
+      toast.success(status === 'COMPLETED' ? '작업 지시가 완료 처리되었습니다.' : '작업 지시가 진행중으로 전환되었습니다.');
+      await refreshAfterStatusChange();
     } catch (error) {
       handleAuthError(error);
     }
   };
+
+  // PR-159: 필드별 돋보기 — 그 필드 값만으로 즉시 조회(다른 두 텍스트 칸은 화면엔 남겨두되
+  // 이번 조회 조건에서는 뺀다). 상태 필터는 이미 선택되어 있다면 그대로 함께 적용한다
+  // (돋보기가 명시적으로 초기화하라고 지시한 대상은 "다른 두 칸"뿐이라 상태까지 지우지 않음).
+  const searchByField = (field: TextField) => {
+    setQuery((q) => buildFieldOnlyQuery(field, { itemName: itemNameDraft, itemCode: itemCodeDraft, styleNo: styleNoDraft }, q.status));
+  };
+
+  // PR-159: "검색" 버튼(및 Enter) — 채워진 조건 전부를 AND로 묶어 조회한다(예전 폼
+  // onSubmit과 동일한 동작, 이번엔 버튼 하나로 명확히 분리됨). 조건이 하나도 없으면
+  // 여전히 경고하고 막는다(PR-139 정책 유지 — 근거는 완료 보고 참고).
+  const handleSearchAll = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hasAnySearchCondition(query.status, itemNameDraft, itemCodeDraft, styleNoDraft)) {
+      toast.error('검색 조건을 하나 이상 선택하거나 입력해 주세요.');
+      return;
+    }
+    setQuery((q) => ({ ...q, page: 1, itemName: itemNameDraft, itemCode: itemCodeDraft, styleNo: styleNoDraft }));
+  };
+
+  const statusBadge = (status: string) => (
+    <span className={`px-2 py-1 rounded text-xs font-medium ${status === 'COMPLETED' ? 'bg-green-100 text-green-800' : status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-800' : status === 'CANCELLED' ? 'bg-gray-200 text-gray-600' : 'bg-yellow-100 text-yellow-800'}`}>
+      {status}
+    </span>
+  );
+
+  const visibleExpandedOrders = filterExpandedOrders(expandedOrders, showAllInExpanded);
 
   return (
     <div className="space-y-6">
@@ -168,23 +244,9 @@ export const WorkOrdersManager: React.FC = () => {
         </form>
       </div>
 
-      <form
-        className="bg-gray-50 p-4 rounded-lg flex flex-wrap gap-4 items-end"
-        onSubmit={(e) => {
-          e.preventDefault();
-          // PR-139: 상태 필터도 텍스트도 전부 비어있으면 그냥 전체 목록을 보여주는 대신 경고하고 조회를 막는다.
-          // 단, 상태 필터는 이미 query.status에 즉시 반영돼 있으므로(선택 즉시 재조회) 그것만으로도 유효한 조건이다.
-          if (!hasAnySearchCondition(query.status, itemNameDraft, itemCodeDraft, styleNoDraft)) {
-            toast.error('검색 조건을 하나 이상 선택하거나 입력해 주세요.');
-            return;
-          }
-          setQuery((q) => ({ ...q, page: 1, itemName: itemNameDraft, itemCode: itemCodeDraft, styleNo: styleNoDraft }));
-        }}
-      >
+      <form className="bg-gray-50 p-4 rounded-lg flex flex-wrap gap-4 items-end" onSubmit={handleSearchAll}>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">Filter by Status</label>
-          {/* PR-140: 옵션은 하드코딩이 아니라 상태코드 마스터 테이블(GET /status-codes?domain=WORK_ORDER)에서
-              가져온다 — "상태코드 관리" 화면(관리자)에서 추가/수정한 값이 그대로 반영된다. 상태를 바꾸면 1페이지부터 다시 본다. */}
           <select
             aria-label="상태 필터"
             className="border border-gray-300 rounded px-3 py-2 w-full md:w-64"
@@ -197,50 +259,111 @@ export const WorkOrdersManager: React.FC = () => {
             ))}
           </select>
         </div>
-        {/* PR-139: "검색(품목명/코드/스타일번호)" 통합 입력창을 항목별 개별 입력란 + 조회 버튼으로 분리했다.
-            셋 다 AND로 걸리므로 하나만 채우고 조회해도 그 조건만으로 검색된다(listQueries.ts buildWorkOrdersQuery). */}
-        <FilterSearchInput label="품목명" ariaLabel="품목명 검색어" placeholder="예: 셔츠" value={itemNameDraft} onChange={setItemNameDraft} />
-        <FilterSearchInput label="품목코드" ariaLabel="품목코드 검색어" placeholder="예: MB62SLM103Z-01" value={itemCodeDraft} onChange={setItemCodeDraft} />
-        <FilterSearchInput label="스타일번호" ariaLabel="스타일번호 검색어" placeholder="예: MB62SLM103Z" value={styleNoDraft} onChange={setStyleNoDraft} />
+        {/* PR-159: 돋보기는 이 필드만으로 즉시 조회(onSearchThisField) — 다른 폼 submit과 분리됨. */}
+        <FilterSearchInput label="품목명" ariaLabel="품목명 검색어" placeholder="예: 셔츠" value={itemNameDraft} onChange={setItemNameDraft} onSearchThisField={() => searchByField('itemName')} />
+        <FilterSearchInput label="품목코드" ariaLabel="품목코드 검색어" placeholder="예: MB62SLM103Z-01" value={itemCodeDraft} onChange={setItemCodeDraft} onSearchThisField={() => searchByField('itemCode')} />
+        <FilterSearchInput label="스타일번호" ariaLabel="스타일번호 검색어" placeholder="예: MB62SLM103Z" value={styleNoDraft} onChange={setStyleNoDraft} onSearchThisField={() => searchByField('styleNo')} />
+        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">검색</button>
         <button
           type="button"
           className="bg-gray-200 text-gray-700 px-4 py-2 rounded"
-          onClick={() => { setItemNameDraft(''); setItemCodeDraft(''); setStyleNoDraft(''); setQuery({ page: 1 }); }}
+          onClick={() => { setItemNameDraft(''); setItemCodeDraft(''); setStyleNoDraft(''); setExpandedKey(null); setQuery({ page: 1 }); }}
         >초기화</button>
       </form>
 
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-100 text-gray-700">
-            <tr>
-              <th className="px-4 py-2 text-left">ID</th>
-              <th className="px-4 py-2 text-left">품목</th>
-              <th className="px-4 py-2 text-left">목표 수량</th>
-              <th className="px-4 py-2 text-left">Status</th>
-              <th className="px-4 py-2 text-left">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {workOrders.map((wo) => (
-              <tr key={wo.id} className="hover:bg-gray-50">
-                <td className="px-4 py-2 font-mono">{wo.id}</td>
-                <td className="px-4 py-2">{wo.item ? `${wo.item.name} (${wo.item.code})` : wo.itemId}</td>
-                <td className="px-4 py-2">{wo.targetQuantity}</td>
-                <td className="px-4 py-2">
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${wo.status === 'COMPLETED' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                    {wo.status}
-                  </span>
-                </td>
-                <td className="px-4 py-2">
-                  {wo.status !== 'COMPLETED' && (
-                    <button className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700" onClick={() => handleUpdateStatus(wo.id)}>Complete</button>
+      {/* 1단계 — 스타일번호 목록 */}
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-200">
+        <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium">
+          <div className="col-span-3">스타일번호</div>
+          <div className="col-span-3">대표 품목</div>
+          <div className="col-span-1 text-right">건수</div>
+          <div className="col-span-5">상태별 건수</div>
+        </div>
+        {styleGroups.map((g) => {
+          const key = groupKey(g);
+          const isExpanded = expandedKey === key;
+          return (
+            <div key={key}>
+              <button
+                type="button"
+                onClick={() => toggleExpand(g)}
+                data-testid={`style-group-${key}`}
+                className={`w-full text-left grid grid-cols-12 gap-2 px-4 py-3 hover:bg-gray-50 ${isExpanded ? 'bg-blue-50' : ''}`}
+              >
+                <div className="col-span-3 font-mono font-medium">
+                  {g.styleNo ?? <span className="text-gray-400 italic">스타일 미지정</span>}
+                </div>
+                <div className="col-span-3 text-sm text-gray-600">{g.itemName ?? '-'} {g.itemCode ? <span className="text-gray-400 text-xs">({g.itemCode})</span> : null}</div>
+                <div className="col-span-1 text-right text-sm">{g.count}건</div>
+                <div className="col-span-5 text-xs text-gray-500 space-x-2">
+                  {Object.entries(g.statusCounts).map(([status, n]) => (
+                    <span key={status}>{status} {n}건</span>
+                  ))}
+                </div>
+              </button>
+
+              {isExpanded && (
+                <div className="bg-gray-50 border-t border-gray-200 px-4 py-3" data-testid={`style-detail-${key}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-gray-500">
+                      {showAllInExpanded ? '전체' : '진행중(대기/진행중)만'} 표시 중 — {visibleExpandedOrders.length}건
+                    </p>
+                    <button
+                      type="button"
+                      className="text-xs text-blue-600 underline"
+                      onClick={() => setShowAllInExpanded((v) => !v)}
+                    >
+                      {showAllInExpanded ? '진행중만 보기' : '전체 보기'}
+                    </button>
+                  </div>
+                  {expandedLoading ? (
+                    <p className="text-sm text-gray-400 py-2">불러오는 중...</p>
+                  ) : visibleExpandedOrders.length === 0 ? (
+                    <p className="text-sm text-gray-400 py-2" data-testid="style-detail-empty">표시할 작업지시가 없습니다.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                    <table className="text-sm bg-white">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-3 py-1 text-left">ID</th>
+                          <th className="px-3 py-1 text-left">품목</th>
+                          <th className="px-3 py-1 text-left">목표 수량</th>
+                          <th className="px-3 py-1 text-left">Status</th>
+                          <th className="px-3 py-1 text-left">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {visibleExpandedOrders.map((wo) => (
+                          <tr key={wo.id}>
+                            <td className="px-3 py-1 font-mono">{wo.id}</td>
+                            <td className="px-3 py-1">{wo.item ? `${wo.item.name} (${wo.item.code})` : wo.itemId}</td>
+                            <td className="px-3 py-1">{wo.targetQuantity}</td>
+                            <td className="px-3 py-1">{statusBadge(wo.status)}</td>
+                            <td className="px-3 py-1 space-x-2">
+                              {/* PR-159: 대기 상태에서만 노출 — 담당자가 실제로 작업을 시작했을 때 수동으로 누르는 용도. */}
+                              {wo.status === 'PENDING' && (
+                                <button className="bg-indigo-600 text-white px-3 py-1 rounded text-xs hover:bg-indigo-700" onClick={() => handleUpdateStatus(wo.id, 'IN_PROGRESS')}>
+                                  진행중으로 전환
+                                </button>
+                              )}
+                              {wo.status !== 'COMPLETED' && wo.status !== 'CANCELLED' && (
+                                <button className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700" onClick={() => handleUpdateStatus(wo.id, 'COMPLETED')}>
+                                  Complete
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    </div>
                   )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {workOrders.length === 0 && !listLoading && (
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {styleGroups.length === 0 && !listLoading && (
           <p className="px-4 py-6 text-center text-sm text-gray-500" data-testid="work-orders-empty">조회된 작업지시가 없습니다.</p>
         )}
       </div>

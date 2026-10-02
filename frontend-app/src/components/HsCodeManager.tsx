@@ -224,7 +224,7 @@ export const HsCodeManager: React.FC = () => {
           <p className="text-red-800 font-semibold mb-2">
             다음 조합은 기존 값과 다르게 갱신되었습니다 ({lastConflicts.length}건)
           </p>
-          <table className="w-full text-sm text-red-900">
+          <table className="text-sm text-red-900">
             <thead>
               <tr className="text-left border-b border-red-200">
                 <th className="py-1 pr-2">품종</th>
@@ -369,7 +369,7 @@ export const HsCodeManager: React.FC = () => {
         />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
+          <table className="text-sm border-collapse">
             <thead>
               <tr className="text-left border-b border-gray-200 text-gray-600">
                 <th className="py-2 pr-3">품종</th>

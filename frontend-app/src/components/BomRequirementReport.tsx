@@ -174,15 +174,16 @@ export const BomRequirementReport: React.FC = () => {
               </div>
             ))}
           </div>
-          <table className="w-full text-sm border-collapse" data-testid="req-table">
+          <div className="overflow-x-auto">
+          <table className="text-sm border-collapse" data-testid="req-table">
             <thead>
               <tr>
                 <th className={th}>자재명</th>
                 <th className={th}>카테고리</th>
-                <th className={`${th} text-right`}>제품 1개당 소요량</th>
-                <th className={`${th} text-right`}>필요 총수량</th>
-                <th className={`${th} text-right`}>이미 발주 수량</th>
-                <th className={`${th} text-right`}>부족 수량</th>
+                <th className={`${th} text-right whitespace-normal`}>제품 1개당<br />소요량</th>
+                <th className={`${th} text-right whitespace-normal`}>필요<br />총수량</th>
+                <th className={`${th} text-right whitespace-normal`}>이미 발주<br />수량</th>
+                <th className={`${th} text-right whitespace-normal`}>부족<br />수량</th>
               </tr>
             </thead>
             <tbody>
@@ -202,6 +203,7 @@ export const BomRequirementReport: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
           <p className="text-xs text-gray-500 mt-3">
             필요 총수량 = 제품 1개당 소요량 × {shown.quantityLabel}. 이미 발주 수량은 해당 자재의 전체 발주 합계(취소 제외, 스타일/작업지시와 무관하게 합산)이며
             부족 수량은 필요 총수량에서 뺀 값(음수는 0)입니다.
