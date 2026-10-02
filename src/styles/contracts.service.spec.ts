@@ -5,6 +5,8 @@ import { DataSource, Repository } from 'typeorm';
 import { ContractsService } from './contracts.service';
 import { Contract, ContractStatus } from './entities/contract.entity';
 import { MasterStyle } from './entities/master-style.entity';
+import { ProductionType } from './entities/style-overview.entity';
+import { SalesContractPricesService } from '../sales-contract-prices/sales-contract-prices.service';
 
 // PR-090: bulkApprove()는 approve()를 건별로 그대로 재사용하므로, approve()가
 // queryRunner 트랜잭션으로 "같은 styleNo의 기존 APPROVED를 SUPERSEDED로 내린다"는
@@ -14,6 +16,7 @@ import { MasterStyle } from './entities/master-style.entity';
 describe('ContractsService (PR-090 bulkApprove)', () => {
   let service: ContractsService;
   let contractRepository: Repository<Contract>;
+  let testingModule: TestingModule;
   let store: Contract[];
 
   const makeContract = (overrides: Partial<Contract>): Contract =>
@@ -56,7 +59,7 @@ describe('ContractsService (PR-090 bulkApprove)', () => {
       },
     });
 
-    const module: TestingModule = await Test.createTestingModule({
+    testingModule = await Test.createTestingModule({
       providers: [
         ContractsService,
         {
@@ -64,21 +67,27 @@ describe('ContractsService (PR-090 bulkApprove)', () => {
           useValue: {
             find: jest.fn(() => Promise.resolve(store.filter((c) => c.status === ContractStatus.PENDING_APPROVAL))),
             findOne: jest.fn(),
+            create: jest.fn((data: any) => data),
+            save: jest.fn((entity: any) => Promise.resolve(entity)),
           },
         },
         {
           provide: getRepositoryToken(MasterStyle),
-          useValue: {},
+          useValue: { findOne: jest.fn() },
         },
         {
           provide: DataSource,
           useValue: { createQueryRunner: jest.fn(queryRunnerFactory) },
         },
+        {
+          provide: SalesContractPricesService,
+          useValue: { resolve: jest.fn() },
+        },
       ],
     }).compile();
 
-    service = module.get(ContractsService);
-    contractRepository = module.get(getRepositoryToken(Contract));
+    service = testingModule.get(ContractsService);
+    contractRepository = testingModule.get(getRepositoryToken(Contract));
   });
 
   it('여러 건을 ids로 지정하면 모두 승인되고 approvedCount가 정확해야 한다', async () => {
@@ -145,5 +154,88 @@ describe('ContractsService (PR-090 bulkApprove)', () => {
 
   it('단건 approve()는 존재하지 않는 id면 NotFoundException을 던진다', async () => {
     await expect(service.approve(9999, 99)).rejects.toThrow(NotFoundException);
+  });
+
+  // PR-166: 수동 발행(issue())도 수주 등록(AI 분석) 경로처럼 StyleOverview 스냅샷을
+  // 복사하고, CMT 계약인데 단가가 비어 있으면 CMT매입단가 표준가격을 조회해 채운다.
+  describe('issue — StyleOverview 스냅샷 + CMT매입단가 자동 조회 (PR-166)', () => {
+    let masterStyleRepo: { findOne: jest.Mock };
+    let salesContractPricesService: { resolve: jest.Mock };
+
+    beforeEach(() => {
+      masterStyleRepo = testingModule.get(getRepositoryToken(MasterStyle));
+      salesContractPricesService = testingModule.get(SalesContractPricesService);
+    });
+
+    it('존재하지 않는 스타일이면 NotFoundException', async () => {
+      masterStyleRepo.findOne.mockResolvedValue(null);
+      await expect(service.issue({ styleNo: 'NOPE' } as any)).rejects.toThrow(NotFoundException);
+    });
+
+    it('FOB 계약이면 CMT 단가 조회를 아예 하지 않고 overview 값을 그대로 스냅샷한다', async () => {
+      masterStyleRepo.findOne.mockResolvedValue({
+        styleNo: 'ST1',
+        overview: {
+          totalQty: 500, targetRdd: '2026-12-01', factory: '베트남', buyer: '미도컴퍼니',
+          productionType: ProductionType.FOB, cmtPrice: null, fobPrice: 12.5, itemType: "WOMEN'S PANTS",
+        },
+      });
+
+      const result = await service.issue({ styleNo: 'ST1' } as any);
+
+      expect(salesContractPricesService.resolve).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        totalQty: 500, factory: '베트남', buyer: '미도컴퍼니',
+        productionType: ProductionType.FOB, fobPrice: 12.5, cmtPrice: null,
+        cmtPriceConfidence: null, cmtPriceNote: null,
+      });
+    });
+
+    it('CMT 계약이고 cmtPrice가 비어 있으면 표준가격을 조회해 정확매칭이면 자동으로 채운다', async () => {
+      masterStyleRepo.findOne.mockResolvedValue({
+        styleNo: 'ST2',
+        overview: { totalQty: 300, factory: '베트남', buyer: '미도컴퍼니', productionType: ProductionType.CMT, cmtPrice: null, itemType: "WOMEN'S COAT" },
+      });
+      salesContractPricesService.resolve.mockResolvedValue({
+        confidence: 'EXACT_STYLE_MATCH', price: 10, priceMin: 10, priceMax: 10, matchedCount: 1,
+        note: 'SALES CONTRACT에 스타일번호가 그대로 있음(단가 $10)', brand: '루미에반', category: "WOMEN'S COAT",
+      });
+
+      const result = await service.issue({ styleNo: 'ST2' } as any);
+
+      expect(salesContractPricesService.resolve).toHaveBeenCalledWith('ST2', "WOMEN'S COAT");
+      expect(result.cmtPrice).toBe(10);
+      expect(result.cmtPriceConfidence).toBe('EXACT_STYLE_MATCH');
+    });
+
+    it('CMT 계약인데 표준가격도 못 찾으면(NEEDS_REVIEW) cmtPrice는 null로 남기고 근거만 기록한다(승인 자체는 막지 않음)', async () => {
+      masterStyleRepo.findOne.mockResolvedValue({
+        styleNo: 'ST3',
+        overview: { totalQty: 300, factory: '베트남', buyer: '미도컴퍼니', productionType: ProductionType.CMT, cmtPrice: null, itemType: "WOMEN'S PANTS" },
+      });
+      salesContractPricesService.resolve.mockResolvedValue({
+        confidence: 'NEEDS_REVIEW', price: null, priceMin: 4.5, priceMax: 8.5, matchedCount: 17,
+        note: '빈폴×WOMEN\'S PANTS 단가 편차가 커서 평균을 표준가격으로 쓰기 어려움 — 수동 확인 필요', brand: '빈폴', category: "WOMEN'S PANTS",
+      });
+
+      const result = await service.issue({ styleNo: 'ST3' } as any);
+
+      expect(result.cmtPrice).toBeNull();
+      expect(result.cmtPriceConfidence).toBe('NEEDS_REVIEW');
+      expect(result.cmtPriceNote).toContain('수동 확인 필요');
+    });
+
+    it('CMT 계약이어도 cmtPrice가 이미 있으면(기존 StyleOverview 값) 표준가격을 조회하지 않는다', async () => {
+      masterStyleRepo.findOne.mockResolvedValue({
+        styleNo: 'ST4',
+        overview: { totalQty: 300, factory: '베트남', buyer: '미도컴퍼니', productionType: ProductionType.CMT, cmtPrice: 9.99, itemType: "WOMEN'S COAT" },
+      });
+
+      const result = await service.issue({ styleNo: 'ST4' } as any);
+
+      expect(salesContractPricesService.resolve).not.toHaveBeenCalled();
+      expect(result.cmtPrice).toBe(9.99);
+      expect(result.cmtPriceConfidence).toBeNull();
+    });
   });
 });
