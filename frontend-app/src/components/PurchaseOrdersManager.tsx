@@ -16,6 +16,7 @@ import { pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, type Suppl
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
 import { ShipmentsManager } from './ShipmentsManager';
+import { SupplierQuickCreateModal } from './SupplierQuickCreateModal';
 
 interface ItemRef { id: number; name: string; code: string }
 
@@ -46,6 +47,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [filterItem, setFilterItem] = useState<ItemRef | null>(null);
   // PR-074: 포장내역은 발주 하위 흐름이라 별도 탭이 아니라 발주 행에서 모달로 연다.
   const [packingReceiptsFor, setPackingReceiptsFor] = useState<PurchaseOrder | null>(null);
+  // PR-172: 공급업체가 아직 없을 때 SuppliersManager 탭으로 넘어가면(이 앱은 탭 전환
+  // 시 언마운트됨 — react-router 없음) 작성 중이던 발주 폼이 사라진다 — 팝업으로 바로
+  // 등록하고 폼은 그대로 유지한다.
+  const [showQuickCreateSupplier, setShowQuickCreateSupplier] = useState(false);
   // PR-082: 기존 "선적관리 > 수입"에 임시로 얹혀 있던 ShipmentsManager(원자재 입고)를
   // 원래 자리인 Purchase Orders 쪽 서브탭으로 옮긴다 — shipments 모듈은 PurchaseOrder와
   // 연결된 개념이라 여기가 맞는 위치다(export-shipments의 shipmentsSubTab과 동일 패턴).
@@ -229,18 +234,27 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           </div>
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">공급업체</label>
-            <SearchSelectField<SupplierRef>
-              value={supplier}
-              onChange={(picked) => { setSupplier(picked); setAutofilled(false); }}
-              search={searchSuppliers}
-              getKey={(x) => x.id}
-              getLabel={(x) => `${x.name} (${x.code})`}
-              renderRow={(x) => (<span>{x.name} <span className="text-gray-400 text-xs">{x.code}</span></span>)}
-              ariaLabel="공급업체"
-              placeholder="공급업체 검색"
-              title="공급업체 검색"
-              className="w-64"
-            />
+            <div className="flex items-stretch gap-1">
+              <SearchSelectField<SupplierRef>
+                value={supplier}
+                onChange={(picked) => { setSupplier(picked); setAutofilled(false); }}
+                search={searchSuppliers}
+                getKey={(x) => x.id}
+                getLabel={(x) => `${x.name} (${x.code})`}
+                renderRow={(x) => (<span>{x.name} <span className="text-gray-400 text-xs">{x.code}</span></span>)}
+                ariaLabel="공급업체"
+                placeholder="공급업체 검색"
+                title="공급업체 검색"
+                className="w-64"
+              />
+              <button
+                type="button"
+                onClick={() => setShowQuickCreateSupplier(true)}
+                className="border border-gray-300 rounded px-2 text-sm text-blue-600 hover:bg-blue-50 whitespace-nowrap"
+              >
+                + 새 공급업체 등록
+              </button>
+            </div>
           </div>
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">수량</label>
@@ -342,6 +356,19 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           purchaseOrderId={packingReceiptsFor.id}
           purchaseOrderLabel={`발주 #${packingReceiptsFor.id} (${packingReceiptsFor.item?.name ?? `#${packingReceiptsFor.itemId}`})`}
           onClose={() => setPackingReceiptsFor(null)}
+        />
+      )}
+
+      {showQuickCreateSupplier && (
+        <SupplierQuickCreateModal
+          onCreated={(created) => {
+            // 발주 폼의 나머지 입력값(품목/수량/단가/비고 등)은 전혀 건드리지 않고
+            // 공급업체 선택란만 채운다 — autofilled는 "이력으로 자동 채움"이 아니라
+            // 사람이 방금 등록/선택한 값이므로 false로 둔다(기존 수동 선택과 동일하게 취급).
+            setSupplier({ id: created.id, code: created.code, name: created.name });
+            setAutofilled(false);
+          }}
+          onClose={() => setShowQuickCreateSupplier(false)}
         />
       )}
         </>
