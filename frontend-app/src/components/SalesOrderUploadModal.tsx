@@ -364,6 +364,30 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           </span>
                         )}
                       </label>
+                      <label className="flex flex-col">
+                        <span className="text-gray-500 text-xs">CMT단가</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          data-testid={`cmt-price-input-${index}`}
+                          className="border rounded px-2 py-1"
+                          value={result.overview.cmtPrice ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'cmtPrice', e.target.value === '' ? null : Number(e.target.value))}
+                        />
+                        {/* PR-168: 미도 전용 — 작지 상단 수기 CMT단가 AI 후보. 자동으로
+                            채우지 않고, 사람이 "이 값 사용"을 눌러야 위 입력란에 복사되며
+                            그 뒤에도 "저장" 버튼을 눌러야 실제로 반영된다(이중 확인). */}
+                        {result.overview.handwrittenCmtPriceCandidate != null && (
+                          <div className="mt-1 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 text-xs text-yellow-800" data-testid={`cmt-price-candidate-${index}`}>
+                            AI가 인식한 CMT단가 후보: <b>{result.overview.handwrittenCmtPriceCandidate}</b> — 이 값을 사용하시겠습니까?
+                            <button
+                              type="button"
+                              onClick={() => updateOverviewField(index, 'cmtPrice', result.overview.handwrittenCmtPriceCandidate ?? null)}
+                              className="ml-2 px-2 py-0.5 rounded bg-yellow-600 text-white hover:bg-yellow-700"
+                            >사용</button>
+                          </div>
+                        )}
+                      </label>
                     </div>
                   </div>
 

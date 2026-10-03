@@ -23,6 +23,22 @@ export class AiOverviewDto {
   @IsOptional()
   @IsBoolean()
   targetRddSuspicious?: boolean;
+
+  // PR-168: 미도 전용 — 작업지시서 이미지 상단에 수기로 적힌 CMT단가 숫자(AI 후보일
+  // 뿐, 그대로 저장되지 않는다). 미도가 아닌 바이어 건은 vision.service.ts가 결정적으로
+  // null로 덮어쓴다(바이어 인식 자체를 AI 판단에만 맡기지 않음, PR-158과 동일한 원칙).
+  @ApiPropertyOptional({ description: '미도 전용: 작지 상단 수기 CMT단가 후보(AI 추출, 그대로 저장 금지 — 사람이 확인 후 cmtPrice에 반영)' })
+  @IsOptional()
+  @IsNumber()
+  handwrittenCmtPriceCandidate?: number | null;
+
+  // 화면에서 사람이 확인/수정한 최종 CMT단가 — commitAnalysis가 이 값만 StyleOverview/
+  // Contract.cmtPrice에 반영한다. handwrittenCmtPriceCandidate와 달리 AI가 채우는
+  // 필드가 아니다(기본은 비어 있고, "이 값 사용" 버튼을 눌러야 후보값이 여기로 복사된다).
+  @ApiPropertyOptional({ description: '사람이 확인한 최종 CMT단가(저장 대상)' })
+  @IsOptional()
+  @IsNumber()
+  cmtPrice?: number | null;
 }
 
 export class AiBomItemDto {
