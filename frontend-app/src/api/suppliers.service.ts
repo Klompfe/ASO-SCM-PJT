@@ -1,5 +1,11 @@
 import apiClient from './client';
 
+// PR-171: 공급업체 "주요품목" — Supplier<->Item 다대다 관계의 요약 정보(id+name 정도).
+export interface SupplierMainItem {
+  id: number;
+  name: string;
+}
+
 export interface Supplier {
   id: number;
   code: string;
@@ -9,6 +15,7 @@ export interface Supplier {
   email?: string;
   address?: string;
   abbrCode?: string | null;
+  mainItems?: SupplierMainItem[];
 }
 
 // PR-088: code는 더 이상 클라이언트가 보내지 않는다(서버가 "TY-{업체약칭}-
@@ -20,6 +27,8 @@ export interface CreateSupplier {
   email?: string;
   address?: string;
   abbrCode?: string;
+  // PR-171: 주요품목(Item.id) 목록 — 비우면(undefined/[]) 선택 안 함.
+  mainItemIds?: number[];
 }
 
 export type UpdateSupplier = Partial<CreateSupplier>;

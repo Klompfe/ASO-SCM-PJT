@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ArrayUnique, IsArray, IsEmail, IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 // PR-088: code는 더 이상 클라이언트가 넘기지 않는다 — 서버가 "TY-{업체약칭}-
 // {YY}{일련번호4자리}"(예: TY-GM-260001) 형식으로 자동채번한다(SuppliersService.create()
@@ -46,4 +46,15 @@ export class CreateSupplierDto {
   @IsOptional()
   @IsString()
   abbrCode?: string;
+
+  // PR-171: 이 업체가 주로 취급하는 품목(주요품목) — Item.id 배열. 비우면 빈 배열로
+  // 저장(선택 안 함도 정상 케이스). suppliers.service.ts가 이 id들로 Item을 조회해
+  // Supplier.mainItems 관계에 연결한다.
+  @ApiPropertyOptional({ description: '주요품목 ID 목록(Item.id)', example: [1, 2], type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @Type(() => Number)
+  @IsInt({ each: true })
+  mainItemIds?: number[];
 }

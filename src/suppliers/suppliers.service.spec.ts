@@ -1,13 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SuppliersService } from './suppliers.service';
 import { Supplier } from './entities/supplier.entity';
+import { Item } from '../items/entities/item.entity';
 
 describe('SuppliersService', () => {
   let service: SuppliersService;
   let repo: Repository<Supplier>;
+  let itemRepo: Repository<Item>;
 
   const currentYy = String(new Date().getFullYear() % 100).padStart(2, '0');
 
@@ -26,11 +28,18 @@ describe('SuppliersService', () => {
             remove: jest.fn(),
           },
         },
+        {
+          provide: getRepositoryToken(Item),
+          useValue: {
+            findBy: jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 
     service = module.get(SuppliersService);
     repo = module.get(getRepositoryToken(Supplier));
+    itemRepo = module.get(getRepositoryToken(Item));
   });
 
   describe('create — 업체약칭 결정', () => {
@@ -163,6 +172,7 @@ describe('SuppliersService', () => {
   describe('findAll — keyword 검색 (PR-126)', () => {
     const buildQb = (result: any[]) => {
       const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue(result),
@@ -171,19 +181,20 @@ describe('SuppliersService', () => {
       return qb;
     };
 
-    it('keyword가 없으면(또는 공백이면) 기존과 같이 전체를 id 내림차순으로 조회한다(쿼리빌더 안 씀)', async () => {
+    it('keyword가 없으면(또는 공백이면) 기존과 같이 전체를 id 내림차순으로 조회한다(쿼리빌더 안 씀) — mainItems 관계도 함께 로드', async () => {
       (repo.find as jest.Mock).mockResolvedValue([{ id: 2 }, { id: 1 }]);
       expect(await service.findAll()).toEqual([{ id: 2 }, { id: 1 }]);
       await service.findAll({ keyword: '   ' });
       await service.findAll({});
-      expect(repo.find).toHaveBeenCalledWith({ order: { id: 'DESC' } });
+      expect(repo.find).toHaveBeenCalledWith({ relations: ['mainItems'], order: { id: 'DESC' } });
       expect(repo.createQueryBuilder).not.toHaveBeenCalled();
     });
 
-    it('keyword가 있으면 업체명/코드/약칭에 LOWER() LIKE LOWER() 부분일치 조건을 건다(양쪽 DB에서 대소문자 무시)', async () => {
+    it('keyword가 있으면 업체명/코드/약칭에 LOWER() LIKE LOWER() 부분일치 조건을 건다(양쪽 DB에서 대소문자 무시) — mainItems도 조인', async () => {
       const qb = buildQb([{ id: 3, name: 'Alpha Textile' }]);
       const result = await service.findAll({ keyword: ' Alpha ' });
       expect(result).toEqual([{ id: 3, name: 'Alpha Textile' }]);
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('s.mainItems', 'mainItems');
       const [clause, params] = qb.where.mock.calls[0];
       expect(clause).toContain('LOWER(s.name) LIKE LOWER(:kw)');
       expect(clause).toContain('LOWER(s.code) LIKE LOWER(:kw)');
@@ -191,6 +202,64 @@ describe('SuppliersService', () => {
       expect(params).toEqual({ kw: '%Alpha%' }); // 앞뒤 공백은 제거
       expect(qb.orderBy).toHaveBeenCalledWith('s.id', 'DESC');
       expect(repo.find).not.toHaveBeenCalled();
+    });
+  });
+
+  // PR-171: 공급업체 "주요품목" 다중 연결.
+  describe('create/update — 주요품목(mainItems) 연결', () => {
+    it('mainItemIds 없이 등록하면 mainItems는 빈 배열로 저장된다', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([]);
+      const result = await service.create({ name: 'No Items Supplier' } as any);
+      expect(itemRepo.findBy).not.toHaveBeenCalled();
+      expect((result as any).mainItems).toEqual([]);
+    });
+
+    it('mainItemIds를 1개 주면 해당 Item으로 조회해 연결한다', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([]);
+      (itemRepo.findBy as jest.Mock).mockResolvedValue([{ id: 10, name: '원단A' }]);
+      const result = await service.create({ name: 'One Item Supplier', mainItemIds: [10] } as any);
+      expect((result as any).mainItems).toEqual([{ id: 10, name: '원단A' }]);
+    });
+
+    it('mainItemIds를 여러 개 주면 전부 연결한다', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([]);
+      (itemRepo.findBy as jest.Mock).mockResolvedValue([
+        { id: 10, name: '원단A' },
+        { id: 11, name: '원단B' },
+      ]);
+      const result = await service.create({ name: 'Multi Item Supplier', mainItemIds: [10, 11] } as any);
+      expect((result as any).mainItems).toHaveLength(2);
+    });
+
+    it('존재하지 않는 품목 ID가 섞여 있으면 BadRequestException을 던진다', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([]);
+      (itemRepo.findBy as jest.Mock).mockResolvedValue([{ id: 10, name: '원단A' }]);
+      await expect(
+        service.create({ name: 'Bad Item Supplier', mainItemIds: [10, 999] } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('update에서 mainItemIds를 보내지 않으면(undefined) 기존 mainItems를 건드리지 않는다', async () => {
+      (repo.findOne as jest.Mock).mockResolvedValue({ id: 1, name: 'Existing', mainItems: [{ id: 5, name: '기존품목' }] });
+      await service.update(1, { name: 'Renamed' } as any);
+      expect(itemRepo.findBy).not.toHaveBeenCalled();
+      const saved = (repo.save as jest.Mock).mock.calls[0][0];
+      expect(saved.mainItems).toEqual([{ id: 5, name: '기존품목' }]);
+    });
+
+    it('update에서 mainItemIds를 빈 배열로 보내면 기존 연결을 전부 해제한다', async () => {
+      (repo.findOne as jest.Mock).mockResolvedValue({ id: 1, name: 'Existing', mainItems: [{ id: 5, name: '기존품목' }] });
+      await service.update(1, { mainItemIds: [] } as any);
+      const saved = (repo.save as jest.Mock).mock.calls[0][0];
+      expect(saved.mainItems).toEqual([]);
+    });
+
+    it('update에서 mainItemIds를 새로 보내면 기존 연결을 새 목록으로 교체한다', async () => {
+      (repo.findOne as jest.Mock).mockResolvedValue({ id: 1, name: 'Existing', mainItems: [{ id: 5, name: '기존품목' }] });
+      (itemRepo.findBy as jest.Mock).mockResolvedValue([{ id: 20, name: '새품목' }]);
+      await service.update(1, { mainItemIds: [20] } as any);
+      const saved = (repo.save as jest.Mock).mock.calls[0][0];
+      expect(saved.mainItems).toEqual([{ id: 20, name: '새품목' }]);
     });
   });
 });

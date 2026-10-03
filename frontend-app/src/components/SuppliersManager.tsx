@@ -7,18 +7,74 @@ import {
   deleteSupplier,
   type CreateSupplier,
   type Supplier,
+  type SupplierMainItem,
 } from '../api/suppliers.service';
+import { getItems } from '../api/items.service';
+import { SearchSelectField } from './SearchSelectField';
+import { addMainItem, removeMainItem } from '../utils/mainItemsPicker';
 import { getErrorMessage } from '../utils/errorMessage';
 
 const emptyForm: CreateSupplier = { name: '', businessNumber: '', contactPhone: '', email: '', address: '', abbrCode: '' };
+
+// PR-171: 주요품목 다중 선택 — WorkOrdersManager.tsx/PurchaseOrdersManager.tsx가 이미
+// 쓰는 SearchSelectField<T> 패턴을 재사용하되, 이 컴포넌트는 단일 선택용(value: T | null)
+// 이라 value는 항상 null로 두고(선택해도 입력란에 값이 남지 않게) onChange에서 목록에
+// 추가만 한다 — 선택된 품목은 칩으로 따로 보여주고 각 칩의 x 버튼으로 제거한다. 중복
+// 추가는 id로 걸러낸다(이 코드베이스에 기존 다중선택 선례가 없어 가장 단순한 방식으로 구현).
+function MainItemsPicker({
+  selected,
+  onChange,
+  ariaLabel,
+}: {
+  selected: SupplierMainItem[];
+  onChange: (items: SupplierMainItem[]) => void;
+  ariaLabel: string;
+}) {
+  const searchItems = useCallback(async (keyword: string): Promise<SupplierMainItem[]> => {
+    const res = await getItems({ keyword: keyword || undefined, limit: 20 });
+    const list = Array.isArray(res) ? res : (res?.items ?? []);
+    return list.map((i: any) => ({ id: i.id, name: i.name }));
+  }, []);
+
+  const addItem = (picked: SupplierMainItem | null) => onChange(addMainItem(selected, picked));
+  const removeItem = (id: number) => onChange(removeMainItem(selected, id));
+
+  return (
+    <div className="flex flex-col">
+      <SearchSelectField<SupplierMainItem>
+        value={null}
+        onChange={addItem}
+        search={searchItems}
+        getKey={(i) => i.id}
+        getLabel={(i) => i.name}
+        ariaLabel={ariaLabel}
+        placeholder="품목 검색 후 추가"
+        title="주요품목 검색"
+        className="w-64"
+      />
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {selected.map((i) => (
+            <span key={i.id} className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+              {i.name}
+              <button type="button" onClick={() => removeItem(i.id)} aria-label={`${i.name} 제거`} className="text-blue-600 hover:text-blue-900">✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export const SuppliersManager: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newSupplier, setNewSupplier] = useState<CreateSupplier>(emptyForm);
+  const [newMainItems, setNewMainItems] = useState<SupplierMainItem[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<CreateSupplier>(emptyForm);
+  const [editMainItems, setEditMainItems] = useState<SupplierMainItem[]>([]);
 
   const loadSuppliers = useCallback(async () => {
     setLoading(true);
@@ -43,9 +99,10 @@ export const SuppliersManager: React.FC = () => {
     e.preventDefault();
     setError(null);
     try {
-      const res = await createSupplier(newSupplier);
+      const res = await createSupplier({ ...newSupplier, mainItemIds: newMainItems.map((i) => i.id) });
       toast.success(`공급업체가 등록되었습니다. (코드: ${res?.code ?? '-'})`);
       setNewSupplier(emptyForm);
+      setNewMainItems([]);
       loadSuppliers();
     } catch (err: any) {
       setError(getErrorMessage(err, '공급업체 등록에 실패했습니다.'));
@@ -62,17 +119,19 @@ export const SuppliersManager: React.FC = () => {
       address: s.address || '',
       abbrCode: s.abbrCode || '',
     });
+    setEditMainItems(s.mainItems ?? []);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditForm(emptyForm);
+    setEditMainItems([]);
   };
 
   const handleUpdate = async (id: number) => {
     setError(null);
     try {
-      await updateSupplier(id, editForm);
+      await updateSupplier(id, { ...editForm, mainItemIds: editMainItems.map((i) => i.id) });
       toast.success('공급업체 정보가 수정되었습니다.');
       cancelEdit();
       loadSuppliers();
@@ -124,6 +183,10 @@ export const SuppliersManager: React.FC = () => {
           <label className="text-sm text-gray-600 mb-1">주소</label>
           <input className="border border-gray-300 rounded px-3 py-2" value={newSupplier.address} onChange={(e) => setNewSupplier({ ...newSupplier, address: e.target.value })} />
         </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">주요품목</label>
+          <MainItemsPicker selected={newMainItems} onChange={setNewMainItems} ariaLabel="주요품목" />
+        </div>
         <div className="col-span-2 md:col-span-3">
           <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700" disabled={loading}>등록</button>
         </div>
@@ -140,6 +203,7 @@ export const SuppliersManager: React.FC = () => {
               <th className="px-4 py-2 text-left">연락처</th>
               <th className="px-4 py-2 text-left">이메일</th>
               <th className="px-4 py-2 text-left">주소</th>
+              <th className="px-4 py-2 text-left">주요품목</th>
               <th className="px-4 py-2 text-left">Action</th>
             </tr>
           </thead>
@@ -154,6 +218,9 @@ export const SuppliersManager: React.FC = () => {
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.contactPhone} onChange={(e) => setEditForm({ ...editForm, contactPhone: e.target.value })} /></td>
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} /></td>
                   <td className="px-4 py-2"><input className="border rounded px-2 py-1 w-full" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} /></td>
+                  <td className="px-4 py-2 min-w-[14rem]">
+                    <MainItemsPicker selected={editMainItems} onChange={setEditMainItems} ariaLabel={`${s.name} 주요품목`} />
+                  </td>
                   <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                     <button className="text-blue-600" onClick={() => handleUpdate(s.id)}>저장</button>
                     <button className="text-gray-500" onClick={cancelEdit}>취소</button>
@@ -168,6 +235,17 @@ export const SuppliersManager: React.FC = () => {
                   <td className="px-4 py-2">{s.contactPhone}</td>
                   <td className="px-4 py-2">{s.email}</td>
                   <td className="px-4 py-2">{s.address}</td>
+                  <td className="px-4 py-2">
+                    {s.mainItems && s.mainItems.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {s.mainItems.map((i) => (
+                          <span key={i.id} className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">{i.name}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                     <button className="text-blue-600" onClick={() => startEdit(s)}>수정</button>
                     <button className="text-red-600" onClick={() => handleDelete(s.id)}>삭제</button>

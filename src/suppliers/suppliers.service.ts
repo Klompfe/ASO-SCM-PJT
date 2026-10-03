@@ -1,7 +1,8 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { In, Like, Repository } from 'typeorm';
 import { Supplier } from './entities/supplier.entity';
+import { Item } from '../items/entities/item.entity';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { GetSuppliersFilterDto } from './dto/get-suppliers-filter.dto';
@@ -22,7 +23,23 @@ export class SuppliersService {
   constructor(
     @InjectRepository(Supplier)
     private readonly supplierRepository: Repository<Supplier>,
+    @InjectRepository(Item)
+    private readonly itemRepository: Repository<Item>,
   ) {}
+
+  // PR-171: mainItemIds(Item.id 배열)를 실제 Item 엔티티로 바꾼다. 존재하지 않는
+  // id가 섞여 있으면 조용히 무시하지 않고 400으로 알린다(오타/삭제된 품목을 그대로
+  // 저장해 나중에 "왜 품목이 안 보이지"로 헷갈리는 상황을 막는다).
+  private async resolveMainItems(ids: number[]): Promise<Item[]> {
+    if (ids.length === 0) return [];
+    const items = await this.itemRepository.findBy({ id: In(ids) });
+    if (items.length !== ids.length) {
+      const foundIds = new Set(items.map((i) => i.id));
+      const missing = ids.filter((id) => !foundIds.has(id));
+      throw new BadRequestException(`존재하지 않는 품목 ID: ${missing.join(', ')}`);
+    }
+    return items;
+  }
 
   // 업체약칭 결정: dto.abbrCode가 있으면 trim+uppercase 그대로 사용한다. 없으면
   // 업체명(name)에서 알파벳만 추출해 앞 2글자를 대문자로 쓴다. 알파벳이 1글자뿐이면
@@ -68,11 +85,13 @@ export class SuppliersService {
   async create(createSupplierDto: CreateSupplierDto): Promise<Supplier> {
     const abbrCode = this.determineAbbrCode(createSupplierDto);
     const yy = String(new Date().getFullYear() % 100).padStart(2, '0');
+    const { mainItemIds, ...rest } = createSupplierDto;
+    const mainItems = await this.resolveMainItems(mainItemIds ?? []);
 
     for (let attempt = 1; attempt <= MAX_CODE_GENERATION_RETRIES; attempt++) {
       const code = await this.generateNextCode(abbrCode, yy);
       try {
-        const supplier = this.supplierRepository.create({ ...createSupplierDto, code, abbrCode });
+        const supplier = this.supplierRepository.create({ ...rest, code, abbrCode, mainItems });
         return await this.supplierRepository.save(supplier);
       } catch (error) {
         const isUniqueViolation =
@@ -94,18 +113,20 @@ export class SuppliersService {
     const keyword = filter?.keyword?.trim();
     if (!keyword) {
       return await this.supplierRepository.find({
+        relations: ['mainItems'],
         order: { id: 'DESC' },
       });
     }
     return await this.supplierRepository
       .createQueryBuilder('s')
+      .leftJoinAndSelect('s.mainItems', 'mainItems')
       .where('(LOWER(s.name) LIKE LOWER(:kw) OR LOWER(s.code) LIKE LOWER(:kw) OR LOWER(s.abbrCode) LIKE LOWER(:kw))', { kw: `%${keyword}%` })
       .orderBy('s.id', 'DESC')
       .getMany();
   }
 
   async findOne(id: number): Promise<Supplier> {
-    const supplier = await this.supplierRepository.findOne({ where: { id } });
+    const supplier = await this.supplierRepository.findOne({ where: { id }, relations: ['mainItems'] });
     if (!supplier) {
       throw new NotFoundException(`ID가 ${id}인 공급업체를 찾을 수 없습니다.`);
     }
@@ -113,8 +134,17 @@ export class SuppliersService {
   }
 
   async update(id: number, updateSupplierDto: UpdateSupplierDto): Promise<Supplier> {
+    // mainItems 관계를 미리 로드해둬야 TypeORM이 save() 시 기존 join 행과 새
+    // 배열을 비교해 제거/추가를 정확히 계산한다(로드 안 된 상태로 재할당하면
+    // 추가만 되고 빠진 품목의 기존 행이 안 지워질 수 있음).
     const supplier = await this.findOne(id);
-    Object.assign(supplier, updateSupplierDto);
+    const { mainItemIds, ...rest } = updateSupplierDto;
+    Object.assign(supplier, rest);
+    // undefined면 필드 자체를 안 보낸 것(기존 값 유지) — PATCH 의미론과 동일하게
+    // 처리한다. 빈 배열([])은 "전부 선택 해제"라는 명시적 의도이므로 그대로 반영한다.
+    if (mainItemIds !== undefined) {
+      supplier.mainItems = await this.resolveMainItems(mainItemIds);
+    }
     return await this.supplierRepository.save(supplier);
   }
 
