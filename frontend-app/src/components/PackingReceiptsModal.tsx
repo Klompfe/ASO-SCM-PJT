@@ -4,12 +4,32 @@ import {
   getPackingReceipts,
   createPackingReceipt,
   uploadPackingReceipt,
+  getPackingReceiptTemplate,
+  previewPackingReceiptTemplateUpload,
   type PackingReceipt,
   type PackingMaterialCategory,
   type CreatePackingReceiptRoll,
   type CreatePackingReceiptCarton,
+  type PackingReceiptTemplatePreview,
 } from '../api/packingReceipts.service';
 import { getErrorMessage } from '../utils/errorMessage';
+
+// base64로 내려온 표준양식 엑셀을 그대로 파일 다운로드로 띄운다(Bearer 인증이 필요해
+// <a href> 직접 다운로드를 쓸 수 없다 — ShipmentsManager.tsx의 Blob 다운로드 패턴과 동일).
+function downloadBase64File(base64: string, filename: string): void {
+  const bytes = atob(base64);
+  const array = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) array[i] = bytes.charCodeAt(i);
+  const blob = new Blob([array], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 const emptyRoll: CreatePackingReceiptRoll = { rollNo: '', color: '', widthCm: undefined, widthInch: undefined, grossWeight: undefined, netWeight: undefined, thickness: undefined, lengthYd: undefined };
 const emptyCarton: CreatePackingReceiptCarton = { cartonNo: '', color: '', size: '', lotNo: '', qty: 0, itemName: '', weightKg: undefined };
@@ -39,6 +59,15 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
   const [uploadCategory, setUploadCategory] = useState<PackingMaterialCategory>('FABRIC');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  // PR-169: 표준양식 다운로드/업로드 — 업로드는 먼저 미리보기만 하고(저장 안 함),
+  // 사용자가 확인을 눌러야 기존 createPackingReceipt로 실제 커밋된다.
+  const [templateCategory, setTemplateCategory] = useState<PackingMaterialCategory>('FABRIC');
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [preview, setPreview] = useState<PackingReceiptTemplatePreview | null>(null);
+  const [committingPreview, setCommittingPreview] = useState(false);
 
   const loadReceipts = useCallback(async () => {
     setLoading(true);
@@ -103,6 +132,59 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    setDownloadingTemplate(true);
+    try {
+      const res = await getPackingReceiptTemplate(purchaseOrderId, templateCategory);
+      downloadBase64File(res.base64, res.filename);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '표준양식 다운로드에 실패했습니다.'));
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  };
+
+  const handlePreviewTemplateUpload = async () => {
+    if (!templateFile) {
+      toast.error('미리볼 엑셀 파일을 선택해 주세요.');
+      return;
+    }
+    setPreviewing(true);
+    try {
+      const res = await previewPackingReceiptTemplateUpload(purchaseOrderId, templateFile, templateCategory);
+      setPreview(res);
+      if (res.warnings?.length) {
+        res.warnings.forEach((w: string) => toast.error(w));
+      }
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '양식 미리보기에 실패했습니다.'));
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const handleConfirmPreview = async () => {
+    if (!preview) return;
+    setCommittingPreview(true);
+    try {
+      await createPackingReceipt(purchaseOrderId, {
+        materialCategory: preview.materialCategory,
+        cbm: preview.cbm,
+        remark: preview.remark,
+        rolls: preview.rolls,
+        cartons: preview.cartons,
+      });
+      toast.success('포장내역이 등록되었습니다.');
+      setPreview(null);
+      setTemplateFile(null);
+      loadReceipts();
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '포장내역 등록에 실패했습니다.'));
+    } finally {
+      setCommittingPreview(false);
+    }
+  };
+
   const updateRoll = (idx: number, field: keyof CreatePackingReceiptRoll, value: string) => {
     const next = [...rolls];
     next[idx] = { ...next[idx], [field]: field === 'rollNo' || field === 'color' ? value : (value === '' ? undefined : Number(value)) };
@@ -144,7 +226,73 @@ export const PackingReceiptsModal: React.FC<PackingReceiptsModalProps> = ({ purc
           </div>
         )}
 
-        <h4 className="font-semibold mb-2">엑셀 업로드</h4>
+        <h4 className="font-semibold mb-2">표준양식 다운로드/업로드</h4>
+        <div className="bg-gray-50 p-3 rounded mb-6 space-y-3">
+          <div className="flex flex-wrap gap-2 items-end">
+            <div className="flex flex-col">
+              <label className="text-xs text-gray-600 mb-1">구분</label>
+              <select
+                className="border p-2 rounded"
+                value={templateCategory}
+                onChange={(e) => { setTemplateCategory(e.target.value as PackingMaterialCategory); setPreview(null); }}
+              >
+                <option value="FABRIC">원단(롤 단위)</option>
+                <option value="TRIM">부자재(카톤 단위)</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              disabled={downloadingTemplate}
+              className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700 disabled:opacity-50"
+            >
+              {downloadingTemplate ? '다운로드 중...' : '양식 다운로드'}
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2 items-end">
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => { setTemplateFile(e.target.files?.[0] ?? null); setPreview(null); }}
+              className="border p-2 rounded"
+            />
+            <button
+              type="button"
+              onClick={handlePreviewTemplateUpload}
+              disabled={previewing}
+              className="bg-purple-600 text-white px-4 py-2 rounded font-medium hover:bg-purple-700 disabled:opacity-50"
+            >
+              {previewing ? '확인 중...' : '업로드 미리보기'}
+            </button>
+          </div>
+
+          {preview && (
+            <div className="border border-yellow-300 bg-yellow-50 rounded p-3 text-sm space-y-2">
+              <p className="font-medium">
+                {preview.materialCategory === 'FABRIC' ? `롤 ${preview.rolls?.length ?? 0}건` : `카톤 ${preview.cartons?.length ?? 0}건`}이 인식되었습니다 — 저장 전 확인해 주세요.
+              </p>
+              <p>CBM: {preview.cbm ?? '-'} · 포장형태: {preview.remark ?? '-'} · 공급업체 기재 포장수: {preview.declaredPackageCount ?? '-'}</p>
+              {preview.warnings.length > 0 && (
+                <ul className="text-red-600 list-disc pl-4">
+                  {preview.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleConfirmPreview}
+                  disabled={committingPreview}
+                  className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {committingPreview ? '저장 중...' : '확인하고 저장'}
+                </button>
+                <button type="button" onClick={() => setPreview(null)} className="bg-gray-400 text-white px-4 py-2 rounded">취소</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <h4 className="font-semibold mb-2">엑셀 업로드 (기존 BEANPOLE_TTL형/MATERIAL PACKING LIST형)</h4>
         <div className="flex flex-wrap gap-2 items-end bg-gray-50 p-3 rounded mb-6">
           <div className="flex flex-col">
             <label className="text-xs text-gray-600 mb-1">구분</label>
