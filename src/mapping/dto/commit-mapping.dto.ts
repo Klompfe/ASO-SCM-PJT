@@ -63,6 +63,14 @@ export class CommitOverviewDto {
   @IsOptional()
   @IsString()
   targetRdd?: string;
+
+  // PR-168: 미도 전용 — 작지 상단 수기 CMT단가를 담당자가 확인/수정한 최종값.
+  // AI 분석(vision.service.ts)은 이 값을 직접 채우지 않고 handwrittenCmtPriceCandidate로만
+  // 후보를 보여주며, 사람이 검토 화면에서 "이 값 사용"을 눌러야 이 필드로 넘어온다.
+  @ApiPropertyOptional({ description: 'CMT단가(사람이 확인한 최종값)', example: 7500 })
+  @IsOptional()
+  @IsNumber()
+  cmtPrice?: number;
 }
 
 export class CommitBomItemDto {

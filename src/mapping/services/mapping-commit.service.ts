@@ -14,7 +14,7 @@ import { CommitMappingDto } from '../dto/commit-mapping.dto';
 // - NEEDS_REVIEW: 병합 중 "자동 반영을 보류"했다 → 사용자가 확인하고 필요하면 수동으로 고쳐야 한다.
 // - AUTO_APPLIED: 시스템이 값을 "자동으로 채웠다"(정보성) → 확인만 하면 된다.
 export type CommitNoticeType = 'AUTO_APPLIED' | 'NEEDS_REVIEW';
-export type CommitNoticeCode = 'FACTORY_MISMATCH' | 'BOM_ITEM_VALUE_DIFF' | 'LINING_COMPOSITION_DEFAULT';
+export type CommitNoticeCode = 'FACTORY_MISMATCH' | 'BOM_ITEM_VALUE_DIFF' | 'LINING_COMPOSITION_DEFAULT' | 'CMT_PRICE_MISMATCH';
 
 export interface CommitNotice {
   type: CommitNoticeType;
@@ -106,6 +106,8 @@ export class MappingCommitService {
           itemType: overviewData.itemType ?? null,
           productionType: overviewData.productionType ?? null,
           targetRdd: overviewData.targetRdd ? new Date(overviewData.targetRdd) : null,
+          // PR-168: 미도 전용 수기 CMT단가 — 사람이 확인한 값만 들어온다(위 DTO 주석 참고).
+          cmtPrice: overviewData.cmtPrice ?? null,
           style,
         });
       }
@@ -238,5 +240,21 @@ export class MappingCommitService {
     if (overviewData.itemType != null) overview.itemType = overviewData.itemType;
     if (overviewData.productionType != null) overview.productionType = overviewData.productionType;
     if (overviewData.targetRdd) overview.targetRdd = new Date(overviewData.targetRdd);
+
+    // PR-168: 미도 전용 수기 CMT단가 — factory와 같은 이유로 재커밋 시 기존 값을
+    // 조용히 덮어쓰지 않는다(사람이 한 번 확인해 저장한 단가를 재분석 결과로 실수로
+    // 갈아엎지 않기 위함). 값이 다르면 NEEDS_REVIEW로만 기록하고, 기존 값이 아직
+    // 없을 때만 채운다.
+    if (overviewData.cmtPrice != null) {
+      if (overview.cmtPrice != null && Number(overview.cmtPrice) !== overviewData.cmtPrice) {
+        notices.push({
+          type: 'NEEDS_REVIEW',
+          code: 'CMT_PRICE_MISMATCH',
+          message: `기존 CMT단가 '${overview.cmtPrice}' → 새 값 '${overviewData.cmtPrice}' — 자동 반영하지 않음, 확인 후 수동 변경 필요`,
+        });
+      } else if (overview.cmtPrice == null) {
+        overview.cmtPrice = overviewData.cmtPrice;
+      }
+    }
   }
 }

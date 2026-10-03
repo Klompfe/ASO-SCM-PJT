@@ -388,6 +388,59 @@ describe('MappingCommitService', () => {
       );
       expect(styleSave[0].overview.totalQty).toBe(430);
     });
+
+    // PR-168: 미도 전용 수기 CMT단가 — factory와 같은 원칙(자동 덮어쓰기 금지)을
+    // 적용한다. 기존 fixture(existingOverview)는 cmtPrice: null이라 "채워짐" 케이스는
+    // 별도로 기존 값이 있는 스타일을 재구성해 검증한다.
+    it('기존 cmtPrice가 없으면 새 값으로 채워진다', async () => {
+      const result = await service.commit({ ...rebuildPayload(), overviewData: { ...rebuildPayload().overviewData, cmtPrice: 7500 } });
+
+      const styleSave = mockQueryRunnerManager.save.mock.calls.find(
+        ([arg]: any) => arg && typeof arg === 'object' && arg.overview,
+      );
+      expect(styleSave[0].overview.cmtPrice).toBe(7500);
+      expect(result.notices.find((n: any) => n.code === 'CMT_PRICE_MISMATCH')).toBeUndefined();
+    });
+
+    it('기존 cmtPrice가 이미 있고 새 값과 다르면 자동으로 바뀌지 않고 NEEDS_REVIEW/CMT_PRICE_MISMATCH로만 기록된다', async () => {
+      mockQueryRunnerManager.findOne.mockImplementation((entity: any) => {
+        if (entity === MasterStyle) {
+          return Promise.resolve({ ...existingStyle, overview: { ...existingOverview, cmtPrice: 7000 } });
+        }
+        if (entity === Item) return Promise.resolve({ id: 10, name: '원단' });
+        return Promise.resolve(null);
+      });
+
+      const result = await service.commit({ ...rebuildPayload(), overviewData: { ...rebuildPayload().overviewData, cmtPrice: 8000 } });
+
+      const styleSave = mockQueryRunnerManager.save.mock.calls.find(
+        ([arg]: any) => arg && typeof arg === 'object' && arg.overview,
+      );
+      expect(styleSave[0].overview.cmtPrice).toBe(7000); // 기존 값 유지
+      expect(result.notices).toEqual(
+        expect.arrayContaining([
+          { type: 'NEEDS_REVIEW', code: 'CMT_PRICE_MISMATCH', message: "기존 CMT단가 '7000' → 새 값 '8000' — 자동 반영하지 않음, 확인 후 수동 변경 필요" },
+        ]),
+      );
+    });
+
+    it('cmtPrice를 보내지 않으면(undefined) 기존 값을 그대로 둔다', async () => {
+      mockQueryRunnerManager.findOne.mockImplementation((entity: any) => {
+        if (entity === MasterStyle) {
+          return Promise.resolve({ ...existingStyle, overview: { ...existingOverview, cmtPrice: 7000 } });
+        }
+        if (entity === Item) return Promise.resolve({ id: 10, name: '원단' });
+        return Promise.resolve(null);
+      });
+
+      const result = await service.commit(rebuildPayload()); // cmtPrice 필드 자체가 없음
+
+      const styleSave = mockQueryRunnerManager.save.mock.calls.find(
+        ([arg]: any) => arg && typeof arg === 'object' && arg.overview,
+      );
+      expect(styleSave[0].overview.cmtPrice).toBe(7000);
+      expect(result.notices.find((n: any) => n.code === 'CMT_PRICE_MISMATCH')).toBeUndefined();
+    });
   });
 
   // PR-100: 안감(조바)류인데 혼용률(composition)이 비어있으면 관례상 기본값

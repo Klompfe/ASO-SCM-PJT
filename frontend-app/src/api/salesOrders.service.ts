@@ -15,6 +15,14 @@ export interface AiOverview {
   buyer: string | null;
   totalQty: number | null;
   targetRdd: string | null;
+  // PR-158: 문서 상단 작성일(targetRdd와 서로 다른 필드) + 서버가 계산해 내려주는
+  // "납기가 작성일/오늘보다 이르거나 같아 의심스러운지" 플래그.
+  documentDate: string | null;
+  targetRddSuspicious?: boolean;
+  // PR-168: 미도 전용 — 작지 상단 수기 CMT단가. candidate는 AI 후보(읽기전용 참고용,
+  // 미도가 아니면 항상 null), cmtPrice는 사람이 확인/수정한 최종값(이것만 저장된다).
+  handwrittenCmtPriceCandidate?: number | null;
+  cmtPrice?: number | null;
 }
 
 export interface AiBomItem {

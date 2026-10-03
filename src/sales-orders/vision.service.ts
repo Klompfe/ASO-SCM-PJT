@@ -2,6 +2,8 @@ import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import { AiSalesOrderResultDto } from './dto/ai-analysis.dto';
+import { isSuspiciousTargetRdd } from './utils/target-rdd-validation.util';
+import { isMidoBuyer } from './utils/mido-buyer.util';
 
 export interface AiAnalysisUsage {
   pageCount: number;
@@ -35,9 +37,11 @@ const RESPONSE_SCHEMA = {
           factory: { type: SchemaType.STRING, nullable: true },
           buyer: { type: SchemaType.STRING, nullable: true },
           totalQty: { type: SchemaType.NUMBER, nullable: true },
-          targetRdd: { type: SchemaType.STRING, nullable: true, description: 'YYYY-MM-DD' },
+          targetRdd: { type: SchemaType.STRING, nullable: true, description: '계획DELI 하위 "납기" 라벨의 날짜, YYYY-MM-DD' },
+          documentDate: { type: SchemaType.STRING, nullable: true, description: '문서 상단에 적힌 작성일, YYYY-MM-DD (납기와 다른 값)' },
+          handwrittenCmtPriceCandidate: { type: SchemaType.NUMBER, nullable: true, description: '미도 바이어 건에서만: 문서 상단에 수기로 비교적 큰 글씨로 적힌 숫자(CMT단가 후보). 미도가 아니거나 확신이 없으면 null' },
         },
-        required: ['styleNo', 'styleName', 'itemType', 'brand', 'productionType', 'factory', 'buyer', 'totalQty', 'targetRdd'],
+        required: ['styleNo', 'styleName', 'itemType', 'brand', 'productionType', 'factory', 'buyer', 'totalQty', 'targetRdd', 'documentDate', 'handwrittenCmtPriceCandidate'],
       },
       bomItems: {
         type: SchemaType.ARRAY,
@@ -81,7 +85,13 @@ const PROMPT = `이 문서는 의류 제조업체의 "작업지시서"입니다.
 
 각 항목은 아래 3가지로 구분해서 추출합니다:
 
-1. overview(오더개요): Style NO., 스타일명, ITEM(품목 종류), 브랜드(문서 하단 회사명이 아니라 상표/브랜드), 임가공 구분(완사입=FOB, CMT=CMT), 소재(원단) 공장/생산처, 바이어, TOTAL 수량, 계획DELI의 납기 날짜(YYYY-MM-DD로 변환, 연도가 안 보이면 문서 상단 작성일 기준으로 추정).
+1. overview(오더개요): Style NO., 스타일명, ITEM(품목 종류), 브랜드(문서 하단 회사명이 아니라 상표/브랜드), 임가공 구분(완사입=FOB, CMT=CMT), 소재(원단) 공장/생산처, 바이어, TOTAL 수량, documentDate(문서 상단에 적힌 작성일), targetRdd(납기).
+
+documentDate와 targetRdd는 문서 안의 서로 다른 위치에 있는 서로 다른 값이며 절대 혼동하지 마세요:
+- documentDate: 문서 상단에 적힌 이 작업지시서의 작성일(YYYY-MM-DD로 변환).
+- targetRdd: 계획DELI 항목의 하위 라벨 "납기"에 적힌 날짜(YYYY-MM-DD로 변환). 연도가 안 보이면 documentDate의 연도만 보충하고, 월/일 자체를 documentDate 값으로 대체하지 마세요. documentDate와 targetRdd는 서로 다른 필드로 각각 독립적으로 인식하세요 — "납기"에 적힌 날짜를 못 찾았다고 해서 작성일을 납기 대신 넣지 마세요.
+
+handwrittenCmtPriceCandidate: 바이어(buyer)가 "미도"로 명확히 인식된 문서에서만 채우세요. 문서 상단에 인쇄된 표 글자와 구분되는, 손으로 비교적 큰 글씨로 적힌 숫자가 있으면 그 숫자를 추출하세요. 바이어가 미도가 아니거나, 바이어를 못 읽었거나, 그런 수기 숫자가 없거나, 여러 후보가 있어 어느 것인지 확신할 수 없으면 반드시 null로 두고 절대 추측하지 마세요.
 
 2. bomItems(자재명세): 상단 소재 표(소재No./소재명/색상/규격/요척/출고량)와 하단 부자재 표(안감/심지/포켓감/테이프/재봉사/단추/라벨 등, 규격/소요량/비고)를 모두 각 행 하나씩 bomItems 배열 항목으로 변환하세요. category는 소재/안감/심지/부자재 등 표의 구분명, itemName은 소재명 또는 부자재명, spec은 규격/색상, consumption은 요척 또는 소요량(숫자만, 단위 제외). supplier(공급처)는 문서에 실제로 인쇄/기재된 값이 있을 때만 그대로 옮기고, 문서에 없으면 절대 추정하지 말고 반드시 null로 두세요 — 공급처는 작업지시서 시점에는 정해지지 않고 이후 발주 단계에서 결정되는 정보입니다.
 
@@ -134,6 +144,8 @@ export class VisionService {
       }
       const text = result.response.text();
       const parsed = JSON.parse(text) as AiSalesOrderResultDto[];
+      this.applyTargetRddValidation(parsed);
+      this.applyMidoCmtPriceGuard(parsed);
 
       // 페이지 수 = 결과 배열 길이(스타일 1개 = 페이지 1개)로 근사한다 — 실측 검증 완료
       // (6페이지 파일→6건, 16페이지 파일→16건 정확히 일치, PR-055 참고).
@@ -177,6 +189,34 @@ export class VisionService {
     }
   }
 
+  // PR-158: AI 프롬프트 지시만으로는 targetRdd/documentDate 혼동(실사례: "12/30" 납기를
+  // 작성일 "6/22"로 잘못 인식)을 100% 막을 수 없어, 응답을 받은 뒤 코드로 결정적으로
+  // 재검증한다 — 의심스러우면 targetRddSuspicious=true로 표시해 화면에서 경고한다.
+  private applyTargetRddValidation(results: AiSalesOrderResultDto[]): void {
+    const today = new Date().toISOString().slice(0, 10);
+    for (const result of results) {
+      result.overview.targetRddSuspicious = isSuspiciousTargetRdd(
+        result.overview.targetRdd,
+        result.overview.documentDate,
+        today,
+      );
+    }
+  }
+
+  // PR-168: 프롬프트 지시("미도 건에만 채워라")만으로는 AI가 조건을 놓치고 다른
+  // 바이어 건에도 값을 채울 위험이 있다(PR-158의 targetRdd/documentDate 혼동과 같은
+  // 종류) — 바이어가 미도인지 코드로 결정적으로 재확인해, 아니면 AI가 뭘 반환했든
+  // 무조건 null로 덮어쓴다. cmtPrice(사람이 확인한 최종값)는 AI가 채우는 필드가
+  // 아니므로 항상 null로 초기화한다(검토 화면에서 "이 값 사용"을 눌러야 채워짐).
+  private applyMidoCmtPriceGuard(results: AiSalesOrderResultDto[]): void {
+    for (const result of results) {
+      if (!isMidoBuyer(result.overview.buyer)) {
+        result.overview.handwrittenCmtPriceCandidate = null;
+      }
+      result.overview.cmtPrice = null;
+    }
+  }
+
   private mockResult(): AiSalesOrderResultDto[] {
     return [
       {
@@ -190,6 +230,10 @@ export class VisionService {
           buyer: null,
           totalQty: null,
           targetRdd: null,
+          documentDate: null,
+          targetRddSuspicious: false,
+          handwrittenCmtPriceCandidate: null,
+          cmtPrice: null,
         },
         bomItems: [
           { category: null, itemName: '원단-폴리', spec: '150cm', colorCode: null, consumption: 1.5, requiredQty: null, supplier: null, remarks: null },

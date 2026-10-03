@@ -61,6 +61,9 @@ export class SalesOrdersService {
         itemType: result.overview.itemType ?? undefined,
         productionType: result.overview.productionType ?? undefined,
         targetRdd: result.overview.targetRdd ?? undefined,
+        // PR-168: 미도 전용 수기 CMT단가 — 검토 화면에서 사람이 확인/수정한 값만
+        // 넘어온다(handwrittenCmtPriceCandidate는 후보 표시용일 뿐 저장 대상이 아님).
+        cmtPrice: result.overview.cmtPrice ?? undefined,
       },
       bomItems: result.bomItems.map((b) => ({
         category: b.category ?? undefined,

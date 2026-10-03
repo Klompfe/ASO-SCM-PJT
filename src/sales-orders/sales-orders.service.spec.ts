@@ -5,6 +5,7 @@ import { VisionService } from './vision.service';
 import { MappingCommitService } from '../mapping/services/mapping-commit.service';
 import { SalesOrderSpecsService } from './sales-order-specs.service';
 import { AiUsageLogService } from './ai-usage-log.service';
+import { Contract } from '../styles/entities/contract.entity';
 
 // PR-133: WorkOrdersService에 섞여 있던 수주(작업지시서 업로드) 흐름의 테스트를 그대로 옮겼다(대상 서비스/메서드 이름만 바뀜).
 describe('SalesOrdersService', () => {
@@ -66,6 +67,55 @@ describe('SalesOrdersService', () => {
       expect(mockAiUsageLogService.log).not.toHaveBeenCalled();
       expect(result.chargedAmountKrw).toBe(0);
       expect(result.isMock).toBe(true);
+    });
+  });
+
+  // PR-168: 미도 전용 수기 CMT단가 — 검토 화면에서 사람이 확인한 overview.cmtPrice만
+  // mapping-commit으로 넘어가는지(handwrittenCmtPriceCandidate는 넘어가지 않음).
+  describe('commitAnalysis - CMT단가 전달 (PR-168)', () => {
+    const mockMasterStyleRepo = { findOne: jest.fn() };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === Contract ? mockContractRepo : mockMasterStyleRepo,
+      );
+      mockMasterStyleRepo.findOne.mockResolvedValue({
+        styleNo: 'S1',
+        overview: { totalQty: 100, targetRdd: null, factory: '베트남', buyer: '미도컴퍼니', productionType: 'CMT', cmtPrice: 7500, fobPrice: null, cmtPriceConfidence: undefined, cmtPriceNote: undefined },
+      });
+      mockMappingCommitService.commit.mockResolvedValue({ success: true, notices: [], warnings: [] });
+      mockSalesOrderSpecsService.save.mockResolvedValue({ id: 1 });
+    });
+
+    it('overview.cmtPrice(사람이 확인한 값)가 mapping-commit overviewData.cmtPrice로 그대로 전달된다', async () => {
+      await service.commitAnalysis({
+        overview: {
+          styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남',
+          buyer: '미도컴퍼니', totalQty: 100, targetRdd: null, documentDate: null,
+          handwrittenCmtPriceCandidate: 7500, cmtPrice: 7500,
+        },
+        bomItems: [], sizeSpecs: [], workNotes: null,
+      } as any);
+
+      expect(mockMappingCommitService.commit).toHaveBeenCalledWith(
+        expect.objectContaining({ overviewData: expect.objectContaining({ cmtPrice: 7500 }) }),
+      );
+    });
+
+    it('cmtPrice가 비어 있으면(사람이 아직 확인/저장하지 않음) undefined로 전달된다(저장되지 않음)', async () => {
+      await service.commitAnalysis({
+        overview: {
+          styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남',
+          buyer: '미도컴퍼니', totalQty: 100, targetRdd: null, documentDate: null,
+          handwrittenCmtPriceCandidate: 7500, cmtPrice: null, // 후보는 있지만 아직 확인 안 함
+        },
+        bomItems: [], sizeSpecs: [], workNotes: null,
+      } as any);
+
+      expect(mockMappingCommitService.commit).toHaveBeenCalledWith(
+        expect.objectContaining({ overviewData: expect.objectContaining({ cmtPrice: undefined }) }),
+      );
     });
   });
 });
