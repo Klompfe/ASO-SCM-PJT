@@ -113,7 +113,7 @@ export const StyleShortagePanel: React.FC<{ onPickMaterial: (row: MaterialRequir
 
   return (
     <details className="bg-white border border-gray-200 rounded-lg" open>
-      <summary className="px-4 py-3 cursor-pointer font-medium text-gray-700">스타일번호로 필요 자재 찾기 <span className="text-xs font-normal text-gray-400">(발주할 자재를 고르는 보조 도구)</span></summary>
+      <summary className="px-4 py-3 cursor-pointer font-medium text-gray-700">스타일번호로 필요 자재 찾기 <span className="text-xs font-normal text-gray-400">(클릭하면 스타일번호로 조회해 필요한 자재 목록을 볼 수 있습니다 — 발주할 자재를 고르는 보조 도구)</span></summary>
       <div className="p-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex flex-col">
@@ -158,6 +158,9 @@ export const StyleShortagePanel: React.FC<{ onPickMaterial: (row: MaterialRequir
               <p className="text-xs text-gray-500" data-testid="shortage-summary">
                 BOM {data.bom?.bomNo} · 생산 수량 {fmt(data.quantity)} 기준 · 자재 {data.totals.materialCount}종 중 <b className="text-red-600">부족 {data.totals.shortageMaterialCount}종</b>
               </p>
+            )}
+            {rows.length > 0 && (
+              <p className="text-xs text-gray-400">&quot;이 자재로 발주하기&quot;를 누르면 아래 발주 폼에 자동으로 채워집니다.</p>
             )}
             <ShortageTable rows={rows} onPick={onPickMaterial} />
           </>
