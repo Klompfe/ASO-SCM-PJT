@@ -568,7 +568,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
           </select>
         </div>
         <div className="flex flex-col">
-          <label className="text-sm text-gray-600 mb-1">목표출고일(From)</label>
+          <label className="text-sm text-gray-600 mb-1">납기일(From)</label>
           <input
             className="border border-gray-300 rounded px-3 py-2"
             type="date"
@@ -577,7 +577,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
           />
         </div>
         <div className="flex flex-col">
-          <label className="text-sm text-gray-600 mb-1">목표출고일(To)</label>
+          <label className="text-sm text-gray-600 mb-1">납기일(To)</label>
           <input
             className="border border-gray-300 rounded px-3 py-2"
             type="date"
@@ -707,8 +707,8 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                     <input type="number" className="border p-2 rounded" value={editForm.totalQty ?? 0} onChange={(e) => setEditForm({ ...editForm, totalQty: Number(e.target.value) })} />
                   </div>
                   <div className="flex flex-col">
-                    <label className="text-gray-600 mb-1">목표출고일</label>
-                    <input type="date" aria-label="수정: 목표출고일" className="border p-2 rounded" value={editForm.targetRdd ?? ''} onChange={(e) => setEditForm({ ...editForm, targetRdd: e.target.value })} />
+                    <label className="text-gray-600 mb-1">납기일</label>
+                    <input type="date" aria-label="수정: 납기일" className="border p-2 rounded" value={editForm.targetRdd ?? ''} onChange={(e) => setEditForm({ ...editForm, targetRdd: e.target.value })} />
                   </div>
                   <div className="flex flex-col">
                     <label className="text-gray-600 mb-1">생산유형</label>
@@ -746,7 +746,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                 <div><span className="text-gray-500">공장:</span> {selectedStyle.overview?.factory ?? '-'}</div>
                 <div><span className="text-gray-500">바이어:</span> {selectedStyle.overview?.buyer ?? '-'}</div>
                 <div><span className="text-gray-500">총수량:</span> {selectedStyle.overview?.totalQty ?? '-'}</div>
-                <div><span className="text-gray-500">목표출고일:</span> {selectedStyle.overview?.targetRdd ?? '-'}</div>
+                <div><span className="text-gray-500">납기일:</span> {selectedStyle.overview?.targetRdd ?? '-'}</div>
                 <div><span className="text-gray-500">FOB매출단가:</span> {selectedStyle.overview?.fobPrice ?? '-'}</div>
                 <div><span className="text-gray-500">CMT매출단가:</span> {selectedStyle.overview?.cmtPrice ?? '-'}</div>
                 <div><span className="text-gray-500">상태:</span> {selectedStyle.overview?.status ?? '-'}</div>
