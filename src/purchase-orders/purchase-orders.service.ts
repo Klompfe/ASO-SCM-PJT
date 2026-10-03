@@ -8,6 +8,7 @@ import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
+import { BomItem } from '../boms/entities/bom-item.entity';
 import { resolveOptionalPagination } from '../common/dto/optional-pagination-query.dto';
 
 @Injectable()
@@ -44,6 +45,29 @@ export class PurchaseOrdersService {
     });
 
     return await this.poRepository.save(po);
+  }
+
+  // PR-173: 발주 생성 폼이 선택된 품목의 스타일 생산유형(CMT/FOB)을 알아야
+  // 단가 필수 여부를 판단할 수 있다 — packing-receipts.service.ts의
+  // resolveBomItemOrFail()/export-shipments.service.ts generate()와 동일하게
+  // PO.itemId → BomItem.material → bom.style(.overview)로 거슬러 올라간다.
+  // BOM에 연결되지 않은 자재는 생산유형을 알 수 없으므로 null을 돌려주고,
+  // 호출자(프론트)는 이를 FOB와 동일하게(단가 필수) 취급한다(안전한 기본값).
+  async getMaterialProductionContext(
+    itemId: number,
+  ): Promise<{ styleNo: string | null; productionType: string | null }> {
+    const bomItem = await this.dataSource.getRepository(BomItem).findOne({
+      where: { material: { id: itemId } },
+      relations: ['bom', 'bom.style', 'bom.style.overview'],
+      order: { id: 'DESC' },
+    });
+    if (!bomItem) {
+      return { styleNo: null, productionType: null };
+    }
+    return {
+      styleNo: bomItem.bom.style.styleNo ?? null,
+      productionType: bomItem.bom.style.overview?.productionType ?? null,
+    };
   }
 
   async findAll(filter?: GetPurchaseOrdersFilterDto): Promise<PurchaseOrder[]> {

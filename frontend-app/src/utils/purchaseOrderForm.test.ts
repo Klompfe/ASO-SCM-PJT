@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickLatestOrderDefaults, resolveAutofill, sortForShortage, suggestedQuantity } from './purchaseOrderForm';
+import { pickLatestOrderDefaults, resolveAutofill, sortForShortage, suggestedQuantity, isUnitPriceRequired } from './purchaseOrderForm';
 import type { PurchaseOrder } from '../api/purchaseOrders.service';
 import type { MaterialRequirementRow } from './bomRequirementReport';
 
@@ -73,6 +73,21 @@ describe('발주 폼: 최근 발주 이력 자동 채움 (PR-126)', () => {
       const sorted = sortForShortage(rows);
       expect(sorted.map((r) => r.itemId)).toEqual([3, 2, 5, 1, 4]); // 900, 50(가), 50(마), 0(다), 0(라)
       expect(rows.map((r) => r.itemId)).toEqual([1, 2, 3, 4, 5]);
+    });
+  });
+
+  // PR-173: CMT 계약 건은 단가가 당장 필요 없다(수출선적서류 작성 시점에만 필요).
+  describe('isUnitPriceRequired', () => {
+    it('productionType이 CMT면 단가가 필요 없다(false)', () => {
+      expect(isUnitPriceRequired('CMT')).toBe(false);
+    });
+
+    it('productionType이 FOB면 단가가 필요하다(true, 기존 동작 유지)', () => {
+      expect(isUnitPriceRequired('FOB')).toBe(true);
+    });
+
+    it('productionType을 모르면(null — BOM 미연결/조회 실패 등) 안전하게 필수로 본다(true)', () => {
+      expect(isUnitPriceRequired(null)).toBe(true);
     });
   });
 });

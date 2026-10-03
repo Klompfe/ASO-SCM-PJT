@@ -8,6 +8,7 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
+import { BomItem } from '../boms/entities/bom-item.entity';
 
 describe('PurchaseOrdersService', () => {
   let service: PurchaseOrdersService;
@@ -281,6 +282,47 @@ describe('PurchaseOrdersService', () => {
       const qb = buildQb([]);
       await service.findAll({ keyword: '   ' });
       expect(qb.andWhere.mock.calls.some(([clause]: [string]) => clause.includes(':kw'))).toBe(false);
+    });
+  });
+
+  // PR-173: 발주 생성 폼이 CMT/FOB를 판단할 때 쓰는 조회 — BomItem.material → bom.style(.overview).
+  describe('getMaterialProductionContext (PR-173)', () => {
+    const mockBomItemRepo = { findOne: jest.fn() };
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === BomItem ? mockBomItemRepo : { findOne: jest.fn() },
+      );
+    });
+
+    it('BOM에 연결된 자재면 스타일의 productionType을 돌려준다', async () => {
+      mockBomItemRepo.findOne.mockResolvedValue({
+        bom: { style: { styleNo: 'ST-001', overview: { productionType: 'CMT' } } },
+      });
+      const result = await service.getMaterialProductionContext(42);
+      expect(result).toEqual({ styleNo: 'ST-001', productionType: 'CMT' });
+    });
+
+    it('FOB 스타일이면 productionType: FOB를 돌려준다', async () => {
+      mockBomItemRepo.findOne.mockResolvedValue({
+        bom: { style: { styleNo: 'ST-002', overview: { productionType: 'FOB' } } },
+      });
+      const result = await service.getMaterialProductionContext(43);
+      expect(result.productionType).toBe('FOB');
+    });
+
+    it('BOM에 전혀 연결되지 않은 자재는 둘 다 null을 돌려준다(발주 생성 자체를 막지 않기 위해 예외를 던지지 않음)', async () => {
+      mockBomItemRepo.findOne.mockResolvedValue(null);
+      const result = await service.getMaterialProductionContext(99);
+      expect(result).toEqual({ styleNo: null, productionType: null });
+    });
+
+    it('스타일은 있지만 overview.productionType이 비어있으면(수동 등록 외 경로로 생성된 스타일 등) null을 돌려준다', async () => {
+      mockBomItemRepo.findOne.mockResolvedValue({
+        bom: { style: { styleNo: 'ST-003', overview: { productionType: null } } },
+      });
+      const result = await service.getMaterialProductionContext(44);
+      expect(result).toEqual({ styleNo: 'ST-003', productionType: null });
     });
   });
 });

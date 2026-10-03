@@ -180,7 +180,7 @@ export const ProductionContractsManager: React.FC = () => {
               <label className="block text-xs text-gray-500 mb-1">단가</label>
               <input
                 type="number"
-                step="0.01"
+                step="any"
                 value={form.cmtPrice}
                 onChange={(e) => setForm({ ...form, cmtPrice: e.target.value })}
                 className="border rounded px-2 py-1 w-full text-sm"

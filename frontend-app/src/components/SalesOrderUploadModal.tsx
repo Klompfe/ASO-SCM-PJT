@@ -368,7 +368,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                         <span className="text-gray-500 text-xs">CMT단가</span>
                         <input
                           type="number"
-                          step="0.01"
+                          step="any"
                           data-testid={`cmt-price-input-${index}`}
                           className="border rounded px-2 py-1"
                           value={result.overview.cmtPrice ?? ''}

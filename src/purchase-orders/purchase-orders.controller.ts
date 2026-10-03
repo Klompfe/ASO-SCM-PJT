@@ -9,7 +9,7 @@ import {
   ParseIntPipe,
   Query,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
@@ -34,6 +34,15 @@ export class PurchaseOrdersController {
   @ApiResponse({ status: 200, type: [PurchaseOrder] })
   findAll(@Query() filter: GetPurchaseOrdersFilterDto): Promise<PurchaseOrder[]> {
     return this.poService.findAll(filter);
+  }
+
+  // PR-173: 고정 경로라 ':id'보다 먼저 선언해야 한다(안 그러면 ':id'가 "material-context"를
+  // id로 먼저 가로채 ParseIntPipe에서 400이 난다 — boms.controller.ts의 'duplicates'와 동일한 이유).
+  @Get('material-context')
+  @ApiOperation({ summary: '발주 생성 폼용 — 품목이 연결된 스타일의 생산유형(CMT/FOB) 조회(BOM 미연결이면 둘 다 null)' })
+  @ApiQuery({ name: 'itemId', required: true, type: Number })
+  getMaterialProductionContext(@Query('itemId', ParseIntPipe) itemId: number) {
+    return this.poService.getMaterialProductionContext(itemId);
   }
 
   @Get(':id')

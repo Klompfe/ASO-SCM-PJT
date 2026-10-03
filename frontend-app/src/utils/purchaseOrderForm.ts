@@ -50,6 +50,11 @@ export function resolveAutofill(prev: AutofillState, latest: LatestOrderDefaults
 // "이 자재로 발주하기" 제안 수량: 부족 수량을 올림(발주 수량은 정수), 부족이 없으면 1.
 export const suggestedQuantity = (shortageQty: number): number => (shortageQty > 0 ? Math.max(1, Math.ceil(shortageQty)) : 1);
 
+// PR-173: CMT 계약 건의 원부자재 발주는 단가가 당장 필요 없다(수출선적서류 작성
+// 시점에만 필요) — 생산유형을 모르거나(BOM 미연결 등) FOB면 기존처럼 필수로 본다
+// (안전한 기본값: "모름"을 "필수 없음"으로 섣불리 완화하지 않는다).
+export const isUnitPriceRequired = (productionType: 'CMT' | 'FOB' | null): boolean => productionType !== 'CMT';
+
 // 부족 자재 표: 부족 수량이 있는 행을 부족량 큰 순으로 위에, 나머지는 이름순.
 export function sortForShortage(rows: MaterialRequirementRow[]): MaterialRequirementRow[] {
   return [...rows].sort((a, b) => {

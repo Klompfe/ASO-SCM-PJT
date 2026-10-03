@@ -43,13 +43,14 @@ export class CreateMasterStyleDto {
   @IsDateString()
   targetRdd: string;
 
+  // PR-173: 미도 단가표 실측 최대 소수 5자리(0.00012) 기준 6자리로 여유있게 허용.
   @ApiPropertyOptional({ example: 5.5 })
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 6 })
   cmtPrice?: number;
 
   @ApiPropertyOptional({ example: 10 })
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 6 })
   fobPrice?: number;
 }

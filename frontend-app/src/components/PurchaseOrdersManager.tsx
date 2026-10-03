@@ -4,6 +4,7 @@ import {
   getPurchaseOrders,
   createPurchaseOrder,
   updatePurchaseOrderStatus,
+  getMaterialProductionContext,
   type CreatePurchaseOrder,
   type PurchaseOrder,
 } from '../api/purchaseOrders.service';
@@ -12,7 +13,7 @@ import { getItems, getItem } from '../api/items.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
-import { pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, type SupplierRef } from '../utils/purchaseOrderForm';
+import { pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, isUnitPriceRequired, type SupplierRef } from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
 import { ShipmentsManager } from './ShipmentsManager';
@@ -35,6 +36,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // PR-126: 공급업체/품목은 <select>(최초 100개만 불러와 그 밖의 품목은 선택 불가)가 아니라 서버 검색 선택이다.
   const [supplier, setSupplier] = useState<SupplierRef | null>(null);
   const [item, setItem] = useState<ItemRef | null>(null);
+  // PR-173: 선택된 품목이 연결된 스타일의 생산유형 — CMT면 단가를 선택 입력으로
+  // 허용한다(수출선적서류 작성 시점에만 필요). BOM 미연결/조회 실패/FOB는 모두
+  // 기존처럼 단가 필수로 취급한다(null을 "모름=FOB와 동일"로 안전하게 처리).
+  const [itemProductionType, setItemProductionType] = useState<'CMT' | 'FOB' | null>(null);
   // 공급업체/단가가 최근 발주 이력으로 자동 채워진 상태인지(다른 품목으로 바꿀 때 이전 자동값을 남기지 않기 위함)
   const [autofilled, setAutofilled] = useState(false);
   const [autofillNote, setAutofillNote] = useState<string | null>(null);
@@ -74,7 +79,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     }
   }, [filterSupplier, filterItem]);
 
-  formValuesRef.current = { supplier, unitPrice: newPo.unitPrice, autofilled };
+  formValuesRef.current = { supplier, unitPrice: newPo.unitPrice ?? 0, autofilled };
 
   // 서버 검색(검색어마다 조회) — 100건 캡이 없다. 품목은 원자재만(완제품 Item과 섞이지 않게), 한 번에 20건.
   const searchSuppliers = useCallback(async (keyword: string): Promise<SupplierRef[]> => {
@@ -95,6 +100,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const selectItem = useCallback(async (picked: ItemRef | null, opts?: { quantity?: number }) => {
     setItem(picked);
     setAutofillNote(null);
+    setItemProductionType(null);
     if (opts?.quantity) setNewPo((prev) => ({ ...prev, quantity: opts.quantity as number }));
     if (!picked) return;
     const seq = ++itemRequestSeq.current;
@@ -112,6 +118,13 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setAutofillNote(latest ? `최근 발주 #${latest.orderId}의 공급업체(${latest.supplier.name})/단가(${latest.unitPrice})를 채웠습니다. 필요하면 수정하세요.` : '이 품목의 발주 이력이 없어 공급업체/단가는 직접 선택해 주세요.');
     } catch {
       // 이력 조회 실패는 발주 자체를 막지 않는다 — 자동 채움만 건너뛴다.
+    }
+    try {
+      const ctx = await getMaterialProductionContext(picked.id);
+      if (seq !== itemRequestSeq.current) return;
+      setItemProductionType(ctx.productionType);
+    } catch {
+      // 생산유형 조회 실패는 FOB와 동일(단가 필수)로 안전하게 처리 — itemProductionType은 null 그대로 둔다.
     }
   }, []);
 
@@ -142,16 +155,19 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setError('공급업체와 품목을 선택해 주세요.');
       return;
     }
-    if (!newPo.unitPrice || newPo.unitPrice <= 0) {
+    if (isUnitPriceRequired(itemProductionType) && (!newPo.unitPrice || newPo.unitPrice <= 0)) {
       setError('품목 단가를 입력해 주세요.');
       return;
     }
     try {
-      await createPurchaseOrder({ ...newPo, supplierId: supplier.id, itemId: item.id });
+      // CMT 건에서 단가를 비워둔 경우(0) null로 보낸다 — "입력 안 함"과 "0원"을 구분한다.
+      const unitPrice = newPo.unitPrice && newPo.unitPrice > 0 ? newPo.unitPrice : undefined;
+      await createPurchaseOrder({ ...newPo, unitPrice, supplierId: supplier.id, itemId: item.id });
       toast.success('발주가 생성되었습니다.');
       setNewPo(emptyForm);
       setSupplier(null);
       setItem(null);
+      setItemProductionType(null);
       setAutofilled(false);
       setAutofillNote(null);
       setPanelRefresh((n) => n + 1); // 스타일 부족 자재 표의 "이미 발주" 수량 갱신
@@ -261,8 +277,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             <input type="number" min={1} className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.quantity} onChange={(e) => setNewPo({ ...newPo, quantity: Number(e.target.value) })} aria-label="수량" />
           </div>
           <div className="flex flex-col">
-            <label className="text-sm text-gray-600 mb-1">단가</label>
-            <input type="number" min={0} step="0.01" className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.unitPrice} onChange={(e) => { setNewPo({ ...newPo, unitPrice: Number(e.target.value) }); setAutofilled(false); }} aria-label="단가" />
+            <label className="text-sm text-gray-600 mb-1">
+              단가{!isUnitPriceRequired(itemProductionType) && <span className="text-gray-400 font-normal"> (CMT — 선택, 선적서류 작성 시 입력 가능)</span>}
+            </label>
+            <input type="number" min={0} step="any" className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.unitPrice} onChange={(e) => { setNewPo({ ...newPo, unitPrice: Number(e.target.value) }); setAutofilled(false); }} aria-label="단가" />
           </div>
           <div className="flex flex-col flex-1 min-w-[200px]">
             <label className="text-sm text-gray-600 mb-1">비고</label>
@@ -331,7 +349,11 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               <tr key={po.id} className="hover:bg-gray-50">
                 <td className="px-4 py-2">{po.item?.name ?? `#${po.itemId}`}</td>
                 <td className="px-4 py-2 text-right">{po.quantity}</td>
-                <td className="px-4 py-2 text-right">{po.unitPrice ?? '-'}</td>
+                <td className="px-4 py-2 text-right">
+                  {po.unitPrice != null ? po.unitPrice : (
+                    <span className="inline-block bg-yellow-100 text-yellow-800 text-xs px-2 py-0.5 rounded-full" title="CMT 등 단가가 아직 정해지지 않은 발주 — 수출선적서류 작성 시 입력">단가 미입력</span>
+                  )}
+                </td>
                 <td className="px-4 py-2 text-right">{po.unitPrice != null ? (po.unitPrice * po.quantity).toLocaleString() : '-'}</td>
                 <td className="px-4 py-2">{po.supplier?.name ?? '-'}</td>
                 <td className="px-4 py-2 max-w-[200px] truncate" title={po.notes ?? ''}>{po.notes ?? '-'}</td>

@@ -10,8 +10,9 @@ export class ConfirmExportShipmentLinePriceDto {
   @IsEnum(ExportShipmentLinePriceSource)
   source: ExportShipmentLinePriceSource;
 
+  // PR-173: 미도 단가표 실측 최대 소수 5자리(0.00012) 기준 6자리로 여유있게 허용.
   @ApiProperty({ example: 0.3 })
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   unitPriceUsd: number;
 

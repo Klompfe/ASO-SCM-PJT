@@ -17,9 +17,10 @@ export class CreateProductionContractDto {
   priceSource: ProductionContractPriceSource;
 
   // priceSource=PRE_AGREED면 필수(서비스단에서 검증), CMT_INVOICE면 아예 보내면 안 된다.
+  // PR-173: 미도 단가표 실측 최대 소수 5자리(0.00012) 기준 6자리로 여유있게 허용.
   @ApiPropertyOptional({ description: 'PRE_AGREED일 때만 필요 — 생성 시점 값을 그대로 스냅샷 저장', example: 12.5 })
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsPositive()
   cmtPrice?: number;
 

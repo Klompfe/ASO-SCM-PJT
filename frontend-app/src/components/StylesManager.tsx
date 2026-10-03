@@ -538,8 +538,8 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
           <label className="mr-4"><input type="radio" value="FOB" checked={formData.productionType === 'FOB'} onChange={() => setFormData({...formData, productionType: 'FOB'})} /> FOB</label>
           <label><input type="radio" value="CMT" checked={formData.productionType === 'CMT'} onChange={() => setFormData({...formData, productionType: 'CMT'})} /> CMT</label>
         </div>
-        {formData.productionType === 'CMT' && <input className="border p-2 mb-4 w-full" placeholder="CMT매출단가" type="number" step="0.01" value={formData.cmtPrice} onChange={e => setFormData({...formData, cmtPrice: Number(e.target.value)})} />}
-        {formData.productionType === 'FOB' && <input className="border p-2 mb-4 w-full" placeholder="FOB매출단가" type="number" step="0.01" value={formData.fobPrice} onChange={e => setFormData({...formData, fobPrice: Number(e.target.value)})} />}
+        {formData.productionType === 'CMT' && <input className="border p-2 mb-4 w-full" placeholder="CMT매출단가" type="number" step="any" value={formData.cmtPrice} onChange={e => setFormData({...formData, cmtPrice: Number(e.target.value)})} />}
+        {formData.productionType === 'FOB' && <input className="border p-2 mb-4 w-full" placeholder="FOB매출단가" type="number" step="any" value={formData.fobPrice} onChange={e => setFormData({...formData, fobPrice: Number(e.target.value)})} />}
         <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">스타일 등록</button>
       </form>
 
@@ -720,12 +720,12 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                   {editForm.productionType === 'FOB' ? (
                     <div className="flex flex-col">
                       <label className="text-gray-600 mb-1">FOB매출단가</label>
-                      <input type="number" step="0.01" className="border p-2 rounded" value={editForm.fobPrice ?? 0} onChange={(e) => setEditForm({ ...editForm, fobPrice: Number(e.target.value) })} />
+                      <input type="number" step="any" className="border p-2 rounded" value={editForm.fobPrice ?? 0} onChange={(e) => setEditForm({ ...editForm, fobPrice: Number(e.target.value) })} />
                     </div>
                   ) : (
                     <div className="flex flex-col">
                       <label className="text-gray-600 mb-1">CMT매출단가</label>
-                      <input type="number" step="0.01" className="border p-2 rounded" value={editForm.cmtPrice ?? 0} onChange={(e) => setEditForm({ ...editForm, cmtPrice: Number(e.target.value) })} />
+                      <input type="number" step="any" className="border p-2 rounded" value={editForm.cmtPrice ?? 0} onChange={(e) => setEditForm({ ...editForm, cmtPrice: Number(e.target.value) })} />
                     </div>
                   )}
                 </div>
