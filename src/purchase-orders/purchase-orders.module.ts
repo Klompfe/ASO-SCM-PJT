@@ -10,6 +10,7 @@ import { BomItem } from '../boms/entities/bom-item.entity';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PackingReceiptsService } from './packing-receipts.service';
+import { PurchaseOrderDocumentService } from './purchase-order-document.service';
 import { PackingReceiptsController } from './packing-receipts.controller';
 import { PackingReceiptsReportController } from './packing-receipts-report.controller';
 import { AuthModule } from '../auth/auth.module';
@@ -23,6 +24,6 @@ import { MidoPriceTableModule } from '../mido-price-table/mido-price-table.modul
     MidoPriceTableModule,
   ],
   controllers: [PurchaseOrdersController, PackingReceiptsController, PackingReceiptsReportController],
-  providers: [PurchaseOrdersService, PackingReceiptsService],
+  providers: [PurchaseOrdersService, PackingReceiptsService, PurchaseOrderDocumentService],
 })
 export class PurchaseOrdersModule {}

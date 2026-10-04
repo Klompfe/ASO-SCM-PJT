@@ -48,3 +48,7 @@ export const updatePurchaseOrder = (
   id: number,
   data: { quantity?: number; unitPrice?: number; notes?: string },
 ): Promise<any> => apiClient.patch(`/purchase-orders/${id}`, data);
+
+// PR-178: 발주서 표준 양식(엑셀) — base64로 내려온다(Bearer 인증 때문에 직접 링크 불가).
+export const getPurchaseOrderDocument = (id: number): Promise<{ filename: string; base64: string }> =>
+  apiClient.get(`/purchase-orders/${id}/document`);

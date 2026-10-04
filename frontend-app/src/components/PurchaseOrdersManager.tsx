@@ -6,7 +6,9 @@ import {
   updatePurchaseOrderStatus,
   type CreatePurchaseOrder,
   type PurchaseOrder,
+  getPurchaseOrderDocument,
 } from '../api/purchaseOrders.service';
+import { downloadBase64File } from '../utils/fileDownload';
 import { getSuppliers } from '../api/suppliers.service';
 import { getItems, getItem } from '../api/items.service';
 import { getErrorMessage } from '../utils/errorMessage';
@@ -359,6 +361,17 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 <td className="px-4 py-2 max-w-[200px] truncate" title={po.notes ?? ''}>{po.notes ?? '-'}</td>
                 <td className="px-4 py-2">{statusBadge(po.status)}</td>
                 <td className="px-4 py-2 space-x-2 whitespace-nowrap">
+                  <button
+                    className="text-emerald-700"
+                    onClick={async () => {
+                      try {
+                        const doc = await getPurchaseOrderDocument(po.id);
+                        downloadBase64File(doc.base64, doc.filename);
+                      } catch (err: any) {
+                        toast.error(getErrorMessage(err, '발주서 발행에 실패했습니다.'));
+                      }
+                    }}
+                  >발주서</button>
                   {po.status === 'PENDING' && (
                     <>
                       <button className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700" onClick={() => handleReceive(po.id)}>입고 처리</button>

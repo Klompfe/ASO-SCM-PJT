@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PurchaseOrderDocumentService } from './purchase-order-document.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
@@ -21,7 +22,10 @@ import { PurchaseOrder } from './entities/purchase-order.entity';
 @ApiBearerAuth()
 @Controller('purchase-orders')
 export class PurchaseOrdersController {
-  constructor(private readonly poService: PurchaseOrdersService) {}
+  constructor(
+    private readonly poService: PurchaseOrdersService,
+    private readonly documentService: PurchaseOrderDocumentService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: '구매 주문 생성' })
@@ -35,6 +39,14 @@ export class PurchaseOrdersController {
   @ApiResponse({ status: 200, type: [PurchaseOrder] })
   findAll(@Query() filter: GetPurchaseOrdersFilterDto): Promise<PurchaseOrder[]> {
     return this.poService.findAll(filter);
+  }
+
+  // PR-178: 발주서 표준 양식(엑셀)을 base64로 내려준다 — 포장내역 템플릿(PR-169)과 같은 방식.
+  @Get(':id/document')
+  @ApiOperation({ summary: '발주서 표준 양식(엑셀) 생성 — base64로 반환' })
+  async document(@Param('id', ParseIntPipe) id: number) {
+    const { filename, buffer } = await this.documentService.generate(id);
+    return { filename, base64: buffer.toString('base64') };
   }
 
   @Get(':id')
