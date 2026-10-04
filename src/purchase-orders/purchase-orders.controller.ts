@@ -15,6 +15,7 @@ import { PurchaseOrderDocumentService } from './purchase-order-document.service'
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
+import { BulkCreatePurchaseOrdersDto } from './dto/bulk-create-purchase-orders.dto';
 import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto';
 import { PurchaseOrder } from './entities/purchase-order.entity';
 
@@ -32,6 +33,14 @@ export class PurchaseOrdersController {
   @ApiResponse({ status: 201, type: PurchaseOrder })
   create(@Body() dto: CreatePurchaseOrderDto): Promise<PurchaseOrder> {
     return this.poService.create(dto);
+  }
+
+  // PR-179: 일괄발주 — 미리보기에서 확인된 행들을 한 번에 생성한다(라우트 순서: 고정 경로라 ':id'보다 앞).
+  @Post('bulk')
+  @ApiOperation({ summary: '구매 주문 일괄 생성(트랜잭션 — 하나라도 실패하면 전부 취소)' })
+  @ApiResponse({ status: 201, type: [PurchaseOrder] })
+  createBulk(@Body() dto: BulkCreatePurchaseOrdersDto): Promise<PurchaseOrder[]> {
+    return this.poService.createBulk(dto.orders);
   }
 
   @Get()

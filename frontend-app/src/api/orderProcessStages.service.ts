@@ -6,6 +6,9 @@ export interface ProcurementStatusRow {
   poCreated: boolean;
   materialReadiness: { ready: number; total: number };
   exported: boolean;
+  // PR-179: 포장내역 등록 여부와, 포장내역이 없는 입고 발주 id(인라인 '포장내역 등록' 대상).
+  packed: boolean;
+  packingPendingPurchaseOrderId: number | null;
   overallStatus: string;
 }
 

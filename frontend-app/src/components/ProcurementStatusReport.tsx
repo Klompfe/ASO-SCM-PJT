@@ -4,16 +4,25 @@ import { getProcurementStatusReport, type ProcurementStatusRow } from '../api/or
 import { getErrorMessage } from '../utils/errorMessage';
 import { PrintableReport } from './PrintableReport';
 import type { ExcelColumn } from '../utils/excelExport';
+import { PackingReceiptsModal } from './PackingReceiptsModal';
 
 // PR-089: 종합상태별 색상 뱃지 — 회색=미발주, 노랑=입고대기, 파랑=출고대기, 초록=완료.
 const STATUS_BADGE_STYLES: Record<string, string> = {
   미발주: 'bg-gray-100 text-gray-700',
   입고대기: 'bg-yellow-100 text-yellow-800',
+  포장내역대기: 'bg-orange-100 text-orange-800',
   출고대기: 'bg-blue-100 text-blue-800',
   완료: 'bg-green-100 text-green-800',
 };
 
-export const ProcurementStatusReport: React.FC = () => {
+// PR-179: 미진한 상태(미발주/입고대기/포장내역대기)는 행에서 바로 조치할 수 있게 인라인 액션을 단다.
+// 발주 화면으로 넘어가는 액션은 onGoToPurchaseOrders로 탭만 바꾸고, 포장내역 등록은 이 화면에서 모달로 연다.
+interface ProcurementStatusReportProps {
+  onGoToPurchaseOrders?: () => void;
+}
+
+export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = ({ onGoToPurchaseOrders }) => {
+  const [packingFor, setPackingFor] = useState<{ purchaseOrderId: number; styleNo: string } | null>(null);
   const [rows, setRows] = useState<ProcurementStatusRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('');
@@ -91,6 +100,7 @@ export const ProcurementStatusReport: React.FC = () => {
                 <th className="p-2">입고상태</th>
                 <th className="p-2">출고상태</th>
                 <th className="p-2">종합상태</th>
+                <th className="p-2 print:hidden">바로 조치</th>
               </tr>
             </thead>
             <tbody>
@@ -110,11 +120,32 @@ export const ProcurementStatusReport: React.FC = () => {
                       {r.overallStatus}
                     </span>
                   </td>
+                  <td className="p-2 print:hidden whitespace-nowrap">
+                    {r.overallStatus === '미발주' && onGoToPurchaseOrders && (
+                      <button className="text-sm text-blue-600 hover:underline" onClick={onGoToPurchaseOrders}>발주하기</button>
+                    )}
+                    {r.overallStatus === '입고대기' && onGoToPurchaseOrders && (
+                      <button className="text-sm text-blue-600 hover:underline" onClick={onGoToPurchaseOrders}>발주 보기</button>
+                    )}
+                    {r.overallStatus === '포장내역대기' && r.packingPendingPurchaseOrderId != null && (
+                      <button
+                        className="text-sm text-purple-700 hover:underline"
+                        onClick={() => setPackingFor({ purchaseOrderId: r.packingPendingPurchaseOrderId as number, styleNo: r.styleNo })}
+                      >포장내역 등록</button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {packingFor && (
+        <PackingReceiptsModal
+          purchaseOrderId={packingFor.purchaseOrderId}
+          purchaseOrderLabel={`${packingFor.styleNo} · 발주 #${packingFor.purchaseOrderId}`}
+          onClose={() => { setPackingFor(null); load(); }}
+        />
       )}
     </PrintableReport>
   );

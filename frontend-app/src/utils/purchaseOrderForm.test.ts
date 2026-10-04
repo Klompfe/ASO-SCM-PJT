@@ -100,3 +100,22 @@ describe('buildEditableOrderByItem (PR-177)', () => {
     expect(m.get(10)?.pendingCount).toBe(3);
   });
 });
+
+// PR-179: 일괄발주 — 공급업체 자동 선택은 후보 1곳일 때만, 커밋 가능 조건은 세 값 모두 있을 때만.
+import { resolveBulkSupplierId, isBulkRowReady } from './purchaseOrderForm';
+
+describe('일괄발주 보조 규칙 (PR-179)', () => {
+  it('후보 공급업체가 정확히 하나면 그 id, 여럿이거나 없으면 null(추측하지 않음)', () => {
+    expect(resolveBulkSupplierId([4, 4, 4])).toBe(4);
+    expect(resolveBulkSupplierId([4, 9])).toBeNull();
+    expect(resolveBulkSupplierId([])).toBeNull();
+  });
+
+  it('공급업체·정수 수량·양수 단가가 모두 있어야 커밋 가능하다', () => {
+    expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: 2 })).toBe(true);
+    expect(isBulkRowReady({ supplierId: null, quantity: 3, unitPrice: 2 })).toBe(false);
+    expect(isBulkRowReady({ supplierId: 1, quantity: 2.5, unitPrice: 2 })).toBe(false);
+    expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: null })).toBe(false);
+    expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: 0 })).toBe(false);
+  });
+});

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { PurchaseOrder, PurchaseOrderStatus } from './entities/purchase-order.entity';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
@@ -45,6 +45,46 @@ export class PurchaseOrdersService {
     });
 
     return await this.poRepository.save(po);
+  }
+
+  // PR-179: 일괄발주. 모든 행의 공급업체/품목을 먼저 확인해 하나라도 없으면 아무것도 쓰지 않고
+  // 404로 끝낸다(절반만 생성되는 일을 막는다). 통과하면 한 트랜잭션으로 행마다 단건 생성과 같은 필드를 저장한다.
+  async createBulk(dtos: CreatePurchaseOrderDto[]): Promise<PurchaseOrder[]> {
+    const supplierIds = [...new Set(dtos.map((d) => d.supplierId))];
+    const itemIds = [...new Set(dtos.map((d) => d.itemId))];
+    const suppliers = await this.dataSource.getRepository(Supplier).findBy({ id: In(supplierIds) });
+    const items = await this.dataSource.getRepository(Item).findBy({ id: In(itemIds) });
+    const missingSupplier = supplierIds.filter((id) => !suppliers.some((s) => s.id === id));
+    const missingItem = itemIds.filter((id) => !items.some((i) => i.id === id));
+    if (missingSupplier.length || missingItem.length) {
+      throw new NotFoundException(
+        `존재하지 않는 값이 있어 일괄발주를 중단했습니다. 공급업체: [${missingSupplier.join(', ')}] 품목: [${missingItem.join(', ')}]`,
+      );
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const created: PurchaseOrder[] = [];
+      for (const dto of dtos) {
+        const po = queryRunner.manager.create(PurchaseOrder, {
+          quantity: dto.quantity,
+          unitPrice: dto.unitPrice,
+          notes: dto.notes,
+          supplier: suppliers.find((s) => s.id === dto.supplierId),
+          item: items.find((i) => i.id === dto.itemId),
+        });
+        created.push(await queryRunner.manager.save(PurchaseOrder, po));
+      }
+      await queryRunner.commitTransaction();
+      return created;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async findAll(filter?: GetPurchaseOrdersFilterDto): Promise<PurchaseOrder[]> {

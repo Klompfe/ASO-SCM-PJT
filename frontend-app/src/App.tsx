@@ -217,7 +217,7 @@ function App() {
             ) : orderManagementSubTab === 'summary' ? (
               <OrderProgressSummary onSelectStyle={handleSelectStyleFromSummary} />
             ) : (
-              <ProcurementStatusReport />
+              <ProcurementStatusReport onGoToPurchaseOrders={() => setActiveTab('purchaseOrders')} />
             )}
           </div>
         );

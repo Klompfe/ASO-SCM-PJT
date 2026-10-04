@@ -237,6 +237,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         refreshKey={panelRefresh}
         editable={buildEditableOrderByItem(pendingOrders)}
         onEdit={(order, pendingCount) => setEditing({ order, pendingCount })}
+        onBulkDone={() => { setPanelRefresh((n) => n + 1); loadPurchaseOrders(); loadPendingOrders(); }}
       />
 
       <form ref={formRef} onSubmit={handleCreate} className="bg-gray-50 p-4 rounded-lg space-y-2">

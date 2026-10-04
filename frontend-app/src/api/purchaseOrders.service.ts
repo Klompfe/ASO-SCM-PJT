@@ -49,6 +49,11 @@ export const updatePurchaseOrder = (
   data: { quantity?: number; unitPrice?: number; notes?: string },
 ): Promise<any> => apiClient.patch(`/purchase-orders/${id}`, data);
 
+// PR-179: 일괄발주 — 미리보기에서 확인된 행들을 한 번에 생성(서버는 하나라도 틀리면 전부 취소).
+export const createPurchaseOrdersBulk = (
+  orders: { supplierId: number; itemId: number; quantity: number; unitPrice: number; notes?: string }[],
+): Promise<any> => apiClient.post('/purchase-orders/bulk', { orders });
+
 // PR-178: 발주서 표준 양식(엑셀) — base64로 내려온다(Bearer 인증 때문에 직접 링크 불가).
 export const getPurchaseOrderDocument = (id: number): Promise<{ filename: string; base64: string }> =>
   apiClient.get(`/purchase-orders/${id}/document`);
