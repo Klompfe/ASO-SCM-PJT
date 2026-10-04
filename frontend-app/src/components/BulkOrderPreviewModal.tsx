@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { getPurchaseOrders, createPurchaseOrdersBulk } from '../api/purchaseOrders.service';
+import { getPurchaseOrders, createPurchaseOrdersBulk, getOrderTypeSuggestion } from '../api/purchaseOrders.service';
+import { canCreateWithOrderType, type PurchaseOrderType } from '../utils/purchaseOrderType';
 import { getSuppliers } from '../api/suppliers.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { pickLatestOrderDefaults, resolveBulkSupplierId, isBulkRowReady, suggestedQuantity } from '../utils/purchaseOrderForm';
@@ -23,6 +24,9 @@ interface Draft {
   quantity: number;
   unitPrice: number | null;
   note: string | null;
+  // PR-180: 발주 구분(제안값으로 미리 채우고 사람이 확정한다).
+  orderType: PurchaseOrderType | null;
+  orderTypeReason: string | null;
 }
 
 interface Props {
@@ -42,9 +46,10 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [supRes, ...histories] = await Promise.all([
+      const [supRes, histories, suggestions] = await Promise.all([
         getSuppliers(),
-        ...sources.map((s) => getPurchaseOrders({ itemId: s.itemId }).catch(() => [])),
+        Promise.all(sources.map((s) => getPurchaseOrders({ itemId: s.itemId }).catch(() => []))),
+        Promise.all(sources.map((s) => getOrderTypeSuggestion(s.itemId).catch(() => null))),
       ]);
       if (cancelled) return;
       setSuppliers(Array.isArray(supRes) ? supRes : (supRes?.data ?? []));
@@ -62,6 +67,8 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
           quantity: suggestedQuantity(s.shortageQty),
           unitPrice: latest ? latest.unitPrice : null,
           note: s.hasEditablePending ? '이미 미입고 발주가 있어 기본 제외 — 필요하면 포함' : null,
+          orderType: suggestions[i]?.orderType ?? null,
+          orderTypeReason: suggestions[i]?.reason ?? null,
         };
       });
       setDrafts(built);
@@ -73,7 +80,7 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
     setDrafts((prev) => (prev ?? []).map((d) => (d.itemId === itemId ? { ...d, ...patch } : d)));
 
   const included = (drafts ?? []).filter((d) => d.include);
-  const readyCount = included.filter((d) => isBulkRowReady({ supplierId: d.supplierId, quantity: d.quantity, unitPrice: d.unitPrice })).length;
+  const readyCount = included.filter((d) => isBulkRowReady({ supplierId: d.supplierId, quantity: d.quantity, unitPrice: d.unitPrice }) && canCreateWithOrderType(d.orderType)).length;
 
   const commit = async () => {
     if (included.length === 0) {
@@ -81,7 +88,7 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
       return;
     }
     if (readyCount !== included.length) {
-      toast.error('공급업체·수량·단가가 모두 채워지지 않은 행이 있습니다.');
+      toast.error('공급업체·구분·수량·단가가 모두 채워지지 않은 행이 있습니다.');
       return;
     }
     setSubmitting(true);
@@ -91,6 +98,7 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
         itemId: d.itemId,
         quantity: d.quantity,
         unitPrice: d.unitPrice as number,
+        orderType: d.orderType as PurchaseOrderType,
       })));
       toast.success(`${included.length}건의 발주가 생성되었습니다.`);
       onDone();
@@ -117,6 +125,7 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
                 <th className="p-2 text-left">포함</th>
                 <th className="p-2 text-left">자재</th>
                 <th className="p-2 text-left">공급업체</th>
+                <th className="p-2 text-left">구분</th>
                 <th className="p-2 text-right">수량</th>
                 <th className="p-2 text-right">단가</th>
                 <th className="p-2 text-left">비고</th>
@@ -144,6 +153,19 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
                     {d.candidateSupplierIds.length > 1 && (
                       <div className="text-xs text-amber-700">이력 공급업체 {d.candidateSupplierIds.length}곳 — 직접 고르세요</div>
                     )}
+                  </td>
+                  <td className="p-2">
+                    <select
+                      className="border rounded px-2 py-1 w-36"
+                      value={d.orderType ?? ''}
+                      onChange={(e) => update(d.itemId, { orderType: e.target.value === '' ? null : (e.target.value as PurchaseOrderType) })}
+                      aria-label={`${d.itemName} 구분`}
+                    >
+                      <option value="">구분 선택</option>
+                      <option value="FIRM">실발주(FOB)</option>
+                      <option value="PROVISIONAL">가발주(CMT)</option>
+                    </select>
+                    {d.orderTypeReason && <div className="text-xs text-gray-500 max-w-[14rem]">{d.orderTypeReason}</div>}
                   </td>
                   <td className="p-2 text-right">
                     <input type="number" min={1} className="border rounded px-2 py-1 w-20 text-right" value={d.quantity} onChange={(e) => update(d.itemId, { quantity: Number(e.target.value) })} aria-label={`${d.itemName} 수량`} />

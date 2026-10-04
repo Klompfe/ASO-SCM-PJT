@@ -1,8 +1,10 @@
+import { orderTypeLabel, orderTypeNote, canCreateWithOrderType, type PurchaseOrderType } from '../utils/purchaseOrderType';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
   getPurchaseOrders,
   createPurchaseOrder,
+  getOrderTypeSuggestion,
   updatePurchaseOrderStatus,
   type CreatePurchaseOrder,
   type PurchaseOrder,
@@ -41,6 +43,9 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // 공급업체/단가가 최근 발주 이력으로 자동 채워진 상태인지(다른 품목으로 바꿀 때 이전 자동값을 남기지 않기 위함)
   const [autofilled, setAutofilled] = useState(false);
   const [autofillNote, setAutofillNote] = useState<string | null>(null);
+  // PR-180: 발주 구분 — 품목을 고르면 스타일 계약방식 제안을 미리 채우되, 사람이 바꾸거나 직접 고른다.
+  const [orderType, setOrderType] = useState<PurchaseOrderType | null>(null);
+  const [orderTypeHint, setOrderTypeHint] = useState<string | null>(null);
   const [panelRefresh, setPanelRefresh] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const itemRequestSeq = useRef(0);
@@ -102,11 +107,19 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     setItem(picked);
     setAutofillNote(null);
     if (opts?.quantity) setNewPo((prev) => ({ ...prev, quantity: opts.quantity as number }));
-    if (!picked) return;
+    if (!picked) {
+      setOrderType(null);
+      setOrderTypeHint(null);
+      return;
+    }
     const seq = ++itemRequestSeq.current;
     try {
       const res = await getPurchaseOrders({ itemId: picked.id });
       if (seq !== itemRequestSeq.current) return; // 그 사이 다른 품목을 골랐다
+      const sugg = await getOrderTypeSuggestion(picked.id).catch(() => null);
+      if (seq !== itemRequestSeq.current) return;
+      setOrderType(sugg?.orderType ?? null);
+      setOrderTypeHint(sugg?.reason ?? null);
       const orders = Array.isArray(res) ? res : (res?.data ?? []);
       const latest = pickLatestOrderDefaults(orders);
       // 어떤 값이 자동 채움이고 어떤 값이 사용자가 넣은 값인지는 resolveAutofill(테스트된 순수 함수)이 정한다.
@@ -165,14 +178,20 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setError('품목 단가를 입력해 주세요.');
       return;
     }
+    if (!canCreateWithOrderType(orderType)) {
+      setError('발주 구분(실발주/가발주)을 선택해 주세요.');
+      return;
+    }
     try {
-      await createPurchaseOrder({ ...newPo, supplierId: supplier.id, itemId: item.id });
+      await createPurchaseOrder({ ...newPo, supplierId: supplier.id, itemId: item.id, orderType: orderType as 'FIRM' | 'PROVISIONAL' });
       toast.success('발주가 생성되었습니다.');
       setNewPo(emptyForm);
       setSupplier(null);
       setItem(null);
       setAutofilled(false);
       setAutofillNote(null);
+      setOrderType(null);
+      setOrderTypeHint(null);
       setPanelRefresh((n) => n + 1); // 스타일 부족 자재 표의 "이미 발주" 수량 갱신
       loadPurchaseOrders();
     } catch (err: any) {
@@ -289,6 +308,19 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             <label className="text-sm text-gray-600 mb-1">단가</label>
             <input type="number" min={0} step="0.01" className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.unitPrice} onChange={(e) => { setNewPo({ ...newPo, unitPrice: Number(e.target.value) }); setAutofilled(false); }} aria-label="단가" />
           </div>
+          <div className="flex flex-col">
+            <label className="text-sm text-gray-600 mb-1">구분</label>
+            <select
+              className="border border-gray-300 rounded px-3 py-2 w-40"
+              value={orderType ?? ''}
+              onChange={(e) => setOrderType(e.target.value === '' ? null : (e.target.value as PurchaseOrderType))}
+              aria-label="발주 구분"
+            >
+              <option value="">구분 선택</option>
+              <option value="FIRM">실발주(FOB)</option>
+              <option value="PROVISIONAL">가발주(CMT)</option>
+            </select>
+          </div>
           <div className="flex flex-col flex-1 min-w-[200px]">
             <label className="text-sm text-gray-600 mb-1">비고</label>
             <textarea
@@ -302,6 +334,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700" disabled={loading}>발주 생성</button>
         </div>
         {autofillNote && <p className="text-xs text-blue-700" data-testid="autofill-note">{autofillNote}</p>}
+        {orderTypeHint && <p className="text-xs text-gray-500" data-testid="order-type-hint">구분 제안: {orderTypeHint}</p>}
       </form>
 
       <div className="flex flex-wrap gap-4 items-end bg-gray-50 p-4 rounded-lg">
@@ -346,6 +379,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               <th className="px-4 py-2 text-right">단가</th>
               <th className="px-4 py-2 text-right">총액</th>
               <th className="px-4 py-2 text-left">공급업체</th>
+              <th className="px-4 py-2 text-left">구분</th>
               <th className="px-4 py-2 text-left">비고</th>
               <th className="px-4 py-2 text-left">상태</th>
               <th className="px-4 py-2 text-left">Action</th>
@@ -359,6 +393,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 <td className="px-4 py-2 text-right">{po.unitPrice ?? '-'}</td>
                 <td className="px-4 py-2 text-right">{po.unitPrice != null ? (po.unitPrice * po.quantity).toLocaleString() : '-'}</td>
                 <td className="px-4 py-2">{po.supplier?.name ?? '-'}</td>
+                <td className="px-4 py-2 text-xs whitespace-nowrap" data-testid="order-type-cell">
+                  <span className={`px-2 py-1 rounded font-medium ${po.orderType === 'PROVISIONAL' ? 'bg-purple-100 text-purple-800' : po.orderType === 'FIRM' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'}`}>{orderTypeLabel(po.orderType)}</span>
+                  {orderTypeNote(po.orderType) && <span className="block mt-1 text-amber-700">{orderTypeNote(po.orderType)}</span>}
+                </td>
                 <td className="px-4 py-2 max-w-[200px] truncate" title={po.notes ?? ''}>{po.notes ?? '-'}</td>
                 <td className="px-4 py-2">{statusBadge(po.status)}</td>
                 <td className="px-4 py-2 space-x-2 whitespace-nowrap">

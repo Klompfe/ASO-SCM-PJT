@@ -2,6 +2,9 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { PurchaseOrder, PurchaseOrderStatus } from './entities/purchase-order.entity';
+import { BomItem } from '../boms/entities/bom-item.entity';
+import { ProductionType } from '../styles/entities/style-overview.entity';
+import { OrderTypeSuggestion, suggestOrderType } from './utils/purchase-order-type.util';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
@@ -39,6 +42,7 @@ export class PurchaseOrdersService {
     const po = this.poRepository.create({
       quantity: dto.quantity,
       unitPrice: dto.unitPrice,
+      orderType: dto.orderType ?? null,
       notes: dto.notes,
       supplier,
       item,
@@ -71,6 +75,7 @@ export class PurchaseOrdersService {
         const po = queryRunner.manager.create(PurchaseOrder, {
           quantity: dto.quantity,
           unitPrice: dto.unitPrice,
+          orderType: dto.orderType ?? null,
           notes: dto.notes,
           supplier: suppliers.find((s) => s.id === dto.supplierId),
           item: items.find((i) => i.id === dto.itemId),
@@ -85,6 +90,27 @@ export class PurchaseOrdersService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  // PR-180: 품목의 발주 구분 제안. 발주에는 스타일 연결이 없으므로 이 품목을 쓰는 활성 BOM의 스타일 계약방식으로 정한다.
+  async suggestOrderTypeForItem(itemId: number): Promise<OrderTypeSuggestion & { styleNos: string[] }> {
+    const rows = await this.dataSource
+      .getRepository(BomItem)
+      .createQueryBuilder('bi')
+      .innerJoin('bi.bom', 'bom')
+      .innerJoin('bom.style', 'style')
+      .leftJoin('style.overview', 'overview')
+      .select('style.styleNo', 'styleNo')
+      .addSelect('overview.productionType', 'productionType')
+      .where('bi.materialId = :itemId', { itemId })
+      .andWhere('bom.isActive = :active', { active: true })
+      .getRawMany<{ styleNo: string; productionType: ProductionType | null }>();
+    const byStyle = new Map<string, ProductionType | null>();
+    for (const r of rows) byStyle.set(r.styleNo, r.productionType ?? null);
+    return {
+      ...suggestOrderType([...byStyle.values()]),
+      styleNos: [...byStyle.keys()],
+    };
   }
 
   async findAll(filter?: GetPurchaseOrdersFilterDto): Promise<PurchaseOrder[]> {

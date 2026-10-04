@@ -11,6 +11,8 @@ export interface PurchaseOrder {
   supplier?: { id: number; code: string; name: string };
   notes?: string;
   createdAt?: string;
+  // PR-180: 실발주(FIRM)/가발주(PROVISIONAL). 기존 행은 null일 수 있다(미지정).
+  orderType?: 'FIRM' | 'PROVISIONAL' | null;
 }
 
 export interface CreatePurchaseOrder {
@@ -19,6 +21,7 @@ export interface CreatePurchaseOrder {
   quantity: number;
   unitPrice: number;
   notes?: string;
+  orderType?: 'FIRM' | 'PROVISIONAL';
 }
 
 export interface GetPurchaseOrdersFilter {
@@ -51,9 +54,18 @@ export const updatePurchaseOrder = (
 
 // PR-179: 일괄발주 — 미리보기에서 확인된 행들을 한 번에 생성(서버는 하나라도 틀리면 전부 취소).
 export const createPurchaseOrdersBulk = (
-  orders: { supplierId: number; itemId: number; quantity: number; unitPrice: number; notes?: string }[],
+  orders: { supplierId: number; itemId: number; quantity: number; unitPrice: number; notes?: string; orderType?: 'FIRM' | 'PROVISIONAL' }[],
 ): Promise<any> => apiClient.post('/purchase-orders/bulk', { orders });
 
 // PR-178: 발주서 표준 양식(엑셀) — base64로 내려온다(Bearer 인증 때문에 직접 링크 불가).
 export const getPurchaseOrderDocument = (id: number): Promise<{ filename: string; base64: string }> =>
   apiClient.get(`/purchase-orders/${id}/document`);
+
+// PR-180: 품목의 발주 구분 제안 — 이 품목을 쓰는 활성 BOM 스타일의 계약방식 기준. 확신할 수 없으면 orderType이 null이다.
+export interface OrderTypeSuggestion {
+  orderType: 'FIRM' | 'PROVISIONAL' | null;
+  reason: string;
+  styleNos: string[];
+}
+export const getOrderTypeSuggestion = (itemId: number): Promise<OrderTypeSuggestion> =>
+  apiClient.get('/purchase-orders/order-type-suggestion', { params: { itemId } });
