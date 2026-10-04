@@ -74,6 +74,10 @@ export class SalesOrdersService {
         requiredQty: b.requiredQty ?? undefined,
         supplier: b.supplier ?? undefined,
         remarks: b.remarks ?? undefined,
+        // PR-175: materialSubTypeCandidate(AI 후보)는 저장 대상이 아니다 — 검토
+        // 화면에서 사람이 확인한 threadType/tapeType만 넘어온다.
+        threadType: b.threadType ?? undefined,
+        tapeType: b.tapeType ?? undefined,
       })),
     });
 

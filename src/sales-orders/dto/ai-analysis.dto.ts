@@ -50,6 +50,27 @@ export class AiBomItemDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() requiredQty: number | null;
   @ApiPropertyOptional() @IsOptional() @IsString() supplier: string | null;
   @ApiPropertyOptional() @IsOptional() @IsString() remarks: string | null;
+
+  // PR-175: 실/테이프 종류 AI 후보 — 자재명/규격 텍스트에 단서가 있을 때만 채워지고
+  // (vision.service.ts 프롬프트), 확신이 없으면 null(추측 금지, RESPONSE_SCHEMA가
+  // 고정된 한글 라벨 5종만 허용). AI가 직접 BomItem.threadType/tapeType을 채우지
+  // 않는다 — 검토 화면에서 사람이 "적용"을 눌러야 아래 threadType/tapeType으로 복사된다.
+  @ApiPropertyOptional({ description: '실/테이프 종류 AI 후보(코아사/오바사/지누이도/다데/암홀 중 하나, 확신 없으면 null)' })
+  @IsOptional()
+  @IsString()
+  materialSubTypeCandidate?: string | null;
+
+  // 사람이 확인한 최종 실 종류 — commitAnalysis가 이 값만 BomItem.threadType에 반영한다.
+  @ApiPropertyOptional({ description: '사람이 확인한 최종 실 종류(ThreadType enum 값, 저장 대상)' })
+  @IsOptional()
+  @IsString()
+  threadType?: string | null;
+
+  // 사람이 확인한 최종 테이프 종류 — commitAnalysis가 이 값만 BomItem.tapeType에 반영한다.
+  @ApiPropertyOptional({ description: '사람이 확인한 최종 테이프 종류(TapeType enum 값, 저장 대상)' })
+  @IsOptional()
+  @IsString()
+  tapeType?: string | null;
 }
 
 // 사이즈 스펙표 한 행 (부위 x 사이즈). 원본이 손글씨 분수 표기라 문자열로 둔다.

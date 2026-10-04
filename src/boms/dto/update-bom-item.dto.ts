@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
-import { ThreadType } from '../entities/bom-item.entity';
+import { ThreadType, TapeType } from '../entities/bom-item.entity';
 
 // PR-073: 수출 선적서류(INVOICE/Packing List) 자동생성을 위해 BomItem에 혼용율/HS코드를
 // 스타일별로 입력·수정할 수 있어야 한다. 지금은 이 두 필드만 인라인 수정 대상이라
@@ -23,4 +23,11 @@ export class UpdateBomItemDto {
   @IsOptional()
   @IsEnum(ThreadType)
   threadType?: ThreadType;
+
+  // PR-175: 테이프류(다데/암홀) 포장단위(50m/롤) 환산용 — threadType과 동일한 원칙
+  // (사람이 직접 고른다, 보내지 않으면 기존 값 유지).
+  @ApiPropertyOptional({ enum: TapeType })
+  @IsOptional()
+  @IsEnum(TapeType)
+  tapeType?: TapeType;
 }

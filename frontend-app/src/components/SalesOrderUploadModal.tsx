@@ -2,7 +2,12 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { uploadSalesOrderImage, commitSalesOrderAnalysis, getAiUsageSummary, type AiSalesOrderResult, type AiUsageSummary } from '../api/salesOrders.service';
 import { getErrorMessage } from '../utils/errorMessage';
-import { updateOverviewField as updateOverviewFieldPure } from '../utils/salesOrderOverviewEdit';
+import {
+  updateOverviewField as updateOverviewFieldPure,
+  setBomItemSubType,
+  resolveMaterialSubTypeCandidate,
+  resolveSubTypeValue,
+} from '../utils/salesOrderOverviewEdit';
 
 interface Props {
   isOpen: boolean;
@@ -395,17 +400,51 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                     <h5 className="text-sm font-semibold text-gray-700 mb-1">2) 자재명세 ({result.bomItems.length}건)</h5>
                     <div className="overflow-x-auto max-h-48 overflow-y-auto">
                       <table className="border text-sm">
-                        <thead className="bg-gray-100"><tr><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">비고</th></tr></thead>
+                        <thead className="bg-gray-100"><tr><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">비고</th><th className="border p-1">실/테이프 종류</th></tr></thead>
                         <tbody>
-                          {result.bomItems.map((item, i) => (
-                            <tr key={i}>
-                              <td className="border p-1">{item.category ?? '-'}</td>
-                              <td className="border p-1">{item.itemName}</td>
-                              <td className="border p-1">{item.spec ?? '-'}</td>
-                              <td className="border p-1">{item.consumption ?? '-'}</td>
-                              <td className="border p-1">{item.remarks ?? '-'}</td>
-                            </tr>
-                          ))}
+                          {result.bomItems.map((item, i) => {
+                            const candidate = item.materialSubTypeCandidate ?? null;
+                            const resolved = resolveMaterialSubTypeCandidate(candidate);
+                            const selectedValue = item.threadType ?? item.tapeType ?? '';
+                            return (
+                              <tr key={i}>
+                                <td className="border p-1">{item.category ?? '-'}</td>
+                                <td className="border p-1">{item.itemName}</td>
+                                <td className="border p-1">{item.spec ?? '-'}</td>
+                                <td className="border p-1">{item.consumption ?? '-'}</td>
+                                <td className="border p-1">{item.remarks ?? '-'}</td>
+                                <td className="border p-1">
+                                  {candidate && resolved && !selectedValue && (
+                                    <div className="mb-1 bg-yellow-50 border border-yellow-200 rounded px-1 py-0.5 text-xs text-yellow-800" data-testid={`subtype-candidate-${index}-${i}`}>
+                                      AI가 인식한 자재 종류: <b>{candidate}</b> — 적용하시겠습니까?
+                                      <button
+                                        type="button"
+                                        onClick={() => setResults((prev) => setBomItemSubType(prev, index, i, resolved))}
+                                        className="ml-1 px-1 rounded bg-yellow-600 text-white hover:bg-yellow-700"
+                                      >적용</button>
+                                    </div>
+                                  )}
+                                  <select
+                                    className="border rounded px-1 py-0.5 text-xs"
+                                    aria-label="실/테이프 종류"
+                                    value={selectedValue}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      const target = v ? resolveSubTypeValue(v) : null;
+                                      setResults((prev) => setBomItemSubType(prev, index, i, target));
+                                    }}
+                                  >
+                                    <option value="">미지정</option>
+                                    <option value="COA_SA">코아사 (2500M/콘)</option>
+                                    <option value="OBA_SA_SKU_I_SA">오바사·스쿠이사 (4000M/콘)</option>
+                                    <option value="POLY_JINUIDO">폴리지누이도 (500M/콘)</option>
+                                    <option value="DADE">다데 (50M/롤)</option>
+                                    <option value="AMHOL">암홀 (50M/롤)</option>
+                                  </select>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

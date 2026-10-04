@@ -11,6 +11,13 @@ export enum ThreadType {
   POLY_JINUIDO = 'POLY_JINUIDO', // 폴리지누이도
 }
 
+// PR-175: 테이프류(다데/암홀) 서브타입 — threadType과 동일한 구조(사람이 직접 고르는
+// nullable 필드, 텍스트 자동분류 안 함)로 둔다. 콘길이 대신 "50m/롤" 환산 기준이 쓰인다.
+export enum TapeType {
+  DADE = 'DADE', // 다데
+  AMHOL = 'AMHOL', // 암홀
+}
+
 @Entity('bom_item_details')
 export class BomItem {
   @PrimaryGeneratedColumn()
@@ -67,4 +74,10 @@ export class BomItem {
   // 실이 아닌 자재는 항상 null. 값이 없는 실 자재는 콘가격을 계산하지 않고 경고만 띄운다.
   @Column({ type: 'varchar', enum: ThreadType, nullable: true })
   threadType?: ThreadType | null;
+
+  // PR-175: 테이프류(다데/암홀) — threadType과 별도 컬럼으로 둔다(실/테이프는 서로
+  // 다른 자재 종류라 한 BomItem이 동시에 둘 다일 수 없지만, 굳이 하나의 컬럼에
+  // 합치지 않고 threadType과 같은 패턴을 유지해 기존 코드 영향을 최소화한다).
+  @Column({ type: 'varchar', enum: TapeType, nullable: true })
+  tapeType?: TapeType | null;
 }

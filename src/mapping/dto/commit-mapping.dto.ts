@@ -141,6 +141,19 @@ export class CommitBomItemDto {
   @IsOptional()
   @IsString()
   hsCode?: string;
+
+  // PR-175: 실/테이프 종류 — 사람이 확인한 최종값만 넘어온다(AI 후보
+  // materialSubTypeCandidate는 ai-analysis.dto.ts에만 있고 여기엔 없다 — 검토
+  // 화면에서 "적용"을 눌러야 이 필드로 복사되어 커밋 요청에 포함된다).
+  @ApiPropertyOptional({ description: 'ThreadType enum 값(코아사 등)', example: 'COA_SA' })
+  @IsOptional()
+  @IsString()
+  threadType?: string;
+
+  @ApiPropertyOptional({ description: 'TapeType enum 값(다데/암홀)', example: 'DADE' })
+  @IsOptional()
+  @IsString()
+  tapeType?: string;
 }
 
 export class CommitMappingDto {

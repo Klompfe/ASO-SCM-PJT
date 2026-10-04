@@ -196,6 +196,11 @@ export class MappingCommitService {
           remarks: item.remarks || 'N/A',
           composition,
           hsCode: item.hsCode ?? null,
+          // PR-175: 사람이 검토 화면에서 확인한 최종 실/테이프 종류만 반영한다(AI
+          // 후보를 그대로 저장하지 않음 — commitAnalysis 쪽에서 이미 사람이 확인한
+          // 값만 여기로 넘어온다).
+          threadType: (item.threadType as any) ?? null,
+          tapeType: (item.tapeType as any) ?? null,
         });
         bom.items = [...(bom.items ?? []), savedBomItem];
       }
