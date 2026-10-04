@@ -13,6 +13,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
+import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto';
 import { PurchaseOrder } from './entities/purchase-order.entity';
 
@@ -41,6 +42,13 @@ export class PurchaseOrdersController {
   @ApiResponse({ status: 200, type: PurchaseOrder })
   findOne(@Param('id', ParseIntPipe) id: number): Promise<PurchaseOrder> {
     return this.poService.findOne(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: '미입고(PENDING) 발주 수량/단가/비고 수정' })
+  @ApiResponse({ status: 200, type: PurchaseOrder })
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePurchaseOrderDto): Promise<PurchaseOrder> {
+    return this.poService.update(id, dto);
   }
 
   @Patch(':id/status')

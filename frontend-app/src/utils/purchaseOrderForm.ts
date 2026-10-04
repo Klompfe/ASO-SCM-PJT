@@ -60,3 +60,19 @@ export function sortForShortage(rows: MaterialRequirementRow[]): MaterialRequire
     return a.itemName.localeCompare(b.itemName);
   });
 }
+
+// PR-177: 자재(itemId)별로 "수정하기" 대상이 되는 발주 = 미입고(PENDING) 중 가장 최근(id 최대).
+// 입고/취소된 발주는 수정 대상이 아니므로 제외한다. 여러 건이면 가장 최근 것 하나만 고른다
+// (화면 버튼을 한 번에 한 대상으로 두기 위함 — 나머지는 발주 목록에서 본다).
+export function buildEditableOrderByItem<T extends { id: number; itemId: number; status: string }>(
+  orders: T[],
+): Map<number, { order: T; pendingCount: number }> {
+  const map = new Map<number, { order: T; pendingCount: number }>();
+  for (const o of orders) {
+    if (o.status !== 'PENDING') continue;
+    const cur = map.get(o.itemId);
+    if (!cur) map.set(o.itemId, { order: o, pendingCount: 1 });
+    else map.set(o.itemId, { order: o.id > cur.order.id ? o : cur.order, pendingCount: cur.pendingCount + 1 });
+  }
+  return map;
+}

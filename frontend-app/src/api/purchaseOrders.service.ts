@@ -42,3 +42,9 @@ export const updatePurchaseOrderStatus = (
   id: number,
   status: 'PENDING' | 'RECEIVED' | 'CANCELLED',
 ): Promise<any> => apiClient.patch(`/purchase-orders/${id}/status`, { status });
+
+// PR-177: 미입고(PENDING) 발주 수정 — 수량/단가/비고.
+export const updatePurchaseOrder = (
+  id: number,
+  data: { quantity?: number; unitPrice?: number; notes?: string },
+): Promise<any> => apiClient.patch(`/purchase-orders/${id}`, data);

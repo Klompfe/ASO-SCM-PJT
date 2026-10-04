@@ -101,6 +101,21 @@ describe('PurchaseOrdersService', () => {
     });
   });
 
+  // PR-177: 미입고(PENDING) 발주만 수정 가능.
+  describe('update (PR-177)', () => {
+    it('PENDING 발주의 수량/단가/비고를 바꿔 저장한다', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue({ id: 1, status: 'PENDING', quantity: 10, unitPrice: 5, notes: null } as any);
+      jest.spyOn(poRepository, 'save').mockImplementation((po: any) => Promise.resolve(po));
+      const result = await service.update(1, { quantity: 20, unitPrice: 7, notes: '긴급' });
+      expect(result).toEqual(expect.objectContaining({ quantity: 20, unitPrice: 7, notes: '긴급' }));
+    });
+
+    it('RECEIVED/CANCELLED 발주는 BadRequestException으로 막는다', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue({ id: 2, status: 'RECEIVED', quantity: 10 } as any);
+      await expect(service.update(2, { quantity: 99 })).rejects.toThrow(BadRequestException);
+    });
+  });
+
   describe('cancel', () => {
     it('발주서를 취소해야 한다', async () => {
       const po = { id: 1, status: 'PENDING' };

@@ -4,6 +4,7 @@ import { Repository, DataSource } from 'typeorm';
 import { PurchaseOrder, PurchaseOrderStatus } from './entities/purchase-order.entity';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
+import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto';
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
@@ -106,6 +107,19 @@ export class PurchaseOrdersService {
       throw new NotFoundException(`ID가 ${id}인 구매 주문을 찾을 수 없습니다.`);
     }
     return po;
+  }
+
+  // PR-177: 미입고(PENDING) 발주만 수정할 수 있다. 입고/취소된 발주는 이미 재고·거래에
+  // 반영됐으므로 조용히 고치지 않고 400으로 막는다.
+  async update(id: number, dto: UpdatePurchaseOrderDto): Promise<PurchaseOrder> {
+    const po = await this.findOne(id);
+    if (po.status !== PurchaseOrderStatus.PENDING) {
+      throw new BadRequestException(`미입고(PENDING) 상태인 발주만 수정할 수 있습니다. 현재 상태: ${po.status}`);
+    }
+    if (dto.quantity !== undefined) po.quantity = dto.quantity;
+    if (dto.unitPrice !== undefined) po.unitPrice = dto.unitPrice;
+    if (dto.notes !== undefined) po.notes = dto.notes;
+    return await this.poRepository.save(po);
   }
 
   async updateStatus(id: number, dto: UpdatePurchaseOrderStatusDto): Promise<PurchaseOrder> {

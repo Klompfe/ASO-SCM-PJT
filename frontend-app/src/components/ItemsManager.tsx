@@ -14,6 +14,9 @@ import { extractNotices, type StyleCommitResult } from '../utils/commitNotices';
 import { BulkApproveResult } from './CommitResultPanel';
 import { fetchItemPage, hasAnySearchCondition } from '../utils/listQueries';
 import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
+import { buildEditableOrderByItem } from '../utils/purchaseOrderForm';
+import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
+import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 
 interface ItemsManagerProps {
   onOrderItem?: (itemId: number) => void;
@@ -39,6 +42,20 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   const [searchResults, setSearchResults] = useState<MasterStyle[]>([]);
   const [selectedStyleNo, setSelectedStyleNo] = useState<string | null>(null);
   const [bom, setBom] = useState<BomDetail | null>(null);
+  // PR-177: 미입고 발주가 있는 자재는 "발주하기" 대신 "수정하기"로 바꾼다.
+  const [pendingOrders, setPendingOrders] = useState<PurchaseOrder[]>([]);
+  const [editing, setEditing] = useState<{ order: PurchaseOrder; pendingCount: number } | null>(null);
+  const loadPendingOrders = useCallback(async () => {
+    try {
+      const res = await getPurchaseOrders({ status: 'PENDING' });
+      setPendingOrders(Array.isArray(res) ? res : (res?.data ?? []));
+    } catch {
+      setPendingOrders([]); // 조회 실패 시 기존처럼 "발주하기"를 보여준다
+    }
+  }, []);
+  useEffect(() => {
+    if (bom) loadPendingOrders();
+  }, [bom, loadPendingOrders]);
   const [bomError, setBomError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
 
@@ -516,6 +533,14 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
             )}
           </div>
           {bomError && <div className="p-4 bg-yellow-50 text-yellow-800 rounded-lg">{bomError}</div>}
+          {editing && (
+            <PurchaseOrderEditModal
+              order={editing.order}
+              pendingCount={editing.pendingCount}
+              onClose={() => setEditing(null)}
+              onSaved={() => { setEditing(null); loadPendingOrders(); }}
+            />
+          )}
           {bom && (
             <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
               <table>
@@ -604,7 +629,15 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                           <button className="text-blue-600" onClick={() => startEditBomItem(it)}>수정</button>
-                          {onOrderItem && it.material?.id && (
+                          {it.material?.id && buildEditableOrderByItem(pendingOrders).get(it.material.id) && (
+                            <button
+                              onClick={() => { const e = buildEditableOrderByItem(pendingOrders).get(it.material.id)!; setEditing({ order: e.order, pendingCount: e.pendingCount }); }}
+                              className="bg-amber-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-amber-700 whitespace-nowrap"
+                            >
+                              수정하기
+                            </button>
+                          )}
+                          {onOrderItem && it.material?.id && !buildEditableOrderByItem(pendingOrders).get(it.material.id) && (
                             <button
                               onClick={() => onOrderItem(it.material.id)}
                               className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-blue-700 whitespace-nowrap"

@@ -6,18 +6,24 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { requirementEmptyMessage, type MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { sortForShortage } from '../utils/purchaseOrderForm';
 import { SearchSelectField } from './SearchSelectField';
+import type { PurchaseOrder } from '../api/purchaseOrders.service';
 
 interface StyleOption { styleNo: string; overview?: { styleName?: string | null; totalQty?: number | string | null } | null }
 
 const fmt = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 
+// PR-177: 자재별 미입고 발주(수정 대상). 있으면 버튼이 "수정하기"가 된다.
+export type EditableOrderMap = Map<number, { order: PurchaseOrder; pendingCount: number }>;
+
 interface ShortageTableProps {
   rows: MaterialRequirementRow[];
   onPick: (row: MaterialRequirementRow) => void;
+  editable?: EditableOrderMap;
+  onEdit?: (order: PurchaseOrder, pendingCount: number) => void;
 }
 
 // 부족 자재 표(표시 전용). 부족 수량이 있는 행이 위에 오고 강조된다(정렬은 호출하는 쪽의 sortForShortage).
-export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick }) => {
+export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, editable, onEdit }) => {
   const th = 'px-2 py-1 text-left text-xs bg-gray-100 border border-gray-200';
   const td = 'px-2 py-1 text-sm border border-gray-200';
   return (
@@ -43,7 +49,11 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick }) =>
               <td className={`${td} text-right`}>{fmt(r.orderedQty)}</td>
               <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(r.shortageQty)}</td>
               <td className={td}>
-                <button type="button" className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 whitespace-nowrap" onClick={() => onPick(r)}>이 자재로 발주하기</button>
+                {editable?.has(r.itemId) && onEdit ? (
+                  <button type="button" className="bg-amber-600 text-white px-2 py-1 rounded text-xs hover:bg-amber-700 whitespace-nowrap" onClick={() => { const e = editable.get(r.itemId)!; onEdit(e.order, e.pendingCount); }}>수정하기</button>
+                ) : (
+                  <button type="button" className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 whitespace-nowrap" onClick={() => onPick(r)}>이 자재로 발주하기</button>
+                )}
               </td>
             </tr>
           ))}
@@ -57,7 +67,12 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick }) =>
 // 발주 화면은 자재(Item) 단위라 PurchaseOrder에는 스타일번호가 없다(여러 스타일이 같은 자재를 함께 쓸 수 있음). 이 패널은 발주 데이터를
 // 바꾸지 않는 "보조 검색"이다: 스타일을 고르면 그 스타일의 활성 BOM으로 필요 자재/이미 발주/부족을 보여주고(PR-120 소요명세서와
 // 같은 서버 계산), 부족한 자재를 골라 발주 폼으로 넘긴다.
-export const StyleShortagePanel: React.FC<{ onPickMaterial: (row: MaterialRequirementRow) => void; refreshKey?: number }> = ({ onPickMaterial, refreshKey = 0 }) => {
+export const StyleShortagePanel: React.FC<{
+  onPickMaterial: (row: MaterialRequirementRow) => void;
+  refreshKey?: number;
+  editable?: EditableOrderMap;
+  onEdit?: (order: PurchaseOrder, pendingCount: number) => void;
+}> = ({ onPickMaterial, refreshKey = 0, editable, onEdit }) => {
   const [style, setStyle] = useState<StyleOption | null>(null);
   const [quantityInput, setQuantityInput] = useState('');
   const [data, setData] = useState<StyleRequirements | null>(null);
@@ -162,7 +177,7 @@ export const StyleShortagePanel: React.FC<{ onPickMaterial: (row: MaterialRequir
             {rows.length > 0 && (
               <p className="text-xs text-gray-400">&quot;이 자재로 발주하기&quot;를 누르면 아래 발주 폼에 자동으로 채워집니다.</p>
             )}
-            <ShortageTable rows={rows} onPick={onPickMaterial} />
+            <ShortageTable rows={rows} onPick={onPickMaterial} editable={editable} onEdit={onEdit} />
           </>
         )}
       </div>

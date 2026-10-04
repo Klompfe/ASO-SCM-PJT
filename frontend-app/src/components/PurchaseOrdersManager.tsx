@@ -12,9 +12,10 @@ import { getItems, getItem } from '../api/items.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
-import { pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, type SupplierRef } from '../utils/purchaseOrderForm';
+import { pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, buildEditableOrderByItem, type SupplierRef } from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
+import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { ShipmentsManager } from './ShipmentsManager';
 import { SupplierQuickCreateModal } from './SupplierQuickCreateModal';
 
@@ -51,6 +52,9 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // 시 언마운트됨 — react-router 없음) 작성 중이던 발주 폼이 사라진다 — 팝업으로 바로
   // 등록하고 폼은 그대로 유지한다.
   const [showQuickCreateSupplier, setShowQuickCreateSupplier] = useState(false);
+  // PR-177: 미입고 발주 — 자재별 "수정하기" 대상과 수정 중인 발주.
+  const [pendingOrders, setPendingOrders] = useState<PurchaseOrder[]>([]);
+  const [editing, setEditing] = useState<{ order: PurchaseOrder; pendingCount: number } | null>(null);
   // PR-082: 기존 "선적관리 > 수입"에 임시로 얹혀 있던 ShipmentsManager(원자재 입고)를
   // 원래 자리인 Purchase Orders 쪽 서브탭으로 옮긴다 — shipments 모듈은 PurchaseOrder와
   // 연결된 개념이라 여기가 맞는 위치다(export-shipments의 shipmentsSubTab과 동일 패턴).
@@ -123,6 +127,19 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   useEffect(() => {
     loadPurchaseOrders();
   }, [loadPurchaseOrders]);
+
+  const loadPendingOrders = useCallback(async () => {
+    try {
+      const res = await getPurchaseOrders({ status: 'PENDING' });
+      setPendingOrders(Array.isArray(res) ? res : (res?.data ?? []));
+    } catch {
+      setPendingOrders([]); // 조회 실패 시 "발주하기"로 두고(안전한 쪽) 막지 않는다
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPendingOrders();
+  }, [loadPendingOrders, panelRefresh]);
 
   // Items(자재명세) 화면에서 "발주하기"로 넘어온 경우, 해당 품목을 폼에 미리 선택해 둔다.
   useEffect(() => {
@@ -213,7 +230,12 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         <>
       {error && <div className="p-4 bg-red-100 text-red-700 rounded-lg">{error}</div>}
 
-      <StyleShortagePanel onPickMaterial={handlePickMaterial} refreshKey={panelRefresh} />
+      <StyleShortagePanel
+        onPickMaterial={handlePickMaterial}
+        refreshKey={panelRefresh}
+        editable={buildEditableOrderByItem(pendingOrders)}
+        onEdit={(order, pendingCount) => setEditing({ order, pendingCount })}
+      />
 
       <form ref={formRef} onSubmit={handleCreate} className="bg-gray-50 p-4 rounded-lg space-y-2">
         <div className="flex flex-wrap gap-4 items-end">
@@ -350,6 +372,15 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           </tbody>
         </table>
       </div>
+
+      {editing && (
+        <PurchaseOrderEditModal
+          order={editing.order}
+          pendingCount={editing.pendingCount}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); setPanelRefresh((n) => n + 1); loadPurchaseOrders(); }}
+        />
+      )}
 
       {packingReceiptsFor && (
         <PackingReceiptsModal

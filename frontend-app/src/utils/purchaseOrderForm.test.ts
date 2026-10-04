@@ -76,3 +76,27 @@ describe('발주 폼: 최근 발주 이력 자동 채움 (PR-126)', () => {
     });
   });
 });
+
+// PR-177: 자재별 수정 대상 발주 선택 — 미입고만, 가장 최근 것 하나, 건수 집계.
+import { buildEditableOrderByItem } from './purchaseOrderForm';
+
+describe('buildEditableOrderByItem (PR-177)', () => {
+  const o = (id: number, itemId: number, status: string) => ({ id, itemId, status });
+
+  it('미입고 발주가 없는 자재는 맵에 없다(→ 신규 발주하기)', () => {
+    const m = buildEditableOrderByItem([o(1, 10, 'RECEIVED'), o(2, 10, 'CANCELLED')]);
+    expect(m.has(10)).toBe(false);
+  });
+
+  it('미입고 발주가 하나면 그 발주를 고른다', () => {
+    const m = buildEditableOrderByItem([o(5, 10, 'PENDING'), o(6, 10, 'RECEIVED')]);
+    expect(m.get(10)?.order.id).toBe(5);
+    expect(m.get(10)?.pendingCount).toBe(1);
+  });
+
+  it('미입고 발주가 여러 건이면 가장 최근(id 최대) 하나를 고르고 건수를 함께 돌려준다', () => {
+    const m = buildEditableOrderByItem([o(3, 10, 'PENDING'), o(9, 10, 'PENDING'), o(7, 10, 'PENDING'), o(12, 10, 'RECEIVED')]);
+    expect(m.get(10)?.order.id).toBe(9);
+    expect(m.get(10)?.pendingCount).toBe(3);
+  });
+});
