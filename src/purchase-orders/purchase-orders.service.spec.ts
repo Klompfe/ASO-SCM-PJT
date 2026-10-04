@@ -101,6 +101,49 @@ describe('PurchaseOrdersService', () => {
     });
   });
 
+  // PR-176: 색상/사이즈 라인 합계가 총수량이 되고, 라인이 없으면 기존처럼 quantity를 쓴다.
+  describe('create — 색상/사이즈 라인 (PR-176)', () => {
+    const mockSupplier = { id: 1, name: '공급사' };
+    const mockItem = { id: 1, name: '원단' };
+    const base = { supplierId: 1, itemId: 1, unitPrice: 10 };
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) => ({
+        findOne: jest.fn().mockResolvedValue(entity === Supplier ? mockSupplier : mockItem),
+      }));
+      jest.spyOn(poRepository, 'create').mockImplementation((data: any) => data);
+      jest.spyOn(poRepository, 'save').mockImplementation((data: any) => Promise.resolve({ id: 9, ...data }));
+    });
+
+    it('라인 합계가 총수량이 되고, 입력한 총수량과 같으면 경고가 없다', async () => {
+      const result = await service.create({
+        ...base, quantity: 30, lines: [{ color: 'BLACK', size: 'M', qty: 10 }, { color: 'WHITE', size: 'L', qty: 20 }],
+      } as any);
+      expect(result.quantity).toBe(30);
+      expect(result.lines).toHaveLength(2);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('입력한 총수량이 라인 합계와 다르면 라인 합계로 저장하고 경고를 남긴다', async () => {
+      const result = await service.create({
+        ...base, quantity: 50, lines: [{ color: 'BLACK', qty: 10 }, { color: 'WHITE', qty: 20 }],
+      } as any);
+      expect(result.quantity).toBe(30);
+      expect(result.warnings[0]).toContain('라인 합계');
+    });
+
+    it('라인 없이 quantity만 주면 기존처럼 그 값을 쓰고 라인은 비어 있다(하위호환)', async () => {
+      const result = await service.create({ ...base, quantity: 40 } as any);
+      expect(result.quantity).toBe(40);
+      expect(result.lines).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('라인도 quantity도 없으면 400(BadRequest)', async () => {
+      await expect(service.create({ ...base } as any)).rejects.toThrow(BadRequestException);
+    });
+  });
+
   describe('cancel', () => {
     it('발주서를 취소해야 한다', async () => {
       const po = { id: 1, status: 'PENDING' };

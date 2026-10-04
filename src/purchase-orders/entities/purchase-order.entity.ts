@@ -6,10 +6,12 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  OneToMany,
 } from 'typeorm';
 import { Item } from '../../items/entities/item.entity';
 import { Supplier } from '../../suppliers/entities/supplier.entity';
 import { Shipment } from '../../shipments/entities/shipment.entity';
+import { PurchaseOrderLine } from './purchase-order-line.entity';
 
 export enum PurchaseOrderStatus {
   PENDING = 'PENDING',
@@ -66,6 +68,10 @@ export class PurchaseOrder {
   })
   @JoinColumn({ name: 'shipmentId' })
   shipment?: Shipment;
+
+  // PR-176: 색상/사이즈별 상세 줄(선택). 있으면 quantity는 라인 합계와 같다.
+  @OneToMany(() => PurchaseOrderLine, (line) => line.purchaseOrder, { cascade: true })
+  lines?: PurchaseOrderLine[];
 
   @CreateDateColumn()
   createdAt: Date;

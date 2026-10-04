@@ -76,3 +76,19 @@ describe('발주 폼: 최근 발주 이력 자동 채움 (PR-126)', () => {
     });
   });
 });
+
+// PR-176: 색상/사이즈 라인 합계 계산.
+import { sumPurchaseOrderLines, isLineTotalMismatch } from './purchaseOrderForm';
+
+describe('purchaseOrderForm 라인 합계 (PR-176)', () => {
+  it('라인 합계는 qty 합이고, 라인이 없으면 0이다', () => {
+    expect(sumPurchaseOrderLines([{ qty: 10 }, { qty: 5 }])).toBe(15);
+    expect(sumPurchaseOrderLines([])).toBe(0);
+  });
+
+  it('라인이 있고 합계가 총수량과 다르면 불일치, 같으면 일치, 라인이 없으면 불일치 아님', () => {
+    expect(isLineTotalMismatch(30, [{ qty: 10 }, { qty: 20 }])).toBe(false);
+    expect(isLineTotalMismatch(50, [{ qty: 10 }, { qty: 20 }])).toBe(true);
+    expect(isLineTotalMismatch(50, [])).toBe(false);
+  });
+});

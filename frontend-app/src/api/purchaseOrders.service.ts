@@ -11,12 +11,23 @@ export interface PurchaseOrder {
   supplier?: { id: number; code: string; name: string };
   notes?: string;
   createdAt?: string;
+  // PR-176: 색상/사이즈별 상세 줄(없으면 빈 배열 — 기존 발주).
+  lines?: PurchaseOrderLine[];
+}
+
+// PR-176: 색상/사이즈 자유입력 한 줄. 수량은 정수.
+export interface PurchaseOrderLine {
+  color?: string | null;
+  size?: string | null;
+  qty: number;
 }
 
 export interface CreatePurchaseOrder {
   supplierId: number;
   itemId: number;
-  quantity: number;
+  // PR-176: 라인이 있으면 생략 가능(총수량 = 라인 합계).
+  quantity?: number;
+  lines?: PurchaseOrderLine[];
   unitPrice: number;
   notes?: string;
 }

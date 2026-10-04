@@ -60,3 +60,11 @@ export function sortForShortage(rows: MaterialRequirementRow[]): MaterialRequire
     return a.itemName.localeCompare(b.itemName);
   });
 }
+
+// PR-176: 색상/사이즈 라인 합계(정수 수량). 라인이 없으면 0.
+export const sumPurchaseOrderLines = (lines: { qty: number }[]): number =>
+  lines.reduce((sum, l) => sum + (Number.isFinite(Number(l.qty)) ? Number(l.qty) : 0), 0);
+
+// 라인 합계와 총수량이 다른지. 라인이 없으면 비교할 게 없으므로 false.
+export const isLineTotalMismatch = (quantity: number, lines: { qty: number }[]): boolean =>
+  lines.length > 0 && sumPurchaseOrderLines(lines) !== Number(quantity);
