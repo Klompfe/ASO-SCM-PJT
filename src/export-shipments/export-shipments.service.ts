@@ -154,6 +154,8 @@ export class ExportShipmentsService {
               unitPriceUsd: usd?.unitPriceUsd ?? null,
               amountUsd: usd?.amountUsd ?? null,
               priceSource: usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null,
+              // PR-182: 실/테이프 종류(있으면) — 미터단가 → 콘/롤단가 환산 후보 조회에 쓰인다.
+              materialSubType: bomItem.threadType ?? bomItem.tapeType ?? null,
             });
             packedQty += cl.qty;
             if (cl.hasMissingLength) {
@@ -183,6 +185,8 @@ export class ExportShipmentsService {
               unitPriceUsd: usd?.unitPriceUsd ?? null,
               amountUsd: usd?.amountUsd ?? null,
               priceSource: usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null,
+              // PR-182: 실/테이프 종류(있으면) — 미터단가 → 콘/롤단가 환산 후보 조회에 쓰인다.
+              materialSubType: bomItem.threadType ?? bomItem.tapeType ?? null,
             });
             packedQty += cl.qty;
           }
@@ -478,6 +482,9 @@ export class ExportShipmentsService {
     line.unitPriceUsd = dto.unitPriceUsd;
     line.amountUsd = dto.unitPriceUsd * Number(line.qty);
     line.priceSource = dto.source;
+    // PR-182: 미터단가 → 콘/롤단가 환산이 적용된 경우 화면이 보여준 식을 그대로 남긴다
+    // (서버는 재계산하지 않는다 — 사람이 확인한 최종 숫자만 신뢰하는 기존 원칙과 동일).
+    line.priceBasisNote = dto.priceBasisNote ?? null;
     return this.exportShipmentLineRepository.save(line);
   }
 }

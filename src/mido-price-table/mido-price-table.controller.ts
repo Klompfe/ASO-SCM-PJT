@@ -16,8 +16,11 @@ export class MidoPriceTableController {
   }
 
   @Get('candidates')
-  @ApiOperation({ summary: '자재명으로 단가표 후보 검색(부분일치, 자동 확정 없음)' })
+  @ApiOperation({ summary: '자재명으로 단가표 후보 검색(부분일치, 자동 확정 없음). lineUnit이 콘/롤이면 환산 후보(conversion)도 함께 반환' })
   findCandidates(@Query() query: FindMidoPriceCandidatesDto) {
-    return this.service.findCandidates(query.materialName);
+    return this.service.findCandidates(query.materialName, {
+      lineUnit: query.lineUnit,
+      materialSubType: query.materialSubType,
+    });
   }
 }

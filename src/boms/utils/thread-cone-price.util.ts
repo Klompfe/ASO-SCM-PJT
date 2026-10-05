@@ -9,6 +9,13 @@
 // lengthByMaterialSubType(자재 서브타입 문자열 → 미터)을 넘겨주는 방식을 택했다.
 // materialSubType은 BomItem.threadType/tapeType enum 값과 동일한 문자열이라
 // 실/테이프 구분 없이 같은 조회 테이블로 처리된다.
+//
+// PR-182: 같은 환산식(미터단가 × 단위길이)을 INVOICE 쪽(export-shipments/utils/
+// meter-price-conversion.util.ts)에서도 쓰게 되면서, 계산 자체는 그쪽 유틸로
+// 합치고 이 함수는 "서브타입 → 길이" 조회 + null 가드만 맡는다(BOM 화면이 기대하는
+// 반올림 없는 원시값 반환은 그대로 유지 — 호출부/테스트 회귀 없음).
+import { convertMeterPriceToUnitPrice } from '../../export-shipments/utils/meter-price-conversion.util';
+
 export function calculateConePriceUsd(
   pricePerMeterUsd: number,
   materialSubType: string | null | undefined,
@@ -17,5 +24,5 @@ export function calculateConePriceUsd(
   if (!materialSubType) return null;
   const lengthM = lengthByMaterialSubType[materialSubType];
   if (lengthM == null) return null;
-  return pricePerMeterUsd * lengthM;
+  return convertMeterPriceToUnitPrice(pricePerMeterUsd, lengthM).unitPrice;
 }
