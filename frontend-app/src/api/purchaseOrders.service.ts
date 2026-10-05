@@ -17,9 +17,20 @@ export interface CreatePurchaseOrder {
   supplierId: number;
   itemId: number;
   quantity: number;
-  unitPrice: number;
+  // PR-173: CMT 계약 건은 단가가 당장 필요 없어(수출선적서류 작성 시점에 입력) 선택값으로 바뀌었다.
+  unitPrice?: number;
   notes?: string;
 }
+
+// PR-173: 발주 생성 폼이 선택된 품목의 스타일 생산유형(CMT/FOB)을 미리 조회해 단가
+// 필수 여부를 판단한다. BOM에 연결되지 않은 자재는 둘 다 null(FOB와 동일하게 취급).
+export interface MaterialProductionContext {
+  styleNo: string | null;
+  productionType: 'CMT' | 'FOB' | null;
+}
+
+export const getMaterialProductionContext = (itemId: number): Promise<MaterialProductionContext> =>
+  apiClient.get('/purchase-orders/material-context', { params: { itemId } });
 
 export interface GetPurchaseOrdersFilter {
   supplierId?: number;

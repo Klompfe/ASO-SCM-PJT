@@ -495,7 +495,7 @@ export const ExportShipmentManager: React.FC = () => {
                     <td className="p-2 text-right">
                       <input
                         type="number"
-                        step="0.01"
+                        step="any"
                         className="border rounded px-2 py-1 w-24 text-right disabled:bg-gray-100"
                         defaultValue={l.unitPrice ?? ''}
                         disabled={selected.status === 'FINALIZED'}
@@ -568,7 +568,7 @@ export const ExportShipmentManager: React.FC = () => {
             <div className="flex items-center gap-2 mb-4">
               <input
                 type="number"
-                step="0.0001"
+                step="any"
                 aria-label="확정 USD 단가"
                 className="border p-2 rounded flex-1"
                 placeholder="확정할 USD 단가"

@@ -69,7 +69,7 @@ export class CommitOverviewDto {
   // 후보를 보여주며, 사람이 검토 화면에서 "이 값 사용"을 눌러야 이 필드로 넘어온다.
   @ApiPropertyOptional({ description: 'CMT단가(사람이 확인한 최종값)', example: 7500 })
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 6 })
   cmtPrice?: number;
 }
 
@@ -119,9 +119,10 @@ export class CommitBomItemDto {
   @IsString()
   supplier?: string;
 
+  // PR-173: BOM 자재 단가 — 미도 단가표 실측 최대 소수 5자리(0.00012) 기준 6자리로 여유있게 허용.
   @ApiPropertyOptional()
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 6 })
   unitPrice?: number;
 
   @ApiPropertyOptional()
