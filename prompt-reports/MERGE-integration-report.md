@@ -105,7 +105,59 @@ MERGE-1 지시서의 단계별 지침(충돌 해결 방법 등)은 참고로만 
 3. `1791200000000-AddPurchaseOrderLines` — 발주 색상/사이즈 라인(신규 테이블)
 4. `1791300000000-AddPurchaseOrderOrderType` — `purchase_order.orderType`(신규 컬럼, nullable) + 기존 발주 백필(불확실한 건은 null 유지)
 
+## MERGE-2: PR-173 통합 정리
+
+`git merge --no-ff feat/cmt-po-unit-price-optional`은 "Already up to date"(PR-173이 이미 integration
+브랜치에 병합돼 있었음 — 위 표 참고). 대신 MERGE-2 지시서의 B/C 항목(중복 조회 통합, 일괄발주×CMT
+단가 불일치 수정)을 수행했습니다.
+
+### B. 중복 조회 통합
+
+`getMaterialProductionContext`(PR-173)와 `suggestOrderTypeForItem`(PR-180)이 "품목 → 활성 BOM → 스타일 →
+생산유형" 조회를 각자 다르게(173은 활성 여부 무시·최신 BOM 하나, 180은 활성 BOM 전체) 구현하고 있었습니다.
+비공개 함수 `findActiveStyleProductionTypes(itemId)`(180의 로직 재사용) 하나로 합쳐 두 공개 함수가 모두
+호출하도록 바꿨습니다.
+
+- `getMaterialProductionContext`의 최종 동작: 활성 BOM 스타일이 하나이거나 모두 같은 생산유형이면 그 값,
+  섞여 있거나 BOM 연결이 없으면 `productionType: null`(프론트는 FOB와 동일하게 단가 필수로 취급 — PR-173
+  기존 정책 그대로). `styleNo`는 스타일이 정확히 하나일 때만 채움(프론트가 현재 안 쓰는 필드라 여럿이면
+  null로 단순화).
+- 테스트 추가(`purchase-orders.service.spec.ts`): 활성 BOM이 없는 경우, 여러 스타일이 같은 생산유형인
+  경우, 서로 다른 생산유형이 섞인 경우. `suggestOrderTypeForItem` 쪽에도 같은 공통 조회를 쓰는지 확인하는
+  테스트 2건 추가.
+
+### C. 일괄발주(PR-179) × CMT 단가 선택(PR-173) 불일치 수정
+
+`isBulkRowReady`에 `unitPriceRequired`(기본값 `true`, 기존 호출부 무변경) 매개변수를 추가했습니다.
+`BulkOrderPreviewModal`은 가발주(`orderType === 'PROVISIONAL'`) 행에서 `false`를 넘겨 단가 없이도 준비
+완료로 처리하고, 입력란 placeholder를 "선택 입력"으로 바꾸고 안내 문구를 보여줍니다. 커밋 payload의
+`unitPrice`는 `?? undefined`로 보내 비워도 전송됩니다. 서버(`createBulk`/`BulkCreatePurchaseOrdersDto`)는
+PR-173 병합 시점에 이미 `unitPrice`가 선택값이라 추가 변경이 필요 없었습니다 — e2e로 직접 확인했습니다.
+
+검증 목록의 "PUT/수정하기 흐름이 단가 null 발주에서 깨지지 않는지" 항목을 확인하는 과정에서
+`PurchaseOrderEditModal`이 null 단가를 `0`으로 보여주는 걸 발견해 함께 고쳤습니다: 이제 빈 칸으로 보여주고,
+건드리지 않으면 `undefined`로 보내 기존 값(null 포함)을 그대로 유지합니다(`update()`의 "undefined면 안
+건드림" 규칙과 일치).
+
+### 부수 발견: PR-180 병합 커밋 누락분
+
+PR-180 병합(`b584481`) 때 고쳤던 `BomItem` 중복 import 제거가 `git add` 목록에서 빠져 실제로는 커밋되지
+않고 작업트리에만 남아 있었습니다(그 이후의 모든 빌드/테스트는 작업트리 기준이라 전부 정상으로 보였음).
+MERGE-2 작업 중 `git status`로 발견해 `8a48ef3`에서 바로잡았습니다.
+
+### 검증 결과
+
+- `npm run build`: OK. `npx jest`: 669 pass(기존 665 + B 테스트 6건 + C 테스트 1건... 실제로는
+  getMaterialProductionContext 재작성으로 순증감 있음, 최종 669건 전부 pass).
+- 프론트 `tsc -b`: OK. `npx vitest run`: 272 pass.
+- 요구된 e2e(`purchase-order*`, `contract*`, `mapping*`, `sales-orders*`, `rbac*`): **15 suites / 111
+  tests, 전부 pass** — `purchase-order-cmt-unit-price-flow`(173 고유 e2e) 포함.
+
+병합 커밋: `3af7df7`(B/C 통합 수정), 직전 `8a48ef3`(PR-180 누락분 수정).
+통합 브랜치 최신 HEAD: `3af7df7`(푸시 완료 예정).
+
 ## 다음 단계
 
-MERGE-4의 "운영 DB 보호" 확인(백업 여부)을 제시님께 별도로 여쭙고 응답을 기다린 뒤 `main`에 fast-forward 병합합니다.
-이 보고서는 그 반영 후 최종 SHA/CI 결과로 업데이트합니다.
+MERGE-3(PR-176 — 이미 integration 브랜치에 병합돼 있음, 필요한 추가 정리가 있다면 지시 대기)과
+MERGE-4의 "운영 DB 보호" 확인(백업 여부)을 제시님께 별도로 여쭙고 응답을 기다린 뒤 `main`에 fast-forward
+병합합니다. 이 보고서는 그 반영 후 최종 SHA/CI 결과로 업데이트합니다.
