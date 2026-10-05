@@ -255,6 +255,55 @@ DB 설정과 무관합니다 — 이 근거는 확인되지 않았습니다. 다
 주시고, 같다면 Neon 백업(브랜치/시점 복구 지점) 생성 여부도 함께 알려주세요. 답을 받기 전까지는
 `main` 반영(3단계)을 진행하지 않습니다.
 
+## MERGE-3b: 보완 지시 확인 — 이미 반영돼 있음(오래된 HEAD 기준 지시였음)
+
+"MERGE-3b" 지시서는 통합 브랜치 HEAD를 `ddd1ea7`(MERGE-1 직후, MERGE-2/3의 B·C 작업 이전 시점)로
+전제하고 A·B·C 네 항목이 빠져 있다고 지적했습니다. 실제로는 그 지시가 오기 전에 이미 MERGE-2
+(`3af7df7`)와 MERGE-3(`e32262c`)에서 전부 구현·커밋·푸시돼 있었고, 둘 다 `ddd1ea7`의 하위 커밋(자손)
+입니다. 코드를 다시 확인했습니다:
+
+- **A(조회 로직 통합)**: `src/purchase-orders/purchase-orders.service.ts:85` `findActiveStyleProductionTypes`
+  — `getMaterialProductionContext`(112행)와 `suggestOrderTypeForItem`(168행)이 모두 호출.
+- **B(일괄발주 CMT 단가)**: `frontend-app/src/utils/purchaseOrderForm.ts:105` `isBulkRowReady`가
+  `unitPriceRequired` 매개변수를 받고, `BulkOrderPreviewModal`이 가발주 행에 `false`를 넘김.
+- **C(수정하기 × 줄)**: `purchase-orders.service.ts:240`부터 `update()`가 `dto.lines`를 처리.
+- **D(발주서 확인)**: MERGE-3 절 "C.4"에 이미 기록(`purchase-order-document.service.ts:50`이
+  `lines`를 항상 빈 배열로 고정 — 후속 개선 필요로 보고됨).
+
+**추가 구현은 하지 않았습니다**(이미 있는 코드를 중복 작성하지 않기 위해 — 커밋 이력 `3af7df7`,
+`e32262c`를 근거로 제시). 아래 두 가지만 새로 확인했습니다.
+
+### 마이그레이션 번호 정정 — 근거 확인(일치)
+
+TypeORM 0.3.31의 실제 소스(`node_modules/typeorm/migration/MigrationExecutor.js` 160~161행)를
+직접 읽어 확인했습니다 — "이미 실행된 것보다 오래된 타임스탬프" 검사 줄이 정확히 주석 처리돼
+있습니다:
+```js
+// if (lastTimeExecutedMigration && migration.timestamp < lastTimeExecutedMigration.timestamp)
+//     throw new TypeORMError(...)
+```
+MERGE-3에서 제가 이 DB의 실제 실행 기록(out-of-order 실행 이력)으로 경험적으로 내린 결론과
+정확히 일치합니다 — `1791200000000`(PR-176)을 그대로 둔 결정은 유효합니다. 변경하지 않았습니다.
+
+### 빈 DB 마이그레이션 체인 검증 — 미검증(Docker 데몬 미실행)
+
+`docker-compose.yml`의 `postgres` 서비스로 검증을 시도했습니다. Docker CLI(29.7.2)는 설치돼
+있으나 **Docker Desktop 데몬이 실행 중이 아니고**(`Docker Desktop.exe`가 기본 경로에 없음 —
+`docker info`/`docker compose up` 모두 데몬 연결 실패), 이 환경에서 띄울 방법이 없었습니다.
+지시서의 대안("Docker를 쓸 수 없으면 건너뛰고 미검증으로 보고")에 따라 **운영 DB에서는
+시도하지 않았고, 빈 DB에서의 171→175→176→180→182 전체 체인 실행과 마지막 마이그레이션
+revert/재실행은 미검증**입니다.
+
+### 안전 규칙 확인
+
+- 이번 보완 작업에서는 서버를 띄우지 않았습니다(코드가 이미 있어 재검증 실행이 필요 없었음) —
+  `NODE_ENV=production` 규칙을 어길 기회 자체가 없었습니다. 다음에 이 DB에 대해 서버를 띄울
+  일이 있으면 반드시 `NODE_ENV=production`으로 실행하겠습니다.
+- `migration:revert`, 컬럼/행 삭제 등 파괴적 작업은 하지 않았습니다. 이번 턴에 한 DB 접근은
+  `typeorm migration:show`(읽기 전용, 이전 보고에 이미 기록)뿐입니다.
+
+최종 HEAD는 이전과 동일합니다: `497878b`(코드 변경 없음, 이 보고서 갱신만 추가 커밋).
+
 ## 다음 단계
 
 위 운영 DB 확인(호스트 일치 여부 + 백업 여부)에 대한 제시님의 답을 기다린 뒤 `main`에
