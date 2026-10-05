@@ -14,7 +14,10 @@ interface PurchaseOrderEditModalProps {
 // 여러 건이 대기 중이면 가장 최근 것을 열고, 나머지 건수는 안내로만 보여준다(발주 목록에서 확인).
 export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ order, pendingCount, onSaved, onClose }) => {
   const [quantity, setQuantity] = useState(order.quantity);
-  const [unitPrice, setUnitPrice] = useState<number>(Number(order.unitPrice ?? 0));
+  // MERGE-2: CMT 발주는 단가가 null일 수 있다(PR-173) — 0으로 채워 보여주면 "0원"으로
+  // 오해하기 쉬워 빈 칸으로 보여준다. 건드리지 않고 저장하면 undefined로 보내 기존 값(null
+  // 포함) 그대로 유지한다(update()의 "undefined면 안 건드림" 규칙과 동일).
+  const [unitPrice, setUnitPrice] = useState<number | null>(order.unitPrice != null ? Number(order.unitPrice) : null);
   const [notes, setNotes] = useState(order.notes ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +31,7 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
     }
     setSubmitting(true);
     try {
-      await updatePurchaseOrder(order.id, { quantity, unitPrice, notes });
+      await updatePurchaseOrder(order.id, { quantity, unitPrice: unitPrice ?? undefined, notes });
       toast.success(`발주 #${order.id}이(가) 수정되었습니다.`);
       onSaved();
     } catch (err: any) {
@@ -53,7 +56,7 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
           <input type="number" min={1} className="border rounded px-3 py-2 mt-1" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} aria-label="수정 수량" />
         </label>
         <label className="flex flex-col text-sm text-gray-600">단가
-          <input type="number" min={0} step="any" className="border rounded px-3 py-2 mt-1" value={unitPrice} onChange={(e) => setUnitPrice(Number(e.target.value))} aria-label="수정 단가" />
+          <input type="number" min={0} step="any" className="border rounded px-3 py-2 mt-1" placeholder="CMT는 비워둘 수 있음" value={unitPrice ?? ''} onChange={(e) => setUnitPrice(e.target.value === '' ? null : Number(e.target.value))} aria-label="수정 단가" />
         </label>
         <label className="flex flex-col text-sm text-gray-600">비고
           <input className="border rounded px-3 py-2 mt-1" value={notes} onChange={(e) => setNotes(e.target.value)} aria-label="수정 비고" />

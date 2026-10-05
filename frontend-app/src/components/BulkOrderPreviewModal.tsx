@@ -80,7 +80,8 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
     setDrafts((prev) => (prev ?? []).map((d) => (d.itemId === itemId ? { ...d, ...patch } : d)));
 
   const included = (drafts ?? []).filter((d) => d.include);
-  const readyCount = included.filter((d) => isBulkRowReady({ supplierId: d.supplierId, quantity: d.quantity, unitPrice: d.unitPrice }) && canCreateWithOrderType(d.orderType)).length;
+  // MERGE-2: 가발주(PROVISIONAL)는 CMT 건이라 단가 없이도 준비 완료로 본다(PR-173 정책과 일치).
+  const readyCount = included.filter((d) => isBulkRowReady({ supplierId: d.supplierId, quantity: d.quantity, unitPrice: d.unitPrice }, d.orderType !== 'PROVISIONAL') && canCreateWithOrderType(d.orderType)).length;
 
   const commit = async () => {
     if (included.length === 0) {
@@ -97,7 +98,8 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
         supplierId: d.supplierId as number,
         itemId: d.itemId,
         quantity: d.quantity,
-        unitPrice: d.unitPrice as number,
+        // MERGE-2: 가발주(CMT)는 단가가 선택 입력이라 비워둔 채 보낼 수 있다(PR-173 정책).
+        unitPrice: d.unitPrice ?? undefined,
         orderType: d.orderType as PurchaseOrderType,
       })));
       toast.success(`${included.length}건의 발주가 생성되었습니다.`);
@@ -177,10 +179,14 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
                       step="any"
                       className="border rounded px-2 py-1 w-24 text-right"
                       value={d.unitPrice ?? ''}
-                      placeholder="필수"
+                      placeholder={d.orderType === 'PROVISIONAL' ? '선택 입력' : '필수'}
                       onChange={(e) => update(d.itemId, { unitPrice: e.target.value === '' ? null : Number(e.target.value) })}
                       aria-label={`${d.itemName} 단가`}
                     />
+                    {/* MERGE-2: CMT(가발주)는 단가가 선적서류 작성 시점에 입력돼도 되므로 비워도 된다는 걸 알려준다. */}
+                    {d.orderType === 'PROVISIONAL' && d.unitPrice == null && (
+                      <div className="text-xs text-gray-400">CMT — 선택 입력, 선적서류 작성 시 입력 가능</div>
+                    )}
                   </td>
                   <td className="p-2 text-xs text-gray-500">{d.note ?? (d.unitPrice != null ? '최근 발주 단가' : '')}</td>
                 </tr>

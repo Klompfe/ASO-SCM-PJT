@@ -82,4 +82,14 @@ describe('일괄발주 (PR-179)', () => {
       orders: [{ supplierId, itemId: itemA, quantity: 0, unitPrice: 1 }],
     }).expect(400);
   });
+
+  // MERGE-2(PR-173+179 통합): CMT(가발주) 건은 단가가 당장 필요 없다 — 일괄발주에서도
+  // unitPrice 없이 저장돼야 한다(선적서류 작성 시점에 입력).
+  it('단가(unitPrice)를 생략한 행도 저장된다(CMT 발주 — 선택 입력)', async () => {
+    const res = await auth(request(app.getHttpServer()).post('/purchase-orders/bulk')).send({
+      orders: [{ supplierId, itemId: itemA, quantity: 5, orderType: 'PROVISIONAL' }],
+    }).expect(201);
+    expect(res.body.data[0].unitPrice).toBeNull();
+    expect(res.body.data[0].orderType).toBe('PROVISIONAL');
+  });
 });

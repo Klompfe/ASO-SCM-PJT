@@ -343,9 +343,22 @@ describe('PurchaseOrdersService', () => {
     });
   });
 
-  // PR-173: 발주 생성 폼이 CMT/FOB를 판단할 때 쓰는 조회 — BomItem.material → bom.style(.overview).
-  describe('getMaterialProductionContext (PR-173)', () => {
-    const mockBomItemRepo = { findOne: jest.fn() };
+  // MERGE-2: PR-173(getMaterialProductionContext)과 PR-180(suggestOrderTypeForItem)의
+  // 중복 조회를 findActiveStyleProductionTypes()(활성 BOM 전체 조회) 하나로 합쳤다 — 두
+  // 함수 모두 이 조회를 공유한다는 전제로 같은 queryBuilder 모킹 패턴을 쓴다.
+  describe('getMaterialProductionContext (PR-173, MERGE-2에서 180의 활성 BOM 조회로 통합)', () => {
+    const buildQbReturning = (rows: { styleNo: string; productionType: string | null }[]) => {
+      const qb: any = {};
+      qb.innerJoin = jest.fn().mockReturnValue(qb);
+      qb.leftJoin = jest.fn().mockReturnValue(qb);
+      qb.select = jest.fn().mockReturnValue(qb);
+      qb.addSelect = jest.fn().mockReturnValue(qb);
+      qb.where = jest.fn().mockReturnValue(qb);
+      qb.andWhere = jest.fn().mockReturnValue(qb);
+      qb.getRawMany = jest.fn().mockResolvedValue(rows);
+      return qb;
+    };
+    const mockBomItemRepo = { createQueryBuilder: jest.fn() };
 
     beforeEach(() => {
       mockDataSource.getRepository.mockImplementation((entity: any) =>
@@ -353,34 +366,81 @@ describe('PurchaseOrdersService', () => {
       );
     });
 
-    it('BOM에 연결된 자재면 스타일의 productionType을 돌려준다', async () => {
-      mockBomItemRepo.findOne.mockResolvedValue({
-        bom: { style: { styleNo: 'ST-001', overview: { productionType: 'CMT' } } },
-      });
+    it('활성 BOM 스타일이 하나면 그 스타일의 productionType/styleNo를 돌려준다', async () => {
+      mockBomItemRepo.createQueryBuilder.mockReturnValue(buildQbReturning([{ styleNo: 'ST-001', productionType: 'CMT' }]));
       const result = await service.getMaterialProductionContext(42);
       expect(result).toEqual({ styleNo: 'ST-001', productionType: 'CMT' });
     });
 
     it('FOB 스타일이면 productionType: FOB를 돌려준다', async () => {
-      mockBomItemRepo.findOne.mockResolvedValue({
-        bom: { style: { styleNo: 'ST-002', overview: { productionType: 'FOB' } } },
-      });
+      mockBomItemRepo.createQueryBuilder.mockReturnValue(buildQbReturning([{ styleNo: 'ST-002', productionType: 'FOB' }]));
       const result = await service.getMaterialProductionContext(43);
       expect(result.productionType).toBe('FOB');
     });
 
-    it('BOM에 전혀 연결되지 않은 자재는 둘 다 null을 돌려준다(발주 생성 자체를 막지 않기 위해 예외를 던지지 않음)', async () => {
-      mockBomItemRepo.findOne.mockResolvedValue(null);
+    it('활성 BOM이 없고 비활성만 있는 경우(쿼리 자체가 활성 BOM만 돌려주므로 결과는 빈 배열) 둘 다 null — 발주 생성을 막지 않는다', async () => {
+      mockBomItemRepo.createQueryBuilder.mockReturnValue(buildQbReturning([]));
       const result = await service.getMaterialProductionContext(99);
       expect(result).toEqual({ styleNo: null, productionType: null });
     });
 
     it('스타일은 있지만 overview.productionType이 비어있으면(수동 등록 외 경로로 생성된 스타일 등) null을 돌려준다', async () => {
-      mockBomItemRepo.findOne.mockResolvedValue({
-        bom: { style: { styleNo: 'ST-003', overview: { productionType: null } } },
-      });
+      mockBomItemRepo.createQueryBuilder.mockReturnValue(buildQbReturning([{ styleNo: 'ST-003', productionType: null }]));
       const result = await service.getMaterialProductionContext(44);
       expect(result).toEqual({ styleNo: 'ST-003', productionType: null });
+    });
+
+    it('활성 BOM 스타일이 여럿이어도 생산유형이 모두 같으면 그 값을 돌려준다(styleNo는 여럿이라 null)', async () => {
+      mockBomItemRepo.createQueryBuilder.mockReturnValue(
+        buildQbReturning([{ styleNo: 'ST-010', productionType: 'CMT' }, { styleNo: 'ST-011', productionType: 'CMT' }]),
+      );
+      const result = await service.getMaterialProductionContext(45);
+      expect(result).toEqual({ styleNo: null, productionType: 'CMT' });
+    });
+
+    it('서로 다른 생산유형 스타일이 섞여 있으면 추측하지 않고 둘 다 null(프론트는 FOB와 동일하게 단가 필수로 취급)', async () => {
+      mockBomItemRepo.createQueryBuilder.mockReturnValue(
+        buildQbReturning([{ styleNo: 'ST-020', productionType: 'CMT' }, { styleNo: 'ST-021', productionType: 'FOB' }]),
+      );
+      const result = await service.getMaterialProductionContext(46);
+      expect(result).toEqual({ styleNo: null, productionType: null });
+    });
+  });
+
+  // PR-180: 발주 구분 제안 — getMaterialProductionContext와 같은 findActiveStyleProductionTypes()를 공유한다.
+  describe('suggestOrderTypeForItem (PR-180, MERGE-2에서 공통 조회 재사용 확인)', () => {
+    const buildQbReturning = (rows: { styleNo: string; productionType: string | null }[]) => {
+      const qb: any = {};
+      qb.innerJoin = jest.fn().mockReturnValue(qb);
+      qb.leftJoin = jest.fn().mockReturnValue(qb);
+      qb.select = jest.fn().mockReturnValue(qb);
+      qb.addSelect = jest.fn().mockReturnValue(qb);
+      qb.where = jest.fn().mockReturnValue(qb);
+      qb.andWhere = jest.fn().mockReturnValue(qb);
+      qb.getRawMany = jest.fn().mockResolvedValue(rows);
+      return qb;
+    };
+    const mockBomItemRepo = { createQueryBuilder: jest.fn() };
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === BomItem ? mockBomItemRepo : { findOne: jest.fn() },
+      );
+    });
+
+    it('활성 BOM 스타일이 모두 CMT면 PROVISIONAL(가발주)을 제안한다', async () => {
+      mockBomItemRepo.createQueryBuilder.mockReturnValue(buildQbReturning([{ styleNo: 'ST-030', productionType: 'CMT' }]));
+      const result = await service.suggestOrderTypeForItem(50);
+      expect(result.orderType).toBe('PROVISIONAL');
+      expect(result.styleNos).toEqual(['ST-030']);
+    });
+
+    it('FOB/CMT가 섞여 있으면 제안하지 않는다(안전모드)', async () => {
+      mockBomItemRepo.createQueryBuilder.mockReturnValue(
+        buildQbReturning([{ styleNo: 'ST-040', productionType: 'CMT' }, { styleNo: 'ST-041', productionType: 'FOB' }]),
+      );
+      const result = await service.suggestOrderTypeForItem(51);
+      expect(result.orderType).toBeNull();
     });
   });
 });

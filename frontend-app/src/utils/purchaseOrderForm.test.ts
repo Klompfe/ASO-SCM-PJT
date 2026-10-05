@@ -147,4 +147,14 @@ describe('일괄발주 보조 규칙 (PR-179)', () => {
     expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: null })).toBe(false);
     expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: 0 })).toBe(false);
   });
+
+  // MERGE-2: PR-173이 CMT 발주를 단가 없이 허용하면서, 일괄발주에서만 CMT 건이 막히던
+  // 불일치를 고쳤다 — 호출하는 쪽이 unitPriceRequired=false를 넘기면 단가 없이도 ready.
+  it('unitPriceRequired=false(가발주/CMT)면 단가 없이도 준비 완료다 — FOB/미지정은 여전히 단가 필수', () => {
+    expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: null }, false)).toBe(true);
+    expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: 0 }, false)).toBe(true);
+    expect(isBulkRowReady({ supplierId: null, quantity: 3, unitPrice: null }, false)).toBe(false); // 공급업체는 여전히 필수
+    expect(isBulkRowReady({ supplierId: 1, quantity: 2.5, unitPrice: null }, false)).toBe(false); // 수량은 여전히 정수 필수
+    expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: null }, true)).toBe(false); // 기본값(true)은 기존과 동일
+  });
 });

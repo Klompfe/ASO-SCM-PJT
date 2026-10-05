@@ -76,21 +76,46 @@ export class PurchaseOrdersService {
   // PO.itemId → BomItem.material → bom.style(.overview)로 거슬러 올라간다.
   // BOM에 연결되지 않은 자재는 생산유형을 알 수 없으므로 null을 돌려주고,
   // 호출자(프론트)는 이를 FOB와 동일하게(단가 필수) 취급한다(안전한 기본값).
+  // MERGE-2: PR-173(getMaterialProductionContext)과 PR-180(suggestOrderTypeForItem)이
+  // "품목 → 활성 BOM → 스타일 → 생산유형(CMT/FOB)"을 각자 다른 기준으로 중복 조회하고
+  // 있었다 — 173은 활성 여부를 보지 않고 id 최신 BOM 하나만, 180은 활성(bom.isActive)
+  // BOM의 모든 스타일을 보고 섞여 있으면 판단을 보류한다. 180 쪽이 더 정확해 이 조회
+  // 하나로 합치고 두 공개 함수가 모두 이것을 호출한다.
+  private async findActiveStyleProductionTypes(
+    itemId: number,
+  ): Promise<{ styleNo: string; productionType: ProductionType | null }[]> {
+    const rows = await this.dataSource
+      .getRepository(BomItem)
+      .createQueryBuilder('bi')
+      .innerJoin('bi.bom', 'bom')
+      .innerJoin('bom.style', 'style')
+      .leftJoin('style.overview', 'overview')
+      .select('style.styleNo', 'styleNo')
+      .addSelect('overview.productionType', 'productionType')
+      .where('bi.materialId = :itemId', { itemId })
+      .andWhere('bom.isActive = :active', { active: true })
+      .getRawMany<{ styleNo: string; productionType: ProductionType | null }>();
+    const byStyle = new Map<string, ProductionType | null>();
+    for (const r of rows) byStyle.set(r.styleNo, r.productionType ?? null);
+    return [...byStyle.entries()].map(([styleNo, productionType]) => ({ styleNo, productionType }));
+  }
+
+  // PR-173: 발주 생성 폼이 선택된 품목의 스타일 생산유형(CMT/FOB)을 미리 조회해 단가
+  // 필수 여부를 판단한다. 활성 BOM 스타일이 하나이거나 모두 같은 생산유형이면 그 값,
+  // 섞여 있거나 BOM 연결이 없으면 productionType: null(프론트는 FOB와 동일하게 취급해
+  // 단가 필수 — 안전한 기본값, 기존 정책 유지). styleNo는 스타일이 정확히 하나일
+  // 때만 채운다(여럿이면 "그 스타일"이라 할 단일 값이 없음 — 현재 프론트는 안 쓰는 값).
   async getMaterialProductionContext(
     itemId: number,
   ): Promise<{ styleNo: string | null; productionType: string | null }> {
-    const bomItem = await this.dataSource.getRepository(BomItem).findOne({
-      where: { material: { id: itemId } },
-      relations: ['bom', 'bom.style', 'bom.style.overview'],
-      order: { id: 'DESC' },
-    });
-    if (!bomItem) {
+    const styles = await this.findActiveStyleProductionTypes(itemId);
+    if (styles.length === 0) {
       return { styleNo: null, productionType: null };
     }
-    return {
-      styleNo: bomItem.bom.style.styleNo ?? null,
-      productionType: bomItem.bom.style.overview?.productionType ?? null,
-    };
+    const distinctTypes = new Set(styles.map((s) => s.productionType));
+    const productionType = distinctTypes.size === 1 ? [...distinctTypes][0] : null;
+    const styleNo = styles.length === 1 ? styles[0].styleNo : null;
+    return { styleNo, productionType };
   }
 
   // PR-179: 일괄발주. 모든 행의 공급업체/품목을 먼저 확인해 하나라도 없으면 아무것도 쓰지 않고
@@ -136,22 +161,10 @@ export class PurchaseOrdersService {
 
   // PR-180: 품목의 발주 구분 제안. 발주에는 스타일 연결이 없으므로 이 품목을 쓰는 활성 BOM의 스타일 계약방식으로 정한다.
   async suggestOrderTypeForItem(itemId: number): Promise<OrderTypeSuggestion & { styleNos: string[] }> {
-    const rows = await this.dataSource
-      .getRepository(BomItem)
-      .createQueryBuilder('bi')
-      .innerJoin('bi.bom', 'bom')
-      .innerJoin('bom.style', 'style')
-      .leftJoin('style.overview', 'overview')
-      .select('style.styleNo', 'styleNo')
-      .addSelect('overview.productionType', 'productionType')
-      .where('bi.materialId = :itemId', { itemId })
-      .andWhere('bom.isActive = :active', { active: true })
-      .getRawMany<{ styleNo: string; productionType: ProductionType | null }>();
-    const byStyle = new Map<string, ProductionType | null>();
-    for (const r of rows) byStyle.set(r.styleNo, r.productionType ?? null);
+    const styles = await this.findActiveStyleProductionTypes(itemId);
     return {
-      ...suggestOrderType([...byStyle.values()]),
-      styleNos: [...byStyle.keys()],
+      ...suggestOrderType(styles.map((s) => s.productionType)),
+      styleNos: styles.map((s) => s.styleNo),
     };
   }
 

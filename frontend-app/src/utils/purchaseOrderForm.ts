@@ -97,7 +97,15 @@ export function resolveBulkSupplierId(candidateSupplierIds: number[]): number | 
   return unique.length === 1 ? unique[0] : null;
 }
 
-// 일괄발주 행을 커밋해도 되는지: 공급업체·정수 수량(1 이상)·단가(0 초과)가 모두 있어야 한다.
-export function isBulkRowReady(row: { supplierId: number | null; quantity: number; unitPrice: number | null }): boolean {
-  return row.supplierId != null && Number.isInteger(row.quantity) && row.quantity >= 1 && row.unitPrice != null && row.unitPrice > 0;
+// 일괄발주 행을 커밋해도 되는지: 공급업체·정수 수량(1 이상)이 있어야 하고, 단가는
+// unitPriceRequired가 true일 때만 필요(0 초과)하다.
+// MERGE-2: PR-173이 CMT 발주를 단가 없이 허용하면서, 일괄발주에서만 CMT 건이 단가
+// 때문에 막히는 불일치가 있었다 — 가발주(orderType === 'PROVISIONAL')는 CMT 건이라
+// 호출하는 쪽이 unitPriceRequired=false를 넘긴다. FOB/미지정은 기존대로 단가 필수.
+export function isBulkRowReady(
+  row: { supplierId: number | null; quantity: number; unitPrice: number | null },
+  unitPriceRequired: boolean = true,
+): boolean {
+  const unitPriceOk = unitPriceRequired ? row.unitPrice != null && row.unitPrice > 0 : true;
+  return row.supplierId != null && Number.isInteger(row.quantity) && row.quantity >= 1 && unitPriceOk;
 }
