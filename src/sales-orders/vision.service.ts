@@ -56,6 +56,12 @@ const RESPONSE_SCHEMA = {
             requiredQty: { type: SchemaType.NUMBER, nullable: true },
             supplier: { type: SchemaType.STRING, nullable: true },
             remarks: { type: SchemaType.STRING, nullable: true },
+            materialSubTypeCandidate: {
+              type: SchemaType.STRING,
+              nullable: true,
+              enum: ['코아사', '오바사', '지누이도', '다데', '암홀'],
+              description: '실/테이프 종류 후보 — 자재명/규격에 명확한 단서가 있을 때만, 확신 없으면 null',
+            },
           },
           required: ['itemName'],
         },
@@ -94,6 +100,8 @@ documentDate와 targetRdd는 문서 안의 서로 다른 위치에 있는 서로
 handwrittenCmtPriceCandidate: 바이어(buyer)가 "미도"로 명확히 인식된 문서에서만 채우세요. 문서 상단에 인쇄된 표 글자와 구분되는, 손으로 비교적 큰 글씨로 적힌 숫자가 있으면 그 숫자를 추출하세요. 바이어가 미도가 아니거나, 바이어를 못 읽었거나, 그런 수기 숫자가 없거나, 여러 후보가 있어 어느 것인지 확신할 수 없으면 반드시 null로 두고 절대 추측하지 마세요.
 
 2. bomItems(자재명세): 상단 소재 표(소재No./소재명/색상/규격/요척/출고량)와 하단 부자재 표(안감/심지/포켓감/테이프/재봉사/단추/라벨 등, 규격/소요량/비고)를 모두 각 행 하나씩 bomItems 배열 항목으로 변환하세요. category는 소재/안감/심지/부자재 등 표의 구분명, itemName은 소재명 또는 부자재명, spec은 규격/색상, consumption은 요척 또는 소요량(숫자만, 단위 제외). supplier(공급처)는 문서에 실제로 인쇄/기재된 값이 있을 때만 그대로 옮기고, 문서에 없으면 절대 추정하지 말고 반드시 null로 두세요 — 공급처는 작업지시서 시점에는 정해지지 않고 이후 발주 단계에서 결정되는 정보입니다.
+
+materialSubTypeCandidate: 실(THREAD)이나 테이프류 자재 행에서만, 자재명 또는 규격란 텍스트에 "코아사"/"오바사"/"스쿠이사"/"지누이도"/"다데"/"암홀" 같은 글자가 그대로(또는 거의 그대로) 포함되어 있어 종류를 명확히 특정할 수 있을 때만 채우세요(스쿠이사는 오바사로, 다른 이름들은 가장 가까운 항목으로 매핑). 실/테이프가 아닌 자재이거나, 그런 단서가 없거나, 여러 후보 중 어느 것인지 확신할 수 없으면 반드시 null로 두고 절대 추측하지 마세요.
 
 3. sizeSpecs(작업명세 - 사이즈 스펙표): "SIZE" 표(부위별 지시서/견본/증감/완성 값 x 사이즈 0/1/2/Free 등 컬럼)를 부위 x 사이즈 조합마다 한 행씩 변환하세요. 값이 손글씨 분수(예: 32½)면 그대로 문자열로 옮기세요. 빈 칸은 null로 두세요.
 
@@ -236,8 +244,8 @@ export class VisionService {
           cmtPrice: null,
         },
         bomItems: [
-          { category: null, itemName: '원단-폴리', spec: '150cm', colorCode: null, consumption: 1.5, requiredQty: null, supplier: null, remarks: null },
-          { category: null, itemName: '지퍼', spec: '20cm', colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null },
+          { category: null, itemName: '원단-폴리', spec: '150cm', colorCode: null, consumption: 1.5, requiredQty: null, supplier: null, remarks: null, materialSubTypeCandidate: null },
+          { category: null, itemName: '지퍼', spec: '20cm', colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null, materialSubTypeCandidate: null },
         ],
         sizeSpecs: [],
         workNotes: null,

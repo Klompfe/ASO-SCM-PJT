@@ -104,6 +104,29 @@ describe('MappingCommitService', () => {
       expect(mockQueryRunner.rollbackTransaction).not.toHaveBeenCalled();
     });
 
+    // PR-175: 사람이 검토 화면에서 확인한 실/테이프 종류(threadType/tapeType)가
+    // 신규 BomItem 생성 시 그대로 저장되는지 — AI 후보(materialSubTypeCandidate)는
+    // CommitBomItemDto에 아예 없으므로 여기선 다루지 않는다(저장 대상이 아님).
+    it('bomItems에 threadType/tapeType이 있으면 신규 BomItem에 그대로 저장되어야 한다', async () => {
+      await service.commit({
+        ...validPayload,
+        bomItems: [
+          { id: 1, category: '부자재', itemName: '코아사', consumption: 1, requiredQty: 700, colorOf: 'FREE', spec: '', threadType: 'COA_SA' } as any,
+          { id: 2, category: '부자재', itemName: '다데테이프', consumption: 1, requiredQty: 700, colorOf: 'FREE', spec: '', tapeType: 'DADE' } as any,
+        ],
+      });
+
+      const bomItemSaves = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+      expect(bomItemSaves[0][1]).toEqual(expect.objectContaining({ threadType: 'COA_SA', tapeType: null }));
+      expect(bomItemSaves[1][1]).toEqual(expect.objectContaining({ threadType: null, tapeType: 'DADE' }));
+    });
+
+    it('bomItems에 threadType/tapeType이 없으면(일반 자재) 둘 다 null로 저장되어야 한다', async () => {
+      await service.commit(validPayload);
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1]).toEqual(expect.objectContaining({ threadType: null, tapeType: null }));
+    });
+
     it('shipDate 값이 실제로 있으면 firstShipDate에 Date로 변환되어 저장되어야 한다', async () => {
       await service.commit({
         ...validPayload,

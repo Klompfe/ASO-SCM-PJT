@@ -15,7 +15,8 @@ export type TabId =
   | 'cashVouchers'
   | 'inventories'
   | 'brands'
-  | 'statusCodes';
+  | 'statusCodes'
+  | 'materialPackagingUnitRules';
 
 interface NavItem {
   id: TabId;
@@ -76,6 +77,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'buyers', label: '고객사' },
       // PR-111: 스타일번호 접두사 → 브랜드 매핑 마스터.
       { id: 'brands', label: '브랜드 관리' },
+      // PR-175: 실/테이프 자재 종류별 포장단위(콘/롤) 환산 기준 마스터.
+      { id: 'materialPackagingUnitRules', label: '자재 포장단위' },
       { id: 'exportShipmentDefaults', label: '선적서류 기본정보', adminOnly: true },
       // PR-140: 목록 화면 상태값(작업지시 Filter by Status 등) 마스터 테이블 관리.
       { id: 'statusCodes', label: '상태코드 관리', adminOnly: true },
@@ -109,6 +112,12 @@ const ICON_PROPS = {
 };
 
 const ICONS: Record<TabId, React.ReactNode> = {
+  materialPackagingUnitRules: (
+    <svg {...ICON_PROPS}>
+      <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z" />
+      <path d="M3 8l9 5 9-5M12 13v8" />
+    </svg>
+  ),
   dashboard: (
     <svg {...ICON_PROPS}>
       <rect x="3" y="3" width="8" height="8" rx="1.5" />

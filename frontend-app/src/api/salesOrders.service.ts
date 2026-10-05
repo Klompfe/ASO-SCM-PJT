@@ -34,6 +34,11 @@ export interface AiBomItem {
   requiredQty: number | null;
   supplier: string | null;
   remarks: string | null;
+  // PR-175: AI 후보(읽기전용 참고) — 실/테이프 종류 한글 라벨 중 하나 또는 null.
+  materialSubTypeCandidate?: string | null;
+  // 사람이 검토 화면에서 확정한 최종값(저장 대상). AI가 직접 채우지 않는다.
+  threadType?: string | null;
+  tapeType?: string | null;
 }
 
 export interface AiSizeSpecRow {

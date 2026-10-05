@@ -29,6 +29,9 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
     expect(outcome.usage).toEqual({ pageCount: 0, promptTokens: 0, outputTokens: 0 });
     expect(outcome.results).toHaveLength(1);
     expect(outcome.results[0].overview.styleNo).toBe('MB6YSLM115Z');
+    // PR-175: 목업도 실제 응답과 같은 shape을 가져야 한다 — materialSubTypeCandidate는
+    // AI가 채우는 필드가 아니므로 목업에서도 항상 null.
+    expect(outcome.results[0].bomItems.every((b: any) => b.materialSubTypeCandidate === null)).toBe(true);
   });
 
   it('GEMINI_API_KEY가 빈 문자열이어도(falsy) isMock: true여야 한다', async () => {

@@ -9,6 +9,8 @@ export interface BomItemMaterial {
 }
 
 export type ThreadType = 'COA_SA' | 'OBA_SA_SKU_I_SA' | 'POLY_JINUIDO';
+// PR-175: 테이프류(다데/암홀) — threadType과 별도 컬럼(BomItem.tapeType).
+export type TapeType = 'DADE' | 'AMHOL';
 
 export interface BomItemRow {
   id: number;
@@ -23,6 +25,7 @@ export interface BomItemRow {
   composition?: string;
   hsCode?: string;
   threadType?: ThreadType | null;
+  tapeType?: TapeType | null;
   material: BomItemMaterial;
 }
 
@@ -37,6 +40,7 @@ export interface UpdateBomItem {
   composition?: string;
   hsCode?: string;
   threadType?: ThreadType;
+  tapeType?: TapeType;
 }
 
 export const getBomByStyleNo = (styleNo: string): Promise<any> =>

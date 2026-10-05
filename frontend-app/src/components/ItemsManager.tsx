@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getAllItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
-import { getBomByStyleNo, updateBomItem, addBomLabelSet, type BomDetail, type BomItemRow } from '../api/boms.service';
+import { getBomByStyleNo, updateBomItem, addBomLabelSet, type BomDetail, type BomItemRow, type ThreadType, type TapeType } from '../api/boms.service';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
@@ -17,6 +17,10 @@ import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagina
 import { buildEditableOrderByItem } from '../utils/purchaseOrderForm';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
+
+// PR-175: 실/테이프 통합 드롭다운 값을 서버 필드(threadType/tapeType) 중 하나로 나눈다.
+const resolveSubTypePayload = (value: string): { threadType?: ThreadType; tapeType?: TapeType } =>
+  value === 'DADE' || value === 'AMHOL' ? { tapeType: value as TapeType } : { threadType: value as ThreadType };
 
 interface ItemsManagerProps {
   onOrderItem?: (itemId: number) => void;
@@ -255,7 +259,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
 
   const startEditBomItem = (row: BomItemRow) => {
     setEditingBomItemId(row.id);
-    setEditBomItemForm({ composition: row.composition || '', hsCode: row.hsCode || '', threadType: row.threadType || '' });
+    setEditBomItemForm({ composition: row.composition || '', hsCode: row.hsCode || '', threadType: row.threadType || row.tapeType || '' });
   };
 
   const cancelEditBomItem = () => {
@@ -268,7 +272,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       await updateBomItem(id, {
         composition: editBomItemForm.composition,
         hsCode: editBomItemForm.hsCode,
-        ...(editBomItemForm.threadType ? { threadType: editBomItemForm.threadType as any } : {}),
+        ...(editBomItemForm.threadType ? resolveSubTypePayload(editBomItemForm.threadType) : {}),
       });
       toast.success('혼용율/HS코드/실 종류가 수정되었습니다.');
       cancelEditBomItem();
@@ -595,7 +599,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         <td className="px-4 py-2">
                           <select
                             className="border rounded px-2 py-1"
-                            aria-label="실 종류"
+                            aria-label="실/테이프 종류"
                             value={editBomItemForm.threadType}
                             onChange={(e) => setEditBomItemForm({ ...editBomItemForm, threadType: e.target.value })}
                           >
@@ -603,6 +607,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                             <option value="COA_SA">코아사 (2500M/콘)</option>
                             <option value="OBA_SA_SKU_I_SA">오바사·스쿠이사 (4000M/콘)</option>
                             <option value="POLY_JINUIDO">폴리지누이도 (500M/콘)</option>
+                            <option value="DADE">다데 (50M/롤)</option>
+                            <option value="AMHOL">암홀 (50M/롤)</option>
                           </select>
                         </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
@@ -625,7 +631,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         <td className="px-4 py-2">{it.composition ?? '-'}</td>
                         <td className="px-4 py-2">{it.hsCode ?? '-'}</td>
                         <td className="px-4 py-2">
-                          {it.threadType === 'COA_SA' ? '코아사' : it.threadType === 'OBA_SA_SKU_I_SA' ? '오바사·스쿠이사' : it.threadType === 'POLY_JINUIDO' ? '폴리지누이도' : '-'}
+                          {it.threadType === 'COA_SA' ? '코아사' : it.threadType === 'OBA_SA_SKU_I_SA' ? '오바사·스쿠이사' : it.threadType === 'POLY_JINUIDO' ? '폴리지누이도' : it.tapeType === 'DADE' ? '다데' : it.tapeType === 'AMHOL' ? '암홀' : '-'}
                         </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                           <button className="text-blue-600" onClick={() => startEditBomItem(it)}>수정</button>
