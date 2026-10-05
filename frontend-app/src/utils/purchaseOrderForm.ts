@@ -89,3 +89,15 @@ export const sumPurchaseOrderLines = (lines: { qty: number }[]): number =>
 // 라인 합계와 총수량이 다른지. 라인이 없으면 비교할 게 없으므로 false.
 export const isLineTotalMismatch = (quantity: number, lines: { qty: number }[]): boolean =>
   lines.length > 0 && sumPurchaseOrderLines(lines) !== Number(quantity);
+
+// PR-179: 일괄발주 미리보기의 공급업체 자동 선택 — 이력상 후보가 정확히 하나일 때만 고른다.
+// 후보가 여럿이거나 없으면 추측하지 않고 null(사람이 고른다).
+export function resolveBulkSupplierId(candidateSupplierIds: number[]): number | null {
+  const unique = [...new Set(candidateSupplierIds)];
+  return unique.length === 1 ? unique[0] : null;
+}
+
+// 일괄발주 행을 커밋해도 되는지: 공급업체·정수 수량(1 이상)·단가(0 초과)가 모두 있어야 한다.
+export function isBulkRowReady(row: { supplierId: number | null; quantity: number; unitPrice: number | null }): boolean {
+  return row.supplierId != null && Number.isInteger(row.quantity) && row.quantity >= 1 && row.unitPrice != null && row.unitPrice > 0;
+}

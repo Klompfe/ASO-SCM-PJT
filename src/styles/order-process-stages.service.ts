@@ -6,6 +6,7 @@ import { MasterStyle } from './entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { pickActiveBom } from '../boms/utils/active-bom.util';
 import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
+import { PackingReceipt } from '../purchase-orders/entities/packing-receipt.entity';
 import { ExportShipmentLine } from '../export-shipments/entities/export-shipment-line.entity';
 import { UpsertProcessStageDto } from './dto/upsert-process-stage.dto';
 
@@ -15,6 +16,9 @@ export interface ProcurementStatusRow {
   poCreated: boolean;
   materialReadiness: { ready: number; total: number };
   exported: boolean;
+  // PR-179: 입고 완료인데 포장내역이 하나도 없는 발주가 있는지, 있으면 그 발주(포장내역 등록 대상).
+  packed: boolean;
+  packingPendingPurchaseOrderId: number | null;
   overallStatus: string;
 }
 
@@ -28,9 +32,11 @@ export function computeOverallStatus(
   ready: number,
   total: number,
   exported: boolean,
+  packed: boolean,
 ): string {
   if (!poCreated) return '미발주';
   if (total === 0 || ready < total) return '입고대기';
+  if (!packed) return '포장내역대기';
   if (!exported) return '출고대기';
   return '완료';
 }
@@ -48,6 +54,8 @@ export class OrderProcessStagesService {
     private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
     @InjectRepository(ExportShipmentLine)
     private readonly exportShipmentLineRepository: Repository<ExportShipmentLine>,
+    @InjectRepository(PackingReceipt)
+    private readonly packingReceiptRepository: Repository<PackingReceipt>,
   ) {}
 
   // 단계별 진행 상황은 하루에 끝나지 않고 여러 날에 걸쳐 갱신되므로(재단 900/1372개처럼
@@ -112,6 +120,8 @@ export class OrderProcessStagesService {
       this.purchaseOrderRepository.find(),
       this.exportShipmentLineRepository.find(),
     ]);
+    const receipts = await this.packingReceiptRepository.find({ select: { id: true, purchaseOrderId: true } });
+    const purchaseOrderIdsWithReceipt = new Set(receipts.map((r) => r.purchaseOrderId));
 
     // 같은 style에 Bom이 여러 개면 getMaterialReadiness와 동일하게 pickActiveBom 규칙(활성 BOM 중 최신)으로
     // 하나만 쓴다. 이미 한 번에 전부 읽어 둔 목록을 스타일별로 묶어 메모리에서 고르므로 추가 쿼리는 없다.
@@ -142,6 +152,7 @@ export class OrderProcessStagesService {
 
       let poCreated = false;
       let readyMaterials = 0;
+      let packingPendingPurchaseOrderId: number | null = null;
       for (const materialId of materialIds) {
         const posForMaterial = posByItemId.get(materialId) ?? [];
         if (posForMaterial.length > 0) {
@@ -150,7 +161,14 @@ export class OrderProcessStagesService {
             readyMaterials++;
           }
         }
+        // 입고된 발주인데 포장내역이 없는 것 — 이 발주가 "포장내역대기"의 대상이다.
+        for (const po of posForMaterial) {
+          if (po.status === PurchaseOrderStatus.RECEIVED && !purchaseOrderIdsWithReceipt.has(po.id) && packingPendingPurchaseOrderId === null) {
+            packingPendingPurchaseOrderId = po.id;
+          }
+        }
       }
+      const packed = materialIds.length > 0 && readyMaterials === materialIds.length && packingPendingPurchaseOrderId === null;
 
       const exported = exportedStyleNos.has(style.styleNo);
       const materialReadiness = { ready: readyMaterials, total: materialIds.length };
@@ -161,7 +179,9 @@ export class OrderProcessStagesService {
         poCreated,
         materialReadiness,
         exported,
-        overallStatus: computeOverallStatus(poCreated, readyMaterials, materialIds.length, exported),
+        packed,
+        packingPendingPurchaseOrderId,
+        overallStatus: computeOverallStatus(poCreated, readyMaterials, materialIds.length, exported, packed),
       };
     });
   }

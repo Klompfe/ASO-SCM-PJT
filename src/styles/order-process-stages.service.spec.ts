@@ -5,27 +5,27 @@ import { computeOverallStatus, OrderProcessStagesService } from './order-process
 // 판정 자체만 단위로 테스트한다.
 describe('computeOverallStatus (PR-089)', () => {
   it('발주가 없으면(poCreated=false) 입고/출고 값과 무관하게 미발주다', () => {
-    expect(computeOverallStatus(false, 0, 0, false)).toBe('미발주');
-    expect(computeOverallStatus(false, 3, 3, true)).toBe('미발주');
+    expect(computeOverallStatus(false, 0, 0, false, true)).toBe('미발주');
+    expect(computeOverallStatus(false, 3, 3, true, true)).toBe('미발주');
   });
 
   it('발주는 있지만 일부만 입고되면(ready < total) 입고대기다', () => {
-    expect(computeOverallStatus(true, 1, 3, false)).toBe('입고대기');
-    expect(computeOverallStatus(true, 0, 3, false)).toBe('입고대기');
+    expect(computeOverallStatus(true, 1, 3, false, true)).toBe('입고대기');
+    expect(computeOverallStatus(true, 0, 3, false, true)).toBe('입고대기');
   });
 
   it('BOM 자재가 있는데 그 중 하나도 발주가 안 걸렸으면(total=0으로 판정 불가한 경우 제외) 입고대기다', () => {
     // poCreated=true인데 total=0인 경우는 실제로는 나오지 않지만(자재가 있어야 poCreated가
     // true가 될 수 있으므로), 방어적으로 total===0이면 입고대기로 처리되는지 확인한다.
-    expect(computeOverallStatus(true, 0, 0, false)).toBe('입고대기');
+    expect(computeOverallStatus(true, 0, 0, false, true)).toBe('입고대기');
   });
 
   it('전체 입고완료(ready === total)인데 아직 출고 전이면 출고대기다', () => {
-    expect(computeOverallStatus(true, 3, 3, false)).toBe('출고대기');
+    expect(computeOverallStatus(true, 3, 3, false, true)).toBe('출고대기');
   });
 
   it('전체 입고완료 + 출고(ExportShipmentLine 존재)까지 되면 완료다', () => {
-    expect(computeOverallStatus(true, 3, 3, true)).toBe('완료');
+    expect(computeOverallStatus(true, 3, 3, true, true)).toBe('완료');
   });
 });
 
@@ -42,17 +42,19 @@ describe('OrderProcessStagesService — BOM 선택 규칙 (PR-123)', () => {
   });
 
   // itemId → 그 자재의 PO 상태들
-  const build = (boms: any[], pos: Record<number, string[]> = {}, styles: any[] = [{ styleNo: 'S1', overview: { buyer: 'B' } }], exportedStyles: string[] = []) => {
+  const build = (boms: any[], pos: Record<number, string[]> = {}, styles: any[] = [{ styleNo: 'S1', overview: { buyer: 'B' } }], exportedStyles: string[] = [], packedPurchaseOrderIds: number[] = []) => {
     const bomRepo = { find: jest.fn().mockResolvedValue(boms) };
     const poRepo = {
       find: jest.fn().mockImplementation((opts?: any) => {
-        const all = Object.entries(pos).flatMap(([itemId, statuses]) => statuses.map((status) => ({ itemId: Number(itemId), status })));
+        let nextId = 1000; // PR-179: 포장내역 매칭용 PO id (테스트마다 결정적으로 부여)
+        const all = Object.entries(pos).flatMap(([itemId, statuses]) => statuses.map((status) => ({ id: nextId++, itemId: Number(itemId), status })));
         return Promise.resolve(opts?.where?.itemId !== undefined ? all.filter((p) => p.itemId === opts.where.itemId) : all);
       }),
     };
     const styleRepo = { find: jest.fn().mockResolvedValue(styles) };
     const lineRepo = { find: jest.fn().mockResolvedValue(exportedStyles.map((styleNo) => ({ styleNo }))) };
-    const service = new OrderProcessStagesService({} as any, styleRepo as any, bomRepo as any, poRepo as any, lineRepo as any);
+    const packingRepo = { find: jest.fn().mockResolvedValue(packedPurchaseOrderIds.map((purchaseOrderId) => ({ id: purchaseOrderId, purchaseOrderId }))) };
+    const service = new OrderProcessStagesService({} as any, styleRepo as any, bomRepo as any, poRepo as any, lineRepo as any, packingRepo as any);
     return { service, bomRepo, poRepo };
   };
 
@@ -68,6 +70,12 @@ describe('OrderProcessStagesService — BOM 선택 규칙 (PR-123)', () => {
     it('활성이 최신(id 최대)이면 기존과 같은 결과', async () => {
       const { service } = build([bom(5, 'S1', [1], false), bom(6, 'S1', [2, 3], true)], pos);
       expect(await service.getMaterialReadiness('S1')).toEqual({ totalMaterials: 2, readyMaterials: 0 });
+    });
+
+    it('입고는 끝났는데 포장내역이 없는 발주가 있으면 포장내역대기이고, 그 발주 id를 알려준다', async () => {
+      const { service } = build([bom(5, 'S1', [1], true)], pos);
+      const row = (await service.getProcurementStatusReport()).find((r) => r.styleNo === 'S1')!;
+      expect(row).toMatchObject({ overallStatus: '포장내역대기', packed: false, packingPendingPurchaseOrderId: 1000 });
     });
 
     it('isActive 정보가 없거나 전부 비활성이어도 이전 규칙(가장 큰 id)과 같은 결과', async () => {
@@ -95,11 +103,12 @@ describe('OrderProcessStagesService — BOM 선택 규칙 (PR-123)', () => {
         bom(5, 'S1', [1], true), bom(6, 'S1', [2, 3], false), // S1: 활성이 더 오래된 쪽
         bom(7, 'S2', [1], false), bom(8, 'S2', [2, 3], true), // S2: 활성이 최신(=이전 규칙과 동일)
       ];
-      const { service } = build(boms, pos, styles, ['S1']);
+      // S1의 입고 PO(item 1, id 1000)에는 포장내역이 있어야 출고/완료로 간다.
+      const { service } = build(boms, pos, styles, ['S1'], [1000]);
       const rows = await service.getProcurementStatusReport();
       const by = Object.fromEntries(rows.map((r) => [r.styleNo, r]));
 
-      expect(by.S1).toMatchObject({ buyer: 'B1', poCreated: true, materialReadiness: { ready: 1, total: 1 }, exported: true, overallStatus: '완료' });
+      expect(by.S1).toMatchObject({ buyer: 'B1', poCreated: true, materialReadiness: { ready: 1, total: 1 }, exported: true, packed: true, overallStatus: '완료' });
       expect(by.S2).toMatchObject({ poCreated: true, materialReadiness: { ready: 1, total: 2 }, overallStatus: '입고대기' });
       expect(by.S3).toMatchObject({ poCreated: false, materialReadiness: { ready: 0, total: 0 }, overallStatus: '미발주' });
     });
@@ -125,5 +134,20 @@ describe('OrderProcessStagesService — BOM 선택 규칙 (PR-123)', () => {
       const rows = await build([orphan, bom(2, 'S1', [1], true)], pos).service.getProcurementStatusReport();
       expect(rows.find((r) => r.styleNo === 'S1')!.materialReadiness).toEqual({ ready: 1, total: 1 });
     });
+  });
+
+  // PR-179: 입고는 끝났는데 포장내역이 없으면 포장내역대기, 있으면 출고대기로 넘어간다.
+  it('전체 입고완료이지만 포장내역이 없으면 포장내역대기다(출고 여부와 무관)', () => {
+    expect(computeOverallStatus(true, 3, 3, false, false)).toBe('포장내역대기');
+    expect(computeOverallStatus(true, 3, 3, true, false)).toBe('포장내역대기');
+  });
+
+  it('포장내역이 있으면 포장내역대기가 아니라 출고대기/완료 판정을 그대로 따른다', () => {
+    expect(computeOverallStatus(true, 3, 3, false, true)).toBe('출고대기');
+    expect(computeOverallStatus(true, 3, 3, true, true)).toBe('완료');
+  });
+
+  it('입고가 덜 끝났으면 포장 여부와 무관하게 입고대기다(포장내역대기로 가려 버리지 않는다)', () => {
+    expect(computeOverallStatus(true, 1, 3, false, true)).toBe('입고대기');
   });
 });

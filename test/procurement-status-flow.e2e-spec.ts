@@ -202,11 +202,12 @@ describe('발주·입고·출고 현황 보고서 (PR-089)', () => {
       .send({ status: 'RECEIVED' })
       .expect(200);
 
-    // 완전 입고 상태에서는 아직 출고대기여야 한다(출고 전).
-    const beforeExport = await getRow(styleNo);
-    expect(beforeExport.materialReadiness).toEqual({ ready: 1, total: 1 });
-    expect(beforeExport.exported).toBe(false);
-    expect(beforeExport.overallStatus).toBe('출고대기');
+    // PR-179: 전부 입고됐어도 포장내역이 없으면 포장내역대기다(출고대기는 포장 후).
+    const beforePacking = await getRow(styleNo);
+    expect(beforePacking.materialReadiness).toEqual({ ready: 1, total: 1 });
+    expect(beforePacking.exported).toBe(false);
+    expect(beforePacking.overallStatus).toBe('포장내역대기');
+    expect(beforePacking.packingPendingPurchaseOrderId).toBe(purchaseOrderId);
 
     await request(app.getHttpServer())
       .post(`/purchase-orders/${purchaseOrderId}/packing-receipts`)
@@ -216,6 +217,11 @@ describe('발주·입고·출고 현황 보고서 (PR-089)', () => {
         rolls: [{ rollNo: '1', color: '1', widthCm: 100, widthInch: 39.4, grossWeight: 10, netWeight: 9, thickness: 20 }],
       })
       .expect(201);
+
+    // 포장내역이 등록되면 출고대기로 넘어간다(출고 전).
+    const afterPacking = await getRow(styleNo);
+    expect(afterPacking.overallStatus).toBe('출고대기');
+    expect(afterPacking.packingPendingPurchaseOrderId).toBeNull();
 
     await request(app.getHttpServer())
       .post('/export-shipments/generate')

@@ -6,6 +6,7 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { requirementEmptyMessage, type MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { sortForShortage } from '../utils/purchaseOrderForm';
 import { SearchSelectField } from './SearchSelectField';
+import { BulkOrderPreviewModal } from './BulkOrderPreviewModal';
 import type { PurchaseOrder } from '../api/purchaseOrders.service';
 
 interface StyleOption { styleNo: string; overview?: { styleName?: string | null; totalQty?: number | string | null } | null }
@@ -20,10 +21,13 @@ interface ShortageTableProps {
   onPick: (row: MaterialRequirementRow) => void;
   editable?: EditableOrderMap;
   onEdit?: (order: PurchaseOrder, pendingCount: number) => void;
+  // PR-179: 일괄발주용 체크박스(선택 상태는 호출하는 쪽이 가진다).
+  selected?: Set<number>;
+  onToggle?: (itemId: number) => void;
 }
 
 // 부족 자재 표(표시 전용). 부족 수량이 있는 행이 위에 오고 강조된다(정렬은 호출하는 쪽의 sortForShortage).
-export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, editable, onEdit }) => {
+export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, editable, onEdit, selected, onToggle }) => {
   const th = 'px-2 py-1 text-left text-xs bg-gray-100 border border-gray-200';
   const td = 'px-2 py-1 text-sm border border-gray-200';
   return (
@@ -38,11 +42,17 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
             <th className={`${th} text-right`}>이미 발주</th>
             <th className={`${th} text-right`}>부족 수량</th>
             <th className={th}></th>
+            {onToggle && <th className={th}>일괄</th>}
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.itemId} className={r.shortageQty > 0 ? 'bg-red-50' : ''} data-testid={`shortage-row-${r.itemId}`}>
+              {onToggle && (
+                <td className={td}>
+                  <input type="checkbox" checked={selected?.has(r.itemId) ?? false} onChange={() => onToggle(r.itemId)} aria-label={`${r.itemName} 일괄발주 선택`} />
+                </td>
+              )}
               <td className={td}>{r.itemName}{r.itemCode && <span className="block text-xs text-gray-400">{r.itemCode}</span>}</td>
               <td className={td}>{r.categories.join(', ') || '-'}</td>
               <td className={`${td} text-right`}>{fmt(r.requiredQty)}</td>
@@ -72,7 +82,11 @@ export const StyleShortagePanel: React.FC<{
   refreshKey?: number;
   editable?: EditableOrderMap;
   onEdit?: (order: PurchaseOrder, pendingCount: number) => void;
-}> = ({ onPickMaterial, refreshKey = 0, editable, onEdit }) => {
+  // PR-179: 일괄발주 완료 후 호출(발주 목록/미입고 발주 새로고침용).
+  onBulkDone?: () => void;
+}> = ({ onPickMaterial, refreshKey = 0, editable, onEdit, onBulkDone }) => {
+  const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [style, setStyle] = useState<StyleOption | null>(null);
   const [quantityInput, setQuantityInput] = useState('');
   const [data, setData] = useState<StyleRequirements | null>(null);
@@ -177,10 +191,44 @@ export const StyleShortagePanel: React.FC<{
             {rows.length > 0 && (
               <p className="text-xs text-gray-400">&quot;이 자재로 발주하기&quot;를 누르면 아래 발주 폼에 자동으로 채워집니다.</p>
             )}
-            <ShortageTable rows={rows} onPick={onPickMaterial} editable={editable} onEdit={onEdit} />
+            {selectedItems.size > 0 && (
+              <div className="flex items-center gap-2">
+                <button type="button" className="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm hover:bg-indigo-700" onClick={() => setBulkOpen(true)}>
+                  선택 자재 일괄발주 ({selectedItems.size})
+                </button>
+                <button type="button" className="text-sm text-gray-500 hover:underline" onClick={() => setSelectedItems(new Set())}>선택 해제</button>
+              </div>
+            )}
+            <ShortageTable
+              rows={rows}
+              onPick={onPickMaterial}
+              editable={editable}
+              onEdit={onEdit}
+              selected={selectedItems}
+              onToggle={(itemId) => setSelectedItems((prev) => {
+                const next = new Set(prev);
+                if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
+                return next;
+              })}
+            />
           </>
         )}
       </div>
+      {bulkOpen && (
+        <BulkOrderPreviewModal
+          sources={rows
+            .filter((r) => selectedItems.has(r.itemId))
+            .map((r) => ({
+              itemId: r.itemId,
+              itemName: r.itemName,
+              itemCode: r.itemCode,
+              shortageQty: r.shortageQty,
+              hasEditablePending: editable?.has(r.itemId) ?? false,
+            }))}
+          onClose={() => setBulkOpen(false)}
+          onDone={() => { setBulkOpen(false); setSelectedItems(new Set()); onBulkDone?.(); }}
+        />
+      )}
     </details>
   );
 };

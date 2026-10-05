@@ -1,3 +1,4 @@
+import { PackingReceipt } from '../purchase-orders/entities/packing-receipt.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MasterStyle } from './entities/master-style.entity';
@@ -26,6 +27,7 @@ import { SalesContractPricesModule } from '../sales-contract-prices/sales-contra
   imports: [
     TypeOrmModule.forFeature([
       MasterStyle,
+      PackingReceipt,
       StyleOverview,
       Contract,
       OrderProcessStage,
