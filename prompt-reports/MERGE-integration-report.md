@@ -1,5 +1,51 @@
 # 통합 병합 보고서 (MERGE-1~4)
 
+## MERGE-4 최종: main 반영 완료
+
+제시님이 Render DB 호스트가 로컬 `.env`와 같은 Neon DB(`ep-soft-sound-b3lvd0oe...`)임을 확인해
+주셨고, Neon 백업(`backup-20261005`)을 만들었다고 확인해 주셨습니다. 이에 따라 `main`에 반영했습니다.
+
+- **방식**: `git switch main && git merge --ff-only integration/pr171-182` — fast-forward 성공
+  (병합 커밋 없이 커밋 이력 그대로 이어붙임).
+- **`main` 최종 SHA**: `52e823d64276f003618d40e3c388ea62fed94d72`.
+- **푸시**: `git push origin main` 완료 — `85aeb18..52e823d main -> main`.
+- **포함된 PR**: 171(공급업체 주요품목) · 172(공급업체 신규등록 팝업, 기존 main) · 173(CMT 단가
+  선택 입력) · 174(안내 문구, 기존 main) · 175(실/테이프 포장단위 룩업) · 176(색상/사이즈 라인) ·
+  177(수정하기, 기존 main) · 178(발주서 발행, 기존 main) · 179(일괄발주) · 180(발주 구분) ·
+  181(수기 CMT단가 초안) · 182(INVOICE 미터→콘/롤 환산). 171~182 전부 `main`에 있습니다
+  (172/174/177/178은 이번 통합 이전에 이미 개별 병합돼 있었습니다).
+- **CI 상태**: 이 환경에 `gh` CLI가 설치돼 있지 않아 GitHub Actions 실행 결과를 직접 조회하지
+  못했습니다. 저장소에 `.github/workflows/ci.yml`이 있으므로 푸시로 워크플로가 트리거됐을
+  가능성이 높습니다 — **GitHub Actions 탭에서 직접 확인해 주세요.** 실패 시 알려주시면
+  바로 보겠습니다.
+- **배포(Render)**: 이 DB가 운영 DB와 동일하다는 전제대로, 적용 대상 마이그레이션(171·175·176·
+  180·182의 5개)은 이미 이 Neon DB에 실행 기록이 있어(`typeorm migration:show`로 확인, 이전 보고
+  참고) 배포 시 `migration:run:prod`는 "No migrations are pending"로 끝날 것으로 예상됩니다.
+
+### 정리(4단계)
+
+- 기능 브랜치(`feat/supplier-main-items`, `feat/handwritten-cmt-price-draft`,
+  `feat/purchase-order-type`, `feat/cmt-po-unit-price-optional`,
+  `feat/purchase-order-color-size-lines`, `feat/invoice-thread-tape-price-conversion`)와
+  `integration/pr171-182`는 삭제하지 않았습니다(원격에 그대로 있음). `feat/material-packaging-
+  unit-standardization`(PR-175)은 이번 통합 이전에 별도로 직접 병합하며 이미 삭제했습니다
+  (제시님 지시로 이 세션 초반에 처리).
+- `git branch -r --merged origin/main` 결과에 위 6개 통합 대상 브랜치와 `integration/pr171-182`가
+  모두 포함되어 있음을 확인했습니다(그 외 목록에 보이는 브랜치들은 이번 통합과 무관하게 이전부터
+  main의 조상이었던 것들입니다).
+- 백업 태그 `backup/pre-integration-20261005`는 로컬에만 있고 원격에는 없음을 `git ls-remote`로
+  확인했습니다(그대로 유지).
+
+### 남은 후속 작업
+
+- **발주서(PR-178) 엑셀에 색상/사이즈 줄 미출력**: `purchase-order-document.service.ts:50`이
+  document context의 `lines`를 항상 빈 배열로 고정 — 유틸은 라인별 표를 그릴 수 있지만 실제로는
+  항상 총수량만 출력됨(MERGE-3 C.4/MERGE-3b 재확인).
+- **빈 DB에서의 마이그레이션 체인(171→175→176→180→182) 실행/되돌리기 검증**: 이 환경에서
+  Docker Desktop 데몬을 띄울 수 없어 미검증으로 남아 있습니다. 추후 Docker가 되는 환경에서
+  확인이 필요합니다(운영 DB에는 절대 하지 말 것).
+- **PR-173/176/180에서 CMT 발주 단가 선택 입력** 등은 이미 정합성 작업(MERGE-2/3) 완료.
+
 ## 선행 조건 재확인
 
 지시서(MERGE-4)는 MERGE-1~3이 이미 완료되어 `integration/pr171-182`가 푸시되어 있는 상태를 전제했습니다.
