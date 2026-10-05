@@ -95,4 +95,16 @@ export class ExportShipmentLine {
 
   @Column({ type: 'varchar', enum: ExportShipmentLinePriceSource, nullable: true })
   priceSource?: ExportShipmentLinePriceSource | null;
+
+  // PR-182: 생성 시점에 BomItem.threadType/tapeType을 그대로 복사한다(실/테이프가 아닌
+  // 자재나 BOM 연결이 없는 라인은 null — 추측하지 않는다). 라인 단위가 콘/롤일 때
+  // 미도 단가표(미터단가)를 어떤 종류로 환산할지 판단하는 근거로만 쓰인다.
+  @Column({ nullable: true })
+  materialSubType?: string | null;
+
+  // PR-182: confirmLinePrice에서 미터단가 → 콘/롤 환산이 적용된 경우 그 식을 그대로
+  // 남긴다(예: "미도 단가표 0.00012/m × 2500m = 0.3/콘(코아사)"). 서버가 재계산하지
+  // 않고, 화면에서 사람이 확인한 식 문자열을 그대로 저장한다(다른 필드들과 동일한 원칙).
+  @Column({ type: 'text', nullable: true })
+  priceBasisNote?: string | null;
 }

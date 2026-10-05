@@ -26,6 +26,11 @@ export interface ExportShipmentLine {
   unitPriceUsd?: number | null;
   amountUsd?: number | null;
   priceSource?: ExportShipmentLinePriceSource | null;
+  // PR-182: 생성 시점에 BomItem.threadType/tapeType을 복사한 값(실/테이프가 아니거나
+  // BOM 연결이 없으면 null) — 미터단가 → 콘/롤단가 환산 후보를 얼마나 좁힐 수 있는지 결정한다.
+  materialSubType?: string | null;
+  // PR-182: 환산이 적용된 경우 확정 시 저장된 근거 식(예: "미도 단가표 0.00012/m × 2500m = 0.3/콘(코아사)").
+  priceBasisNote?: string | null;
 }
 
 export interface ExportShipment {
@@ -138,7 +143,7 @@ export const updateExportShipmentExchangeRate = (id: number, exchangeRateUsdKrw:
 export const confirmExportShipmentLinePrice = (
   exportShipmentId: number,
   lineId: number,
-  data: { source: ExportShipmentLinePriceSource; unitPriceUsd: number; midoPriceItemId?: number },
+  data: { source: ExportShipmentLinePriceSource; unitPriceUsd: number; midoPriceItemId?: number; priceBasisNote?: string },
 ): Promise<any> => apiClient.patch(`/export-shipments/${exportShipmentId}/lines/${lineId}/price`, data);
 
 // PR-080: 기 작성된 INVOICE/Packing List 엑셀을 그대로 가져와 DRAFT로 즉시 등록한다.

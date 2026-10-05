@@ -187,5 +187,28 @@ describe('ExportShipmentsService.updateExchangeRate / confirmLinePrice (PR-157)'
         service.confirmLinePrice(1, 5, { source: 'MANUAL' as any, unitPriceUsd: 1 }),
       ).rejects.toThrow('FINALIZED 상태의 문서는 더 이상 수정할 수 없습니다.');
     });
+
+    // PR-182: 미터단가 → 콘/롤단가 환산이 적용된 경우 화면이 보여준 식(검산 근거)을 그대로 저장한다.
+    it('priceBasisNote를 보내면 그대로 저장한다(서버가 재계산/검증하지 않음)', async () => {
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, status: 'DRAFT' });
+      (lineRepo.findOne as jest.Mock).mockResolvedValue({ id: 5, exportShipmentId: 1, qty: 10 });
+
+      const result = await service.confirmLinePrice(1, 5, {
+        source: 'MIDO_PRICE_TABLE' as any,
+        unitPriceUsd: 0.3,
+        priceBasisNote: '미도 단가표 0.00012/m × 2500m = 0.3/콘(코아사)',
+      });
+
+      expect(result.priceBasisNote).toBe('미도 단가표 0.00012/m × 2500m = 0.3/콘(코아사)');
+    });
+
+    it('priceBasisNote를 보내지 않으면 null로 저장한다(환산이 적용되지 않은 일반 확정)', async () => {
+      (shipmentRepo.findOne as jest.Mock).mockResolvedValue({ id: 1, status: 'DRAFT' });
+      (lineRepo.findOne as jest.Mock).mockResolvedValue({ id: 5, exportShipmentId: 1, qty: 10, priceBasisNote: '이전 확정 근거' });
+
+      const result = await service.confirmLinePrice(1, 5, { source: 'MANUAL' as any, unitPriceUsd: 1 });
+
+      expect(result.priceBasisNote).toBeNull();
+    });
   });
 });

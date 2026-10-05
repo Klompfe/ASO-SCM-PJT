@@ -13,7 +13,8 @@ import {
   type ExportShipmentLine,
   type GenerateExportShipment,
 } from '../api/exportShipments.service';
-import { findMidoPriceCandidates, type MidoPriceItem } from '../api/midoPriceTable.service';
+import { findMidoPriceCandidates, type MidoPriceItem, type MeterPriceConversionOption } from '../api/midoPriceTable.service';
+import { selectRawCandidate, selectConvertedOption, clearSelection, resolveSource } from '../utils/invoiceLinePriceEditor';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { getCurrentUser, type CurrentUser } from '../api/auth.service';
 import { getExportShipmentDefaults } from '../api/exportShipmentDefaults.service';
@@ -249,21 +250,42 @@ export const ExportShipmentManager: React.FC = () => {
   // 눌렀을 때만 그 후보 id를 출처로 기록하고, 입력값을 직접 고치면 선택이 풀려서
   // MANUAL로 저장된다 — 실제로 쓴 값과 출처가 항상 일치한다.
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
-
+  // PR-182: 미터단가 → 콘/롤단가 환산이 적용된 경우의 근거 식(검산용) — 환산 옵션을
+  // 고르면 채워지고, 원시 후보를 쓰거나 직접 입력하면 비운다(실제로 쓴 값과 근거가 항상 일치).
+  const [priceBasisNoteInput, setPriceBasisNoteInput] = useState<string | null>(null);
   const openPriceEditor = async (line: ExportShipmentLine) => {
     setPriceEditingLineId(line.id);
     setManualUsdInput('');
     setSelectedCandidateId(null);
+    setPriceBasisNoteInput(null);
     try {
-      setPriceCandidates(await findMidoPriceCandidates(line.description));
+      setPriceCandidates(await findMidoPriceCandidates(line.description, { lineUnit: line.unit, materialSubType: line.materialSubType }));
     } catch {
       setPriceCandidates([]);
     }
   };
 
   const useCandidateValue = (c: MidoPriceItem) => {
-    setManualUsdInput(String(c.priceUsdMin));
-    setSelectedCandidateId(c.id);
+    const sel = selectRawCandidate(c.priceUsdMin, c.id);
+    setManualUsdInput(sel.unitPriceUsdInput);
+    setSelectedCandidateId(sel.candidateId);
+    setPriceBasisNoteInput(sel.priceBasisNote);
+  };
+
+  // PR-182: 콘/롤단가 환산 옵션(실/테이프 종류별)을 골랐을 때 — 환산값과 검산용 근거
+  // 식을 함께 채운다. 서버는 이 숫자를 재계산하지 않고 그대로 저장한다(안전모드).
+  const useConvertedOption = (c: MidoPriceItem, opt: MeterPriceConversionOption) => {
+    const sel = selectConvertedOption(c.id, opt);
+    setManualUsdInput(sel.unitPriceUsdInput);
+    setSelectedCandidateId(sel.candidateId);
+    setPriceBasisNoteInput(sel.priceBasisNote);
+  };
+
+  const handleManualUsdInputChange = (value: string) => {
+    const sel = clearSelection(value);
+    setManualUsdInput(sel.unitPriceUsdInput);
+    setSelectedCandidateId(sel.candidateId);
+    setPriceBasisNoteInput(sel.priceBasisNote);
   };
 
   const handleConfirmLinePrice = async () => {
@@ -271,12 +293,13 @@ export const ExportShipmentManager: React.FC = () => {
       toast.error('USD 단가를 입력해 주세요.');
       return;
     }
-    const source = selectedCandidateId != null ? 'MIDO_PRICE_TABLE' : 'MANUAL';
+    const source = resolveSource(selectedCandidateId);
     try {
       const res = await confirmExportShipmentLinePrice(selected.id, priceEditingLineId, {
         source,
         unitPriceUsd: Number(manualUsdInput),
         midoPriceItemId: selectedCandidateId ?? undefined,
+        priceBasisNote: priceBasisNoteInput ?? undefined,
       });
       toast.success('USD 단가가 확정되었습니다.');
       setSelected(res.exportShipmentId ? await getExportShipment(res.exportShipmentId) : selected);
@@ -543,21 +566,54 @@ export const ExportShipmentManager: React.FC = () => {
               최종 숫자를 아래 입력란에 직접 넣어 확정해 주세요.
             </p>
             {priceCandidates.length > 0 ? (
-              <ul className="text-sm mb-3 space-y-1 max-h-40 overflow-y-auto">
+              <ul className="text-sm mb-3 space-y-1 max-h-56 overflow-y-auto">
                 {priceCandidates.map((c) => {
                   const minKrw = krwEquivalent(c.priceUsdMin);
                   const maxKrw = c.priceUsdMax !== c.priceUsdMin ? krwEquivalent(c.priceUsdMax) : null;
                   return (
-                    <li key={c.id} className={`flex items-center justify-between border rounded px-2 py-1 ${selectedCandidateId === c.id ? 'border-blue-500 bg-blue-50' : ''}`}>
-                      <span>
-                        {c.itemName} — ${c.priceUsdMin}{c.priceUsdMax !== c.priceUsdMin ? `~$${c.priceUsdMax}` : ''} / {c.unit}{c.note ? ` (${c.note})` : ''}
-                        {minKrw && <span className="text-gray-400"> (약 {minKrw}{maxKrw ? `~${maxKrw}` : ''}원)</span>}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => useCandidateValue(c)}
-                        className="text-xs text-blue-600 border border-blue-300 rounded px-2 py-0.5 ml-2 shrink-0 hover:bg-blue-50"
-                      >이 값 사용</button>
+                    <li key={c.id} className="border rounded px-2 py-1" data-testid={`price-candidate-${c.id}`}>
+                      <div className="flex items-center justify-between">
+                        <span>
+                          {c.itemName} — ${c.priceUsdMin}{c.priceUsdMax !== c.priceUsdMin ? `~$${c.priceUsdMax}` : ''} / {c.unit}{c.note ? ` (${c.note})` : ''}
+                          {minKrw && <span className="text-gray-400"> (약 {minKrw}{maxKrw ? `~${maxKrw}` : ''}원)</span>}
+                        </span>
+                        {/* PR-182: 콘/롤 환산이 적용되는 후보는 "이 값 사용"이 미터단가를 그대로 쓰는
+                            버튼이라 오해를 사지 않도록 숨기고, 아래 환산 옵션에서만 고르게 한다. */}
+                        {!c.conversion && (
+                          <button
+                            type="button"
+                            onClick={() => useCandidateValue(c)}
+                            className={`text-xs border rounded px-2 py-0.5 ml-2 shrink-0 ${selectedCandidateId === c.id ? 'border-blue-500 bg-blue-50 text-blue-700' : 'text-blue-600 border-blue-300 hover:bg-blue-50'}`}
+                          >이 값 사용</button>
+                        )}
+                      </div>
+                      {/* PR-182: 미터단가 → 콘/롤단가 환산 후보 — 담당자가 검산할 수 있도록 미터단가/단위길이/식을 함께 보여준다. */}
+                      {c.conversion && (
+                        <div className="mt-1 pl-2 border-l-2 border-amber-200 space-y-1">
+                          {c.conversion.options.map((opt) => {
+                            const picked = selectedCandidateId === c.id && manualUsdInput === String(opt.unitPriceUsd);
+                            return (
+                              <div key={opt.materialSubType} className="flex items-center justify-between text-xs">
+                                <span className="text-gray-600">
+                                  {opt.displayName}({opt.packagingUnitLabel}, {opt.unitLengthM}m): {opt.formula}
+                                  {opt.unitPriceUsdMax != null && <span className="text-gray-400"> ~ {opt.formulaMax}</span>}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => useConvertedOption(c, opt)}
+                                  className={`border rounded px-2 py-0.5 ml-2 shrink-0 ${picked ? 'border-blue-500 bg-blue-50 text-blue-700' : 'text-blue-600 border-blue-300 hover:bg-blue-50'}`}
+                                >이 값 사용(환산)</button>
+                              </div>
+                            );
+                          })}
+                          {c.conversion.warning && (
+                            <p className="text-xs text-amber-700" data-testid={`conversion-warning-${c.id}`}>⚠ {c.conversion.warning}</p>
+                          )}
+                          {c.conversion.referenceNote && (
+                            <p className="text-xs text-gray-400">{c.conversion.referenceNote}</p>
+                          )}
+                        </div>
+                      )}
                     </li>
                   );
                 })}
@@ -565,7 +621,7 @@ export const ExportShipmentManager: React.FC = () => {
             ) : (
               <p className="text-xs text-gray-400 mb-3">일치하는 단가표 후보가 없습니다 — 직접 입력해 주세요.</p>
             )}
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 mb-2">
               <input
                 type="number"
                 step="0.0001"
@@ -573,9 +629,12 @@ export const ExportShipmentManager: React.FC = () => {
                 className="border p-2 rounded flex-1"
                 placeholder="확정할 USD 단가"
                 value={manualUsdInput}
-                onChange={(e) => { setManualUsdInput(e.target.value); setSelectedCandidateId(null); }}
+                onChange={(e) => handleManualUsdInputChange(e.target.value)}
               />
             </div>
+            {priceBasisNoteInput && (
+              <p className="text-xs text-gray-500 mb-2" data-testid="price-basis-note">근거: {priceBasisNoteInput}</p>
+            )}
             <p className="text-xs text-gray-400 mb-3">
               출처: {selectedCandidateId != null ? '미도단가표(후보 선택됨)' : '직접입력'}
             </p>
