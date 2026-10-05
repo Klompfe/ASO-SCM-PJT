@@ -39,9 +39,10 @@ const RESPONSE_SCHEMA = {
           totalQty: { type: SchemaType.NUMBER, nullable: true },
           targetRdd: { type: SchemaType.STRING, nullable: true, description: '계획DELI 하위 "납기" 라벨의 날짜, YYYY-MM-DD' },
           documentDate: { type: SchemaType.STRING, nullable: true, description: '문서 상단에 적힌 작성일, YYYY-MM-DD (납기와 다른 값)' },
-          handwrittenCmtPriceCandidate: { type: SchemaType.NUMBER, nullable: true, description: '미도 바이어 건에서만: 문서 상단에 수기로 비교적 큰 글씨로 적힌 숫자(CMT단가 후보). 미도가 아니거나 확신이 없으면 null' },
+          handwrittenCmtPriceCandidate: { type: SchemaType.NUMBER, nullable: true, description: '미도 바이어 건에서만: 문서 상단에 수기로 비교적 큰 글씨로 적힌 숫자(CMT단가 후보, 계산식이 있으면 최종 합계). 미도가 아니거나 확신이 없으면 null' },
+          handwrittenCmtPriceMemo: { type: SchemaType.STRING, nullable: true, description: '미도 바이어 건에서만: 수기 표기를 보이는 그대로 옮긴 문자열(예: "7,270 + 230 = 7,500"). 식이 없으면 숫자만. 미도가 아니거나 확신이 없으면 null' },
         },
-        required: ['styleNo', 'styleName', 'itemType', 'brand', 'productionType', 'factory', 'buyer', 'totalQty', 'targetRdd', 'documentDate', 'handwrittenCmtPriceCandidate'],
+        required: ['styleNo', 'styleName', 'itemType', 'brand', 'productionType', 'factory', 'buyer', 'totalQty', 'targetRdd', 'documentDate', 'handwrittenCmtPriceCandidate', 'handwrittenCmtPriceMemo'],
       },
       bomItems: {
         type: SchemaType.ARRAY,
@@ -97,7 +98,7 @@ documentDate와 targetRdd는 문서 안의 서로 다른 위치에 있는 서로
 - documentDate: 문서 상단에 적힌 이 작업지시서의 작성일(YYYY-MM-DD로 변환).
 - targetRdd: 계획DELI 항목의 하위 라벨 "납기"에 적힌 날짜(YYYY-MM-DD로 변환). 연도가 안 보이면 documentDate의 연도만 보충하고, 월/일 자체를 documentDate 값으로 대체하지 마세요. documentDate와 targetRdd는 서로 다른 필드로 각각 독립적으로 인식하세요 — "납기"에 적힌 날짜를 못 찾았다고 해서 작성일을 납기 대신 넣지 마세요.
 
-handwrittenCmtPriceCandidate: 바이어(buyer)가 "미도"로 명확히 인식된 문서에서만 채우세요. 문서 상단에 인쇄된 표 글자와 구분되는, 손으로 비교적 큰 글씨로 적힌 숫자가 있으면 그 숫자를 추출하세요. 바이어가 미도가 아니거나, 바이어를 못 읽었거나, 그런 수기 숫자가 없거나, 여러 후보가 있어 어느 것인지 확신할 수 없으면 반드시 null로 두고 절대 추측하지 마세요.
+handwrittenCmtPriceCandidate / handwrittenCmtPriceMemo: 바이어(buyer)가 "미도"로 명확히 인식된 문서에서만 채우세요. 문서 상단에 인쇄된 표 글자와 구분되는, 손으로 비교적 큰 글씨로 적힌 숫자가 있으면 추출하세요. "기본금액 + 230 = 7,500"처럼 계산식 형태면 candidate에는 식의 마지막 합계 숫자만, memo에는 식 전체를 보이는 그대로(원문 표기) 옮기세요(식이 없으면 memo에도 숫자만). 바이어가 미도가 아니거나, 바이어를 못 읽었거나, 그런 수기 숫자가 없거나, 여러 후보가 있어 어느 것인지 확신할 수 없으면 둘 다 반드시 null로 두고 절대 추측하지 마세요.
 
 2. bomItems(자재명세): 상단 소재 표(소재No./소재명/색상/규격/요척/출고량)와 하단 부자재 표(안감/심지/포켓감/테이프/재봉사/단추/라벨 등, 규격/소요량/비고)를 모두 각 행 하나씩 bomItems 배열 항목으로 변환하세요. category는 소재/안감/심지/부자재 등 표의 구분명, itemName은 소재명 또는 부자재명, spec은 규격/색상, consumption은 요척 또는 소요량(숫자만, 단위 제외). supplier(공급처)는 문서에 실제로 인쇄/기재된 값이 있을 때만 그대로 옮기고, 문서에 없으면 절대 추정하지 말고 반드시 null로 두세요 — 공급처는 작업지시서 시점에는 정해지지 않고 이후 발주 단계에서 결정되는 정보입니다.
 
@@ -220,6 +221,7 @@ export class VisionService {
     for (const result of results) {
       if (!isMidoBuyer(result.overview.buyer)) {
         result.overview.handwrittenCmtPriceCandidate = null;
+        result.overview.handwrittenCmtPriceMemo = null;
       }
       result.overview.cmtPrice = null;
     }
@@ -241,6 +243,7 @@ export class VisionService {
           documentDate: null,
           targetRddSuspicious: false,
           handwrittenCmtPriceCandidate: null,
+          handwrittenCmtPriceMemo: null,
           cmtPrice: null,
         },
         bomItems: [

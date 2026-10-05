@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Contract, ContractStatus } from './entities/contract.entity';
 import { MasterStyle } from './entities/master-style.entity';
 import { ProductionType, SalesMarket } from './entities/style-overview.entity';
@@ -151,6 +151,23 @@ export class ContractsService {
         );
       }
 
+      // PR-181: 미도 수기 CMT단가 초안은 초안일 뿐 확정값이 아니다 — 승인자가 금액을
+      // 반드시 한 번 더 확인·입력해야 승인할 수 있다(안전모드, 자동 확정 금지). 초안과
+      // 같은 숫자를 다시 보내더라도 명시적으로 보내야 한다.
+      if (contract.cmtPriceConfidence === 'HANDWRITTEN_DRAFT') {
+        if (overrides?.cmtPrice == null) {
+          throw new BadRequestException('수기 CMT단가 초안은 승인 시 금액을 확인·입력해야 합니다.');
+        }
+        contract.cmtPrice = overrides.cmtPrice;
+        contract.cmtPriceConfidence = 'MANUAL_CONFIRMED';
+        // 코멘트는 덮어쓰지 않고 이어 붙여 이력을 남긴다.
+        if (overrides.cmtPriceNote) {
+          contract.cmtPriceNote = contract.cmtPriceNote
+            ? `${contract.cmtPriceNote} | [승인] ${overrides.cmtPriceNote}`
+            : `[승인] ${overrides.cmtPriceNote}`;
+        }
+      }
+
       const brand = await this.resolveBrand(contract.styleNo);
       const requiresSalesMarket = brand != null && SALES_MARKET_DEPENDENT_BRANDS.includes(brand);
       const effectiveSalesMarket = overrides?.salesMarket ?? contract.salesMarket;
@@ -219,10 +236,21 @@ export class ContractsService {
       }
     }
 
+    // PR-181: 수기 CMT단가 초안 건은 일괄승인이 조용히 금액을 확정해버리면 안 되므로
+    // (안전모드) approve()를 시도조차 하지 않고 바로 failed[]로 뺀다 — 기존 판매시장
+    // 미지정 건과 같은 처리 방식이지만, 이 경우는 이유가 미리 알려져 있어 approve()를
+    // 호출해 에러를 받는 대신 여기서 먼저 걸러낸다.
+    const targetContracts = targetIds.length ? await this.contractRepository.find({ where: { id: In(targetIds) } }) : [];
+    const draftIds = new Set(targetContracts.filter((c) => c.cmtPriceConfidence === 'HANDWRITTEN_DRAFT').map((c) => c.id));
+
     let approvedCount = 0;
     const failed: { id: number; reason: string }[] = [];
 
     for (const id of targetIds) {
+      if (draftIds.has(id)) {
+        failed.push({ id, reason: '수기 CMT단가 초안 — 개별 확인 필요' });
+        continue;
+      }
       try {
         await this.approve(id, approvedByUserId);
         approvedCount++;

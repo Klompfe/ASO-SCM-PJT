@@ -354,4 +354,57 @@ describe('ContractsService (PR-090 bulkApprove)', () => {
       expect(result.approvedCount).toBe(2);
     });
   });
+
+  // PR-181: 미도 수기 CMT단가 초안 — 승인 시 사람이 금액을 다시 확인·입력해야 한다(안전모드).
+  describe('approve / bulkApprove — 수기 CMT단가 초안 (PR-181)', () => {
+    it('HANDWRITTEN_DRAFT 계약은 cmtPrice 없이 승인하면 400이다', async () => {
+      store.push(makeContract({ id: 1, styleNo: 'A1', cmtPrice: 7500, cmtPriceConfidence: 'HANDWRITTEN_DRAFT', cmtPriceNote: '작지 수기: 7,500' } as any));
+
+      await expect(service.approve(1, 99)).rejects.toThrow(BadRequestException);
+      await expect(service.approve(1, 99)).rejects.toThrow('수기 CMT단가 초안');
+    });
+
+    it('HANDWRITTEN_DRAFT 계약은 cmtPrice를 보내면 승인되고 MANUAL_CONFIRMED로 바뀌며 코멘트가 기존 뒤에 이어 붙는다', async () => {
+      store.push(makeContract({ id: 2, styleNo: 'A2', cmtPrice: 7500, cmtPriceConfidence: 'HANDWRITTEN_DRAFT', cmtPriceNote: '작지 수기: 7,270 + 230 = 7,500' } as any));
+
+      const result = await service.approve(2, 99, { cmtPrice: 7500, cmtPriceNote: '작지 원본 확인, 7,500으로 확정' });
+
+      expect(result.status).toBe(ContractStatus.APPROVED);
+      expect(result.cmtPrice).toBe(7500);
+      expect(result.cmtPriceConfidence).toBe('MANUAL_CONFIRMED');
+      expect(result.cmtPriceNote).toBe('작지 수기: 7,270 + 230 = 7,500 | [승인] 작지 원본 확인, 7,500으로 확정');
+    });
+
+    it('HANDWRITTEN_DRAFT 계약을 승인하며 승인자 코멘트를 안 보내면 기존 코멘트가 그대로 남는다', async () => {
+      store.push(makeContract({ id: 3, styleNo: 'A3', cmtPrice: 7500, cmtPriceConfidence: 'HANDWRITTEN_DRAFT', cmtPriceNote: '작지 수기: 7,500' } as any));
+
+      const result = await service.approve(3, 99, { cmtPrice: 8000 });
+
+      expect(result.cmtPrice).toBe(8000);
+      expect(result.cmtPriceConfidence).toBe('MANUAL_CONFIRMED');
+      expect(result.cmtPriceNote).toBe('작지 수기: 7,500');
+    });
+
+    it('일괄승인은 HANDWRITTEN_DRAFT 건을 승인하지 않고 failed[]에 사유와 함께 넣는다', async () => {
+      store.push(makeContract({ id: 4, styleNo: 'A4', cmtPrice: 7500, cmtPriceConfidence: 'HANDWRITTEN_DRAFT' } as any));
+      store.push(makeContract({ id: 5, styleNo: 'A5' }));
+
+      const result = await service.bulkApprove([4, 5], 99);
+
+      expect(result.approvedCount).toBe(1);
+      expect(store.find((c) => c.id === 5)!.status).toBe(ContractStatus.APPROVED);
+      expect(store.find((c) => c.id === 4)!.status).toBe(ContractStatus.PENDING_APPROVAL);
+      expect(result.failed).toEqual([{ id: 4, reason: '수기 CMT단가 초안 — 개별 확인 필요' }]);
+    });
+
+    it('EXACT_STYLE_MATCH 등 다른 confidence 계약은 승인 흐름이 그대로다(회귀 없음)', async () => {
+      store.push(makeContract({ id: 6, styleNo: 'A6', cmtPrice: 10, cmtPriceConfidence: 'EXACT_STYLE_MATCH' } as any));
+
+      const result = await service.approve(6, 99);
+
+      expect(result.status).toBe(ContractStatus.APPROVED);
+      expect(result.cmtPrice).toBe(10);
+      expect(result.cmtPriceConfidence).toBe('EXACT_STYLE_MATCH');
+    });
+  });
 });

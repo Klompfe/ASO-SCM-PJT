@@ -61,3 +61,21 @@ export function updateOverviewField<K extends keyof AiOverview>(
 ): AiSalesOrderResult[] {
   return results.map((r, i) => (i === index ? { ...r, overview: { ...r.overview, [field]: value } } : r));
 }
+
+// PR-181: 미도 작지 수기 CMT단가 — AI 후보를 "사용" 버튼 없이 입력란에 초안으로 미리
+// 채운다(기존 PR-168의 "사용" 2단계 확인을 없애고, 대신 계약 승인 때 한 번 더 확인하는
+// 방식으로 바뀜). cmtPrice가 이미 있으면(사람이 이미 손댔거나 재분석) 덮어쓰지 않는다.
+export function prefillHandwrittenCmtDraft(results: AiSalesOrderResult[]): AiSalesOrderResult[] {
+  return results.map((r) => {
+    const { handwrittenCmtPriceCandidate, handwrittenCmtPriceMemo, cmtPrice, cmtPriceNote } = r.overview;
+    if (handwrittenCmtPriceCandidate == null || cmtPrice != null) return r;
+    return {
+      ...r,
+      overview: {
+        ...r.overview,
+        cmtPrice: handwrittenCmtPriceCandidate,
+        cmtPriceNote: cmtPriceNote ?? handwrittenCmtPriceMemo ?? null,
+      },
+    };
+  });
+}

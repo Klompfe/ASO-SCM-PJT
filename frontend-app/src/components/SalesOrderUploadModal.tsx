@@ -7,6 +7,7 @@ import {
   setBomItemSubType,
   resolveMaterialSubTypeCandidate,
   resolveSubTypeValue,
+  prefillHandwrittenCmtDraft,
 } from '../utils/salesOrderOverviewEdit';
 
 interface Props {
@@ -75,7 +76,9 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       const data: AiSalesOrderResult[] = Array.isArray(res?.results) ? res.results : [];
       const charge: number = typeof res?.chargedAmountKrw === 'number' ? res.chargedAmountKrw : 0;
       const mock: boolean = res?.isMock === true;
-      setResults(data);
+      // PR-181: 미도 작지 수기 CMT단가 — AI 후보를 "사용" 버튼 없이 입력란에 초안으로
+      // 미리 채운다. 초안일 뿐 확정이 아니며, 계약 승인 시점에 한 번 더 확인해야 한다.
+      setResults(prefillHandwrittenCmtDraft(data));
       setLastChargeKrw(charge);
       setIsMock(mock);
       setSavedIndexes(new Set());
@@ -370,7 +373,17 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                         )}
                       </label>
                       <label className="flex flex-col">
-                        <span className="text-gray-500 text-xs">CMT단가</span>
+                        <span className="text-gray-500 text-xs flex items-center gap-1">
+                          CMT단가
+                          {/* PR-181: "사용" 버튼 단계를 없애고 AI 후보를 바로 초안으로 채운다
+                              (prefillHandwrittenCmtDraft) — 이 값은 초안일 뿐 확정이 아니며,
+                              계약 승인 시점에 담당 관리자가 한 번 더 확인·입력해야 한다. */}
+                          {result.overview.handwrittenCmtPriceCandidate != null && (
+                            <span className="bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded text-[10px] font-medium" data-testid={`cmt-price-draft-badge-${index}`}>
+                              수기 초안 — 계약 승인 시 확정 필요
+                            </span>
+                          )}
+                        </span>
                         <input
                           type="number"
                           step="any"
@@ -379,19 +392,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           value={result.overview.cmtPrice ?? ''}
                           onChange={(e) => updateOverviewField(index, 'cmtPrice', e.target.value === '' ? null : Number(e.target.value))}
                         />
-                        {/* PR-168: 미도 전용 — 작지 상단 수기 CMT단가 AI 후보. 자동으로
-                            채우지 않고, 사람이 "이 값 사용"을 눌러야 위 입력란에 복사되며
-                            그 뒤에도 "저장" 버튼을 눌러야 실제로 반영된다(이중 확인). */}
-                        {result.overview.handwrittenCmtPriceCandidate != null && (
-                          <div className="mt-1 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 text-xs text-yellow-800" data-testid={`cmt-price-candidate-${index}`}>
-                            AI가 인식한 CMT단가 후보: <b>{result.overview.handwrittenCmtPriceCandidate}</b> — 이 값을 사용하시겠습니까?
-                            <button
-                              type="button"
-                              onClick={() => updateOverviewField(index, 'cmtPrice', result.overview.handwrittenCmtPriceCandidate ?? null)}
-                              className="ml-2 px-2 py-0.5 rounded bg-yellow-600 text-white hover:bg-yellow-700"
-                            >사용</button>
-                          </div>
-                        )}
+                        {/* 단가를 비우면(null) 코멘트가 남아 있어도 저장 시 초안 없음으로 처리된다
+                            (commitAnalysis는 cmtPrice가 있을 때만 코멘트를 계약에 반영한다). */}
+                        <textarea
+                          data-testid={`cmt-price-note-input-${index}`}
+                          className="mt-1 border rounded px-2 py-1 text-xs"
+                          rows={2}
+                          placeholder="CMT단가 코멘트(선택) — 예: 작지 수기: 7,270 + 230 = 7,500"
+                          value={result.overview.cmtPriceNote ?? ''}
+                          onChange={(e) => updateOverviewField(index, 'cmtPriceNote', e.target.value === '' ? null : e.target.value)}
+                        />
                       </label>
                     </div>
                   </div>

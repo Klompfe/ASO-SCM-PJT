@@ -72,7 +72,7 @@ export class Contract {
   // 필요") 그 이유를 남긴다. productionType이 FOB이거나 CMT 표준가격 조회
   // 자체를 안 한 계약(기존 데이터, 수주 등록 경로 등)은 둘 다 null.
   @Column({ nullable: true })
-  cmtPriceConfidence: 'EXACT_STYLE_MATCH' | 'BRAND_CATEGORY_AVERAGE' | 'NEEDS_REVIEW' | null;
+  cmtPriceConfidence: 'EXACT_STYLE_MATCH' | 'BRAND_CATEGORY_AVERAGE' | 'NEEDS_REVIEW' | 'HANDWRITTEN_DRAFT' | 'MANUAL_CONFIRMED' | null;
 
   @Column({ type: 'text', nullable: true })
   cmtPriceNote: string | null;
