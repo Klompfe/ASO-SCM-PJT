@@ -5,8 +5,11 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  ManyToMany,
+  JoinTable,
 } from 'typeorm';
 import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
+import { Item } from '../../items/entities/item.entity';
 
 @Entity('suppliers')
 export class Supplier {
@@ -41,6 +44,17 @@ export class Supplier {
 
   @OneToMany(() => PurchaseOrder, (po) => po.supplier)
   purchaseOrders?: PurchaseOrder[];
+
+  // PR-171: 이 업체가 주로 취급하는 품목(주요품목) — 발주/BOM을 거치지 않고도
+  // 참고용으로 바로 확인할 수 있게 다대다로 직접 연결한다. 조인 테이블 이름/컬럼명을
+  // 명시해 마이그레이션(수기 SQL)이 TypeORM 기본 네이밍에 의존하지 않도록 한다.
+  @ManyToMany(() => Item)
+  @JoinTable({
+    name: 'supplier_main_items',
+    joinColumn: { name: 'supplierId', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'itemId', referencedColumnName: 'id' },
+  })
+  mainItems?: Item[];
 
   @CreateDateColumn()
   createdAt: Date;
