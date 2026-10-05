@@ -12,7 +12,6 @@ import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
-import { BomItem } from '../boms/entities/bom-item.entity';
 import { resolveOptionalPagination } from '../common/dto/optional-pagination-query.dto';
 
 @Injectable()
