@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import toast from 'react-hot-toast';
 import {
   getPurchaseOrders,
@@ -8,6 +8,7 @@ import {
   type CreatePurchaseOrder,
   type PurchaseOrder,
   getPurchaseOrderDocument,
+  type PurchaseOrderLine,
 } from '../api/purchaseOrders.service';
 import { downloadBase64File } from '../utils/fileDownload';
 import { getSuppliers } from '../api/suppliers.service';
@@ -15,7 +16,7 @@ import { getItems, getItem } from '../api/items.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
-import { pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, buildEditableOrderByItem, isUnitPriceRequired, type SupplierRef } from '../utils/purchaseOrderForm';
+import { pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, buildEditableOrderByItem, isUnitPriceRequired, sumPurchaseOrderLines, type SupplierRef } from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
@@ -36,6 +37,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newPo, setNewPo] = useState<CreatePurchaseOrder>(emptyForm);
+  // PR-176: 색상/사이즈별 상세 줄. 비어 있으면 기존처럼 총수량을 직접 입력한다(하위호환).
+  const [poLines, setPoLines] = useState<PurchaseOrderLine[]>([]);
   // PR-126: 공급업체/품목은 <select>(최초 100개만 불러와 그 밖의 품목은 선택 불가)가 아니라 서버 검색 선택이다.
   const [supplier, setSupplier] = useState<SupplierRef | null>(null);
   const [item, setItem] = useState<ItemRef | null>(null);
@@ -178,11 +181,21 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setError('품목 단가를 입력해 주세요.');
       return;
     }
+    const hasLines = poLines.length > 0;
+    if (hasLines && poLines.some((l) => !Number.isInteger(Number(l.qty)) || Number(l.qty) < 1)) {
+      setError('색상/사이즈 줄의 수량은 1 이상의 정수여야 합니다.');
+      return;
+    }
     try {
-      // CMT 건에서 단가를 비워둔 경우(0) null로 보낸다 — "입력 안 함"과 "0원"을 구분한다.
+      // CMT 건에서 단가를 비워둔 경우(0) undefined로 보낸다 — "입력 안 함"과 "0원"을 구분한다.
       const unitPrice = newPo.unitPrice && newPo.unitPrice > 0 ? newPo.unitPrice : undefined;
-      await createPurchaseOrder({ ...newPo, unitPrice, supplierId: supplier.id, itemId: item.id });
+      const payload = hasLines
+        ? { ...newPo, unitPrice, quantity: undefined, lines: poLines.map((l) => ({ color: l.color || undefined, size: l.size || undefined, qty: Number(l.qty) })), supplierId: supplier.id, itemId: item.id }
+        : { ...newPo, unitPrice, lines: undefined, supplierId: supplier.id, itemId: item.id };
+      const res = await createPurchaseOrder(payload);
+      (res?.warnings ?? []).forEach((w: string) => toast(w, { icon: '⚠️' }));
       toast.success('발주가 생성되었습니다.');
+      setPoLines([]);
       setNewPo(emptyForm);
       setSupplier(null);
       setItem(null);
@@ -298,7 +311,16 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           </div>
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">수량</label>
-            <input type="number" min={1} className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.quantity} onChange={(e) => setNewPo({ ...newPo, quantity: Number(e.target.value) })} aria-label="수량" />
+            <input
+              type="number"
+              min={1}
+              className="border border-gray-300 rounded px-3 py-2 w-32 disabled:bg-gray-100"
+              value={poLines.length > 0 ? sumPurchaseOrderLines(poLines) : newPo.quantity}
+              readOnly={poLines.length > 0}
+              title={poLines.length > 0 ? '색상/사이즈 줄 합계로 자동 계산됩니다' : undefined}
+              onChange={(e) => setNewPo({ ...newPo, quantity: Number(e.target.value) })}
+              aria-label="수량"
+            />
           </div>
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">
@@ -319,6 +341,22 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700" disabled={loading}>발주 생성</button>
         </div>
         {autofillNote && <p className="text-xs text-blue-700" data-testid="autofill-note">{autofillNote}</p>}
+        {/* PR-176: 색상/사이즈별 상세 — 접었다 펼친다. 줄이 하나라도 있으면 수량은 줄 합계로 계산된다. */}
+        <details className="border border-gray-200 rounded p-2 bg-white" open={poLines.length > 0}>
+          <summary className="cursor-pointer text-sm text-gray-700">색상/사이즈별 상세 (선택){poLines.length > 0 ? ` — ${poLines.length}줄, 합계 ${sumPurchaseOrderLines(poLines)}` : ''}</summary>
+          <div className="mt-2 space-y-2">
+            {poLines.map((l, idx) => (
+              <div key={idx} className="flex flex-wrap gap-2 items-center">
+                <input className="border border-gray-300 rounded px-2 py-1 w-32" placeholder="색상(자유입력)" aria-label={`색상 ${idx + 1}`} value={l.color ?? ''} onChange={(e) => setPoLines(poLines.map((x, i) => (i === idx ? { ...x, color: e.target.value } : x)))} />
+                <input className="border border-gray-300 rounded px-2 py-1 w-28" placeholder="사이즈(자유입력)" aria-label={`사이즈 ${idx + 1}`} value={l.size ?? ''} onChange={(e) => setPoLines(poLines.map((x, i) => (i === idx ? { ...x, size: e.target.value } : x)))} />
+                <input type="number" min={1} className="border border-gray-300 rounded px-2 py-1 w-24" placeholder="수량" aria-label={`수량 ${idx + 1}`} value={l.qty || ''} onChange={(e) => setPoLines(poLines.map((x, i) => (i === idx ? { ...x, qty: Number(e.target.value) } : x)))} />
+                <button type="button" className="text-red-600 text-sm" onClick={() => setPoLines(poLines.filter((_, i) => i !== idx))}>삭제</button>
+              </div>
+            ))}
+            <button type="button" className="text-blue-600 text-sm" onClick={() => setPoLines([...poLines, { color: '', size: '', qty: 0 }])}>+ 줄 추가</button>
+            {poLines.length > 0 && <p className="text-xs text-gray-500">줄 합계 {sumPurchaseOrderLines(poLines)}개가 발주 수량이 됩니다.</p>}
+          </div>
+        </details>
       </form>
 
       <div className="flex flex-wrap gap-4 items-end bg-gray-50 p-4 rounded-lg">
@@ -370,7 +408,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           </thead>
           <tbody className="divide-y divide-gray-200">
             {purchaseOrders.map((po) => (
-              <tr key={po.id} className="hover:bg-gray-50">
+              <Fragment key={po.id}>
+              <tr className="hover:bg-gray-50">
                 <td className="px-4 py-2">{po.item?.name ?? `#${po.itemId}`}</td>
                 <td className="px-4 py-2 text-right">{po.quantity}</td>
                 <td className="px-4 py-2 text-right">
@@ -403,6 +442,14 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                   <button className="text-purple-600" onClick={() => setPackingReceiptsFor(po)}>포장내역</button>
                 </td>
               </tr>
+              {po.lines && po.lines.length > 0 && (
+                <tr className="bg-gray-50 text-xs text-gray-600">
+                  <td className="px-4 py-1" colSpan={8}>
+                    색상/사이즈별: {po.lines.map((l, i) => <span key={i} className="mr-3">{l.color || '-'}/{l.size || '-'} × {l.qty}</span>)}
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>

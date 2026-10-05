@@ -22,7 +22,24 @@ export class PurchaseOrdersService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async create(dto: CreatePurchaseOrderDto): Promise<PurchaseOrder> {
+  // PR-176: 라인이 있으면 총수량 = 라인 합계. 라인이 없으면 quantity를 필수로 쓴다(기존 동작).
+  // 라인과 quantity가 둘 다 오고 값이 다르면 경고로 알리고 라인 합계를 쓴다(조용히 틀리지 않게).
+  async create(dto: CreatePurchaseOrderDto): Promise<PurchaseOrder & { warnings: string[] }> {
+    const lines = dto.lines ?? [];
+    const warnings: string[] = [];
+    let quantity: number;
+    if (lines.length > 0) {
+      quantity = lines.reduce((sum, l) => sum + l.qty, 0);
+      if (dto.quantity !== undefined && dto.quantity !== quantity) {
+        warnings.push(`입력한 총수량(${dto.quantity})과 색상/사이즈 라인 합계(${quantity})가 달라 라인 합계로 저장했습니다.`);
+      }
+    } else {
+      if (dto.quantity === undefined) {
+        throw new BadRequestException('색상/사이즈 라인이 없으면 주문 수량(quantity)을 입력해야 합니다.');
+      }
+      quantity = dto.quantity;
+    }
+
     const supplier = await this.dataSource.getRepository(Supplier).findOne({
       where: { id: dto.supplierId },
     });
@@ -38,14 +55,16 @@ export class PurchaseOrdersService {
     }
 
     const po = this.poRepository.create({
-      quantity: dto.quantity,
+      quantity,
       unitPrice: dto.unitPrice,
       notes: dto.notes,
       supplier,
       item,
+      lines: lines.map((l) => ({ color: l.color ?? null, size: l.size ?? null, qty: l.qty })),
     });
 
-    return await this.poRepository.save(po);
+    const saved = await this.poRepository.save(po);
+    return Object.assign(saved, { warnings });
   }
 
   // PR-173: 발주 생성 폼이 선택된 품목의 스타일 생산유형(CMT/FOB)을 알아야
@@ -77,6 +96,7 @@ export class PurchaseOrdersService {
       .leftJoinAndSelect('po.supplier', 'supplier')
       .leftJoinAndSelect('po.item', 'item')
       .leftJoinAndSelect('po.shipment', 'shipment')
+      .leftJoinAndSelect('po.lines', 'lines')
       .orderBy('po.id', 'DESC');
 
     if (filter?.status) {
@@ -125,7 +145,7 @@ export class PurchaseOrdersService {
   async findOne(id: number): Promise<PurchaseOrder> {
     const po = await this.poRepository.findOne({
       where: { id },
-      relations: ['supplier', 'item', 'shipment'],
+      relations: ['supplier', 'item', 'shipment', 'lines'],
     });
     if (!po) {
       throw new NotFoundException(`ID가 ${id}인 구매 주문을 찾을 수 없습니다.`);
