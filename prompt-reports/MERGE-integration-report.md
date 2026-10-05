@@ -213,12 +213,54 @@ MERGE-1 작업 때 이미 integration 브랜치에 병합됨). MERGE-3 지시서
 
 병합 커밋: `e32262c`(B/C 통합 수정). 통합 브랜치 최신 HEAD: `e32262c`(푸시 완료 예정).
 
+## MERGE-4: PR-182 병합 + main 반영 전 점검
+
+### PR-182 병합
+
+`git merge --no-ff origin/feat/invoice-thread-tape-price-conversion` — **충돌 없음**(자동 병합).
+마이그레이션 `1791400000000-AddExportLineMaterialSubTypeAndPriceBasisNote`을 포함합니다(이미 이
+개발 DB에 적용돼 있어 재실행하지 않음 — 아래 마이그레이션 상태 참고). 병합 커밋: `173a6c4`.
+
+### 검증 결과
+
+- `npm run build`: OK. `npx jest`: 694 pass(이전 673 + PR-182의 21건).
+- 프론트 `tsc -b`: OK. `npx vitest run`: 276 pass(이전 272 + PR-182의 4건).
+- **전체 e2e(`npm run test:e2e`): 61 suites / 456 tests, 전부 pass**
+  (`invoice-thread-tape-price-conversion-flow` 포함).
+
+### 반영 전 확인(1단계)
+
+- `origin/main`은 MERGE-1 시작 시점(`117e698`) 이후 제가 직접 수행한 PR-175 병합(`85aeb18`) 외에는
+  움직이지 않았고, 그 커밋은 이미 `integration/pr171-182`의 조상입니다 — 추가로 합칠 `origin/main`
+  커밋이 없습니다.
+- 마이그레이션 번호: `1791000000000 < 1791100000000 < 1791200000000 < 1791300000000 <
+  1791400000000` — 중복 없이 오름차순 확인(176 번호는 MERGE-3 결정대로 유지).
+
+### 마이그레이션 적용 상태(읽기 전용 확인, `typeorm migration:show`)
+
+이 저장소의 `.env`가 연결된 Neon DB(`neondb`, 호스트 앞부분 `ep-soft-sound-b3lvd0...`)에서
+`[X] 33 AddSupplierMainItems1791000000000` / `[X] 34 AddMaterialPackagingUnitRulesAndTapeType1791100000000`
+/ `[X] 35 AddPurchaseOrderLines1791200000000` / `[X] 38 AddPurchaseOrderOrderType1791300000000` /
+`[X] 37 AddExportLineMaterialSubTypeAndPriceBasisNote1791400000000` — **5개 모두 이미 실행됨**으로
+기록돼 있습니다. 즉 지시서 2번 항목의 지적대로, main 푸시 후 배포 시 `migration:run:prod`는
+"No migrations are pending"로 아무것도 하지 않을 가능성이 높습니다.
+
+### 운영 DB 여부 — 제시님 확인 필요(차단 중)
+
+지시서는 "이 저장소의 `.env`가 운영 Neon DB를 직접 가리킨다(프로젝트 헌장 PR-127)"고 전제했지만,
+이 저장소에 "프로젝트 헌장" 문서가 없고 git 이력의 PR-127은 조회 UI 작업(검색 select 적용)으로
+DB 설정과 무관합니다 — 이 근거는 확인되지 않았습니다. 다만 핵심 질문(로컬 `.env`와 Render 배포가
+같은 DB를 가리키는지)은 근거와 무관하게 중요해 그대로 확인이 필요합니다. 로컬 DB 호스트 앞부분은
+`ep-soft-sound-b3lvd0...`입니다 — **Render에 설정된 DB 호스트 앞부분이 이것과 같은지** 확인해
+주시고, 같다면 Neon 백업(브랜치/시점 복구 지점) 생성 여부도 함께 알려주세요. 답을 받기 전까지는
+`main` 반영(3단계)을 진행하지 않습니다.
+
 ## 다음 단계
 
-MERGE-4의 "운영 DB 보호" 확인(백업 여부)을 제시님께 별도로 여쭙고 응답을 기다린 뒤 `main`에
+위 운영 DB 확인(호스트 일치 여부 + 백업 여부)에 대한 제시님의 답을 기다린 뒤 `main`에
 fast-forward 병합합니다. 이 보고서는 그 반영 후 최종 SHA/CI 결과로 업데이트합니다.
 
 ### 후속 작업 메모
 
 - 발주서(PR-178) 엑셀이 색상/사이즈 줄을 출력하지 않음 — `purchase-order-document.service.ts`에서
-  실제 `po.lines`를 document context에 연결하는 작업 필요(위 C.4 참고).
+  실제 `po.lines`를 document context에 연결하는 작업 필요(MERGE-3 C.4 참고).
