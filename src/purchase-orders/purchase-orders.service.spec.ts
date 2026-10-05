@@ -4,6 +4,7 @@ import { DataSource, Repository } from 'typeorm';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseOrder, PurchaseOrderStatus } from './entities/purchase-order.entity';
+import { PurchaseOrderLine } from './entities/purchase-order-line.entity';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
@@ -114,6 +115,66 @@ describe('PurchaseOrdersService', () => {
     it('RECEIVED/CANCELLED 발주는 BadRequestException으로 막는다', async () => {
       jest.spyOn(service, 'findOne').mockResolvedValue({ id: 2, status: 'RECEIVED', quantity: 10 } as any);
       await expect(service.update(2, { quantity: 99 })).rejects.toThrow(BadRequestException);
+    });
+
+    // MERGE-3(PR-176×177): lines를 보내면 전체 교체 + quantity 재계산.
+    describe('lines 전체 교체', () => {
+      const mockLineRepo = { delete: jest.fn().mockResolvedValue({}) };
+
+      beforeEach(() => {
+        mockDataSource.getRepository.mockImplementation((entity: any) =>
+          entity === PurchaseOrderLine ? mockLineRepo : {},
+        );
+      });
+
+      it('lines를 보내면 기존 줄을 지우고 새 줄로 교체하며, quantity는 줄 합계로 저장된다', async () => {
+        jest.spyOn(service, 'findOne').mockResolvedValue({ id: 3, status: 'PENDING', quantity: 10, unitPrice: 5, notes: null, lines: [] } as any);
+        jest.spyOn(poRepository, 'save').mockImplementation((po: any) => Promise.resolve(po));
+
+        const result = await service.update(3, { lines: [{ color: 'BLACK', qty: 10 }, { color: 'WHITE', qty: 20 }] });
+
+        expect(mockLineRepo.delete).toHaveBeenCalledWith({ purchaseOrderId: 3 });
+        expect(result.quantity).toBe(30);
+        expect(result.lines).toHaveLength(2);
+        expect(result.warnings).toEqual([]);
+      });
+
+      it('입력한 총수량이 줄 합계와 다르면 합계로 저장하고 경고를 남긴다', async () => {
+        jest.spyOn(service, 'findOne').mockResolvedValue({ id: 4, status: 'PENDING', quantity: 10, unitPrice: 5, notes: null, lines: [] } as any);
+        jest.spyOn(poRepository, 'save').mockImplementation((po: any) => Promise.resolve(po));
+
+        const result = await service.update(4, { quantity: 99, lines: [{ color: 'BLACK', qty: 10 }] });
+
+        expect(result.quantity).toBe(10);
+        expect(result.warnings[0]).toContain('라인 합계');
+      });
+
+      it('lines를 빈 배열로 보내면(줄을 전부 지움) 줄이 비워지고, quantity가 함께 오면 그 값으로 저장된다', async () => {
+        jest.spyOn(service, 'findOne').mockResolvedValue({
+          id: 5, status: 'PENDING', quantity: 30, unitPrice: 5, notes: null,
+          lines: [{ id: 1, color: 'BLACK', qty: 30 }],
+        } as any);
+        jest.spyOn(poRepository, 'save').mockImplementation((po: any) => Promise.resolve(po));
+
+        const result = await service.update(5, { quantity: 50, lines: [] });
+
+        expect(mockLineRepo.delete).toHaveBeenCalledWith({ purchaseOrderId: 5 });
+        expect(result.lines).toEqual([]);
+        expect(result.quantity).toBe(50);
+      });
+
+      it('lines를 아예 보내지 않으면 줄을 건드리지 않는다(기존 동작과 동일)', async () => {
+        jest.spyOn(service, 'findOne').mockResolvedValue({
+          id: 6, status: 'PENDING', quantity: 30, unitPrice: 5, notes: null,
+          lines: [{ id: 1, color: 'BLACK', qty: 30 }],
+        } as any);
+        jest.spyOn(poRepository, 'save').mockImplementation((po: any) => Promise.resolve(po));
+
+        const result = await service.update(6, { unitPrice: 7 });
+
+        expect(mockLineRepo.delete).not.toHaveBeenCalled();
+        expect(result.unitPrice).toBe(7);
+      });
     });
   });
 

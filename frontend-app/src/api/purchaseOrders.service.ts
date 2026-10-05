@@ -69,9 +69,10 @@ export const updatePurchaseOrderStatus = (
 ): Promise<any> => apiClient.patch(`/purchase-orders/${id}/status`, { status });
 
 // PR-177: 미입고(PENDING) 발주 수정 — 수량/단가/비고.
+// MERGE-3: lines를 보내면 기존 줄을 전부 교체하고 quantity를 줄 합계로 다시 계산한다(서버).
 export const updatePurchaseOrder = (
   id: number,
-  data: { quantity?: number; unitPrice?: number; notes?: string },
+  data: { quantity?: number; unitPrice?: number; notes?: string; lines?: PurchaseOrderLine[] },
 ): Promise<any> => apiClient.patch(`/purchase-orders/${id}`, data);
 
 // PR-179: 일괄발주 — 미리보기에서 확인된 행들을 한 번에 생성(서버는 하나라도 틀리면 전부 취소).

@@ -84,7 +84,7 @@ export class PurchaseOrdersController {
   @Patch(':id')
   @ApiOperation({ summary: '미입고(PENDING) 발주 수량/단가/비고 수정' })
   @ApiResponse({ status: 200, type: PurchaseOrder })
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePurchaseOrderDto): Promise<PurchaseOrder> {
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePurchaseOrderDto): Promise<PurchaseOrder & { warnings: string[] }> {
     return this.poService.update(id, dto);
   }
 

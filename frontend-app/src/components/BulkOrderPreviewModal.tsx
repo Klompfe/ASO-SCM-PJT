@@ -118,6 +118,8 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
         <p className="text-sm text-gray-500">
           내용을 확인하고 고친 뒤 <b>일괄 생성</b>을 누르면 한 번에 발주가 만들어집니다. 하나라도 틀리면 아무것도 생성되지 않습니다.
         </p>
+        {/* MERGE-3: 일괄발주는 색상/사이즈 줄을 지원하지 않는다 — 줄이 필요하면 생성 후 수정하기에서 추가. */}
+        <p className="text-xs text-gray-400">색상/사이즈별로 나눠야 하는 자재는 일단 총수량으로 발주한 뒤, 발주 목록의 "수정하기"에서 줄을 추가해 주세요.</p>
         {drafts === null ? (
           <p className="text-sm text-gray-500">후보 공급업체와 최근 단가를 불러오는 중...</p>
         ) : (

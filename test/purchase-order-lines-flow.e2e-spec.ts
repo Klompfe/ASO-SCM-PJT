@@ -87,4 +87,81 @@ describe('발주 색상/사이즈 라인 회귀 테스트 (PR-176)', () => {
     expect(withLines.length).toBeGreaterThan(0);
     expect(withoutLines.length).toBeGreaterThan(0);
   });
+
+  // MERGE-3(PR-176×177): "수정하기"로 줄을 바꿀 수 있어야 한다.
+  describe('수정하기(PATCH)로 색상/사이즈 라인 바꾸기 (PR-177 통합)', () => {
+    it('기존 라인을 다른 라인으로 전체 교체하면 총수량도 새 합계로 바뀐다', async () => {
+      const created = await auth(request(app.getHttpServer()).post('/purchase-orders')).send({
+        supplierId, itemId, unitPrice: 5, quantity: 10,
+        lines: [{ color: 'BLACK', qty: 10 }],
+      }).expect(201);
+
+      const updated = await auth(request(app.getHttpServer()).patch(`/purchase-orders/${created.body.data.id}`)).send({
+        lines: [{ color: 'BLACK', qty: 4 }, { color: 'WHITE', qty: 6 }],
+      }).expect(200);
+      expect(updated.body.data.quantity).toBe(10);
+      expect(updated.body.data.warnings).toEqual([]);
+
+      const detail = await auth(request(app.getHttpServer()).get(`/purchase-orders/${created.body.data.id}`)).expect(200);
+      expect(detail.body.data.lines).toHaveLength(2);
+      expect(detail.body.data.lines.map((l: any) => l.color).sort()).toEqual(['BLACK', 'WHITE']);
+    });
+
+    it('라인 없는 발주에 처음으로 라인을 추가하면 총수량이 라인 합계로 바뀐다', async () => {
+      const created = await auth(request(app.getHttpServer()).post('/purchase-orders')).send({
+        supplierId, itemId, unitPrice: 5, quantity: 20,
+      }).expect(201);
+
+      const updated = await auth(request(app.getHttpServer()).patch(`/purchase-orders/${created.body.data.id}`)).send({
+        lines: [{ color: 'NAVY', qty: 12 }, { color: 'NAVY', size: 'L', qty: 8 }],
+      }).expect(200);
+      expect(updated.body.data.quantity).toBe(20);
+
+      const detail = await auth(request(app.getHttpServer()).get(`/purchase-orders/${created.body.data.id}`)).expect(200);
+      expect(detail.body.data.lines).toHaveLength(2);
+    });
+
+    it('라인이 있는 발주에서 lines를 빈 배열로 보내면 라인이 전부 지워진다', async () => {
+      const created = await auth(request(app.getHttpServer()).post('/purchase-orders')).send({
+        supplierId, itemId, unitPrice: 5, quantity: 15,
+        lines: [{ color: 'GREY', qty: 15 }],
+      }).expect(201);
+
+      await auth(request(app.getHttpServer()).patch(`/purchase-orders/${created.body.data.id}`)).send({
+        quantity: 25, lines: [],
+      }).expect(200);
+
+      const detail = await auth(request(app.getHttpServer()).get(`/purchase-orders/${created.body.data.id}`)).expect(200);
+      expect(detail.body.data.lines).toEqual([]);
+      expect(detail.body.data.quantity).toBe(25);
+    });
+
+    it('미입고(PENDING)가 아닌 발주는 라인을 포함해도 여전히 수정할 수 없다', async () => {
+      const created = await auth(request(app.getHttpServer()).post('/purchase-orders')).send({
+        supplierId, itemId, unitPrice: 5, quantity: 5, lines: [{ color: 'BLACK', qty: 5 }],
+      }).expect(201);
+      await auth(request(app.getHttpServer()).patch(`/purchase-orders/${created.body.data.id}/status`)).send({ status: 'RECEIVED' }).expect(200);
+
+      await auth(request(app.getHttpServer()).patch(`/purchase-orders/${created.body.data.id}`)).send({
+        lines: [{ color: 'WHITE', qty: 9 }],
+      }).expect(400);
+    });
+  });
+
+  // MERGE-3 D: 단가 없는 CMT 발주 + 색상/사이즈 줄 + 발주 구분(가발주)의 조합.
+  it('단가 없는 CMT 발주 + 색상/사이즈 줄 + 가발주 구분을 함께 생성/수정할 수 있다', async () => {
+    const created = await auth(request(app.getHttpServer()).post('/purchase-orders')).send({
+      supplierId, itemId, quantity: 20, orderType: 'PROVISIONAL',
+      lines: [{ color: 'BEIGE', qty: 12 }, { color: 'BEIGE', size: 'L', qty: 8 }],
+    }).expect(201);
+    expect(created.body.data.unitPrice).toBeNull();
+    expect(created.body.data.orderType).toBe('PROVISIONAL');
+    expect(created.body.data.quantity).toBe(20);
+
+    const updated = await auth(request(app.getHttpServer()).patch(`/purchase-orders/${created.body.data.id}`)).send({
+      lines: [{ color: 'BEIGE', qty: 20 }],
+    }).expect(200);
+    expect(updated.body.data.quantity).toBe(20);
+    expect(updated.body.data.unitPrice).toBeNull(); // unitPrice를 안 보냈으니 그대로 null 유지
+  });
 });

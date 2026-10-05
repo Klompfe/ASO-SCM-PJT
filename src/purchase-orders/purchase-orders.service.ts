@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { PurchaseOrder, PurchaseOrderStatus } from './entities/purchase-order.entity';
+import { PurchaseOrderLine } from './entities/purchase-order-line.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
 import { ProductionType } from '../styles/entities/style-overview.entity';
 import { OrderTypeSuggestion, suggestOrderType } from './utils/purchase-order-type.util';
@@ -120,6 +121,9 @@ export class PurchaseOrdersService {
 
   // PR-179: 일괄발주. 모든 행의 공급업체/품목을 먼저 확인해 하나라도 없으면 아무것도 쓰지 않고
   // 404로 끝낸다(절반만 생성되는 일을 막는다). 통과하면 한 트랜잭션으로 행마다 단건 생성과 같은 필드를 저장한다.
+  // MERGE-3(PR-176): 일괄발주는 색상/사이즈 줄(lines)을 받지 않는다(여러 자재를 한 번에
+  // 다루는 화면이라 자재마다 줄 입력까지 넣으면 미리보기가 너무 복잡해짐) — 줄이 필요한
+  // 건은 일괄발주로 만든 뒤 "수정하기"(update)에서 줄을 추가한다.
   async createBulk(dtos: CreatePurchaseOrderDto[]): Promise<PurchaseOrder[]> {
     const supplierIds = [...new Set(dtos.map((d) => d.supplierId))];
     const itemIds = [...new Set(dtos.map((d) => d.itemId))];
@@ -233,15 +237,37 @@ export class PurchaseOrdersService {
 
   // PR-177: 미입고(PENDING) 발주만 수정할 수 있다. 입고/취소된 발주는 이미 재고·거래에
   // 반영됐으므로 조용히 고치지 않고 400으로 막는다.
-  async update(id: number, dto: UpdatePurchaseOrderDto): Promise<PurchaseOrder> {
+  // MERGE-3(PR-176×177): lines를 보내면 기존 줄을 전부 교체한다 — @OneToMany({cascade:true})는
+  // 배열에 남은 줄만 upsert할 뿐 빠진 줄을 지우지 않으므로(orphanedRowAction 미설정), 교체
+  // 전에 기존 줄을 명시적으로 지운다. quantity는 create()와 같은 규칙으로 줄 합계로
+  // 다시 계산하고, 입력한 총수량과 다르면 경고만 남긴다(자동으로 더 조용히 틀리지 않게).
+  // lines를 생략하면 줄은 건드리지 않는다(기존 동작과 동일).
+  async update(id: number, dto: UpdatePurchaseOrderDto): Promise<PurchaseOrder & { warnings: string[] }> {
     const po = await this.findOne(id);
     if (po.status !== PurchaseOrderStatus.PENDING) {
       throw new BadRequestException(`미입고(PENDING) 상태인 발주만 수정할 수 있습니다. 현재 상태: ${po.status}`);
     }
-    if (dto.quantity !== undefined) po.quantity = dto.quantity;
+    const warnings: string[] = [];
+    if (dto.lines !== undefined) {
+      const newLines = dto.lines;
+      if (newLines.length > 0) {
+        const quantity = newLines.reduce((sum, l) => sum + l.qty, 0);
+        if (dto.quantity !== undefined && dto.quantity !== quantity) {
+          warnings.push(`입력한 총수량(${dto.quantity})과 색상/사이즈 라인 합계(${quantity})가 달라 라인 합계로 저장했습니다.`);
+        }
+        po.quantity = quantity;
+      } else if (dto.quantity !== undefined) {
+        po.quantity = dto.quantity; // 줄을 비워 "줄 없음"으로 되돌리면서 총수량도 함께 바꾸는 경우.
+      }
+      await this.dataSource.getRepository(PurchaseOrderLine).delete({ purchaseOrderId: id });
+      po.lines = newLines.map((l) => ({ color: l.color ?? null, size: l.size ?? null, qty: l.qty }) as PurchaseOrderLine);
+    } else if (dto.quantity !== undefined) {
+      po.quantity = dto.quantity;
+    }
     if (dto.unitPrice !== undefined) po.unitPrice = dto.unitPrice;
     if (dto.notes !== undefined) po.notes = dto.notes;
-    return await this.poRepository.save(po);
+    const saved = await this.poRepository.save(po);
+    return Object.assign(saved, { warnings });
   }
 
   async updateStatus(id: number, dto: UpdatePurchaseOrderStatusDto): Promise<PurchaseOrder> {
