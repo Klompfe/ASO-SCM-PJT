@@ -67,7 +67,7 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
     expect(outcome.results).toEqual([
       {
         ...fakeParsedResult[0],
-        overview: { ...fakeParsedResult[0].overview, targetRddSuspicious: false, handwrittenCmtPriceCandidate: null, cmtPrice: null },
+        overview: { ...fakeParsedResult[0].overview, targetRddSuspicious: false, handwrittenCmtPriceCandidate: null, handwrittenCmtPriceMemo: null, cmtPrice: null },
       },
     ]);
     expect(outcome.usage).toEqual({ pageCount: 1, promptTokens: 100, outputTokens: 200 });
@@ -188,5 +188,29 @@ describe('VisionService.analyzeSalesOrder — 미도 전용 수기 CMT단가 후
     });
     const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
     expect(outcome.results[0].overview.cmtPrice).toBeNull();
+  });
+
+  // PR-181: handwrittenCmtPriceMemo(수기 표기 원문, 계산식이면 식 전체)도 candidate와
+  // 같은 미도 가드를 받는다 — 계산식 예시("7,270 + 230 = 7,500")로 candidate=합계,
+  // memo=식 원문이 그대로 보존되는지까지 함께 확인한다.
+  it('바이어가 미도면 계산식 메모(handwrittenCmtPriceMemo)를 원문 그대로 둔다(candidate는 합계)', async () => {
+    const service = await buildServiceWithFakeResponse({
+      styleNo: 'S', styleName: null, itemType: null, brand: null, productionType: null, factory: null,
+      buyer: '미도컴퍼니', totalQty: null, targetRdd: null, documentDate: null,
+      handwrittenCmtPriceCandidate: 7500, handwrittenCmtPriceMemo: '7,270 + 230 = 7,500',
+    });
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].overview.handwrittenCmtPriceCandidate).toBe(7500);
+    expect(outcome.results[0].overview.handwrittenCmtPriceMemo).toBe('7,270 + 230 = 7,500');
+  });
+
+  it('바이어가 미도가 아니면 handwrittenCmtPriceMemo도 강제로 null로 덮어쓴다', async () => {
+    const service = await buildServiceWithFakeResponse({
+      styleNo: 'S', styleName: null, itemType: null, brand: null, productionType: null, factory: null,
+      buyer: '빈폴코리아', totalQty: null, targetRdd: null, documentDate: null,
+      handwrittenCmtPriceCandidate: 9999, handwrittenCmtPriceMemo: '9,999',
+    });
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].overview.handwrittenCmtPriceMemo).toBeNull();
   });
 });

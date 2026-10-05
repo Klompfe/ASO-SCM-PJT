@@ -32,6 +32,14 @@ export class AiOverviewDto {
   @IsNumber()
   handwrittenCmtPriceCandidate?: number | null;
 
+  // PR-181: 미도 전용 — handwrittenCmtPriceCandidate와 짝을 이루는, 수기 표기를 보이는
+  // 그대로 옮긴 문자열(계산식이면 식 전체). 검토 화면 코멘트 입력칸의 기본값으로만 쓰이고,
+  // 그 자체로 저장되지는 않는다(실제 저장 대상은 사람이 확정한 cmtPriceNote).
+  @ApiPropertyOptional({ description: '미도 전용: 작지 상단 수기 표기 원문(AI 추출, 코멘트칸 기본값)' })
+  @IsOptional()
+  @IsString()
+  handwrittenCmtPriceMemo?: string | null;
+
   // 화면에서 사람이 확인/수정한 최종 CMT단가 — commitAnalysis가 이 값만 StyleOverview/
   // Contract.cmtPrice에 반영한다. handwrittenCmtPriceCandidate와 달리 AI가 채우는
   // 필드가 아니다(기본은 비어 있고, "이 값 사용" 버튼을 눌러야 후보값이 여기로 복사된다).
@@ -39,6 +47,13 @@ export class AiOverviewDto {
   @IsOptional()
   @IsNumber()
   cmtPrice?: number | null;
+
+  // PR-181: cmtPrice의 근거 코멘트(초안 상태로 Contract.cmtPriceNote까지 전달된다).
+  // 검토 화면에서 handwrittenCmtPriceMemo로 미리 채워지지만 사람이 고칠 수 있다.
+  @ApiPropertyOptional({ description: 'CMT단가 코멘트(초안 근거, 저장 대상)' })
+  @IsOptional()
+  @IsString()
+  cmtPriceNote?: string | null;
 }
 
 export class AiBomItemDto {

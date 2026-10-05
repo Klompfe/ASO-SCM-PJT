@@ -64,6 +64,9 @@ export class SalesOrdersService {
         // PR-168: 미도 전용 수기 CMT단가 — 검토 화면에서 사람이 확인/수정한 값만
         // 넘어온다(handwrittenCmtPriceCandidate는 후보 표시용일 뿐 저장 대상이 아님).
         cmtPrice: result.overview.cmtPrice ?? undefined,
+        // PR-181: 위 cmtPrice의 근거 코멘트(수기 초안이면 식 원문 등) — StyleOverview에는
+        // 저장하지 않고, 아래에서 Contract.cmtPriceNote로만 전달한다.
+        cmtPriceNote: result.overview.cmtPriceNote ?? undefined,
       },
       bomItems: result.bomItems.map((b) => ({
         category: b.category ?? undefined,
@@ -87,6 +90,16 @@ export class SalesOrdersService {
       .findOne({ where: { styleNo }, relations: ['overview'] });
     const overview = style?.overview;
 
+    // PR-181: 미도 수기 CMT단가 초안 — 이 화면에서 cmtPrice는 AI가 채우는 값이 아니라
+    // 오직 사람이 입력한 초안이다(vision.service.ts 가드가 AI 결과의 cmtPrice를 항상 null로
+    // 비운다). 그래서 이번 요청이 cmtPrice를 보냈고 그 값이 실제로 StyleOverview에 반영됐으면
+    // (mergeOverview가 CMT_PRICE_MISMATCH로 막지 않았으면) 이 계약을 HANDWRITTEN_DRAFT로
+    // 표시해 승인 시점에 담당 관리자가 금액을 확인·입력하도록 강제한다(안전모드).
+    const isHandwrittenDraft =
+      result.overview.cmtPrice != null &&
+      overview?.cmtPrice != null &&
+      Number(overview.cmtPrice) === Number(result.overview.cmtPrice);
+
     const contractRepository = this.dataSource.getRepository(Contract);
     const contract = contractRepository.create({
       styleNo,
@@ -98,6 +111,8 @@ export class SalesOrdersService {
       productionType: overview?.productionType ?? null,
       cmtPrice: overview?.cmtPrice ?? null,
       fobPrice: overview?.fobPrice ?? null,
+      cmtPriceConfidence: isHandwrittenDraft ? 'HANDWRITTEN_DRAFT' : null,
+      cmtPriceNote: isHandwrittenDraft ? (result.overview.cmtPriceNote ?? null) : null,
     });
     await contractRepository.save(contract);
 

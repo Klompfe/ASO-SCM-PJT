@@ -71,6 +71,13 @@ export class CommitOverviewDto {
   @IsOptional()
   @IsNumber()
   cmtPrice?: number;
+
+  // PR-181: 미도 수기 CMT단가 초안의 근거 코멘트 — StyleOverview에는 저장 칸이 없고,
+  // SalesOrdersService.commitAnalysis()가 이 값을 그대로 읽어 Contract.cmtPriceNote로 넘긴다.
+  @ApiPropertyOptional({ description: 'CMT단가 코멘트(수기 초안 근거)', example: '작지 수기: 7,270 + 230 = 7,500' })
+  @IsOptional()
+  @IsString()
+  cmtPriceNote?: string;
 }
 
 export class CommitBomItemDto {

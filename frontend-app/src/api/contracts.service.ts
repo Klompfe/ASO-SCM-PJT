@@ -3,7 +3,8 @@ import apiClient from './client';
 export type ContractStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'SUPERSEDED';
 export type ProductionType = 'FOB' | 'CMT';
 export type SalesMarket = 'DOMESTIC' | 'CHINA';
-export type CmtPriceConfidence = 'EXACT_STYLE_MATCH' | 'BRAND_CATEGORY_AVERAGE' | 'NEEDS_REVIEW';
+// PR-181: HANDWRITTEN_DRAFT(미도 수기 초안, 승인 시 확정 필요) / MANUAL_CONFIRMED(승인자가 확정) 추가.
+export type CmtPriceConfidence = 'EXACT_STYLE_MATCH' | 'BRAND_CATEGORY_AVERAGE' | 'NEEDS_REVIEW' | 'HANDWRITTEN_DRAFT' | 'MANUAL_CONFIRMED';
 
 export interface Contract {
   id: number;
@@ -50,7 +51,8 @@ export const getContractApprovalContext = (id: number): Promise<ContractApproval
 
 // PR-167: 빈폴/에잇세컨즈는 salesMarket 없이 호출하면 서버가 400으로 거부한다
 // (안전모드 — 자동 추론 금지). 그 외 브랜드는 생략 가능(기존 동작 유지).
-export const approveContract = (id: number, overrides?: { salesMarket?: SalesMarket; productionType?: ProductionType }): Promise<any> =>
+// PR-181: 계약이 HANDWRITTEN_DRAFT면 cmtPrice를 반드시 보내야 서버가 승인한다.
+export const approveContract = (id: number, overrides?: { salesMarket?: SalesMarket; productionType?: ProductionType; cmtPrice?: number; cmtPriceNote?: string }): Promise<any> =>
   apiClient.patch(`/contracts/${id}/approve`, overrides ?? {});
 
 export interface BulkApproveResult {

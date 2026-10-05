@@ -85,6 +85,10 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
   const [approvalContextByContractId, setApprovalContextByContractId] = useState<Record<number, ContractApprovalContext>>({});
   const [salesMarketDraft, setSalesMarketDraft] = useState<Record<number, SalesMarket | ''>>({});
   const [productionTypeDraft, setProductionTypeDraft] = useState<Record<number, ContractProductionType | ''>>({});
+  // PR-181: 미도 수기 CMT단가 초안(HANDWRITTEN_DRAFT) 계약 승인 시 — 금액 입력란은
+  // 초안 값(c.cmtPrice)으로 미리 채우고 사람이 고칠 수 있게 한다(아래 렌더에서 ?? c.cmtPrice로 처리).
+  const [cmtPriceDraft, setCmtPriceDraft] = useState<Record<number, number | ''>>({});
+  const [cmtPriceNoteDraft, setCmtPriceNoteDraft] = useState<Record<number, string>>({});
 
   const [processStages, setProcessStages] = useState<OrderProcessStage[]>([]);
   const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness | null>(null);
@@ -396,9 +400,25 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
       return;
     }
 
+    // PR-181: 미도 수기 CMT단가 초안은 승인 시 금액을 반드시 다시 확인·입력해야 한다
+    // (서버도 동일하게 막지만, 화면에서 먼저 막는다 — 안전모드 이중 방어).
+    const isHandwrittenDraft = contract.cmtPriceConfidence === 'HANDWRITTEN_DRAFT';
+    const cmtPriceOverride = cmtPriceDraft[contract.id] !== undefined && cmtPriceDraft[contract.id] !== ''
+      ? Number(cmtPriceDraft[contract.id])
+      : (isHandwrittenDraft ? contract.cmtPrice ?? undefined : undefined);
+    if (isHandwrittenDraft && (cmtPriceOverride == null || Number.isNaN(cmtPriceOverride))) {
+      toast.error('수기 CMT단가 초안은 금액을 확인·입력해야 승인할 수 있습니다.');
+      return;
+    }
+
     setContractActionId(contract.id);
     try {
-      await approveContract(contract.id, { salesMarket: salesMarket as SalesMarket | undefined, productionType: productionType as ContractProductionType | undefined });
+      await approveContract(contract.id, {
+        salesMarket: salesMarket as SalesMarket | undefined,
+        productionType: productionType as ContractProductionType | undefined,
+        cmtPrice: isHandwrittenDraft ? (cmtPriceOverride as number) : undefined,
+        cmtPriceNote: isHandwrittenDraft ? (cmtPriceNoteDraft[contract.id] || undefined) : undefined,
+      });
       toast.success('계약이 승인되었습니다.');
       loadContracts(selectedStyle.styleNo);
     } catch (err: any) {
@@ -768,6 +788,13 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                         <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 ${CONTRACT_STATUS_CLASSES[c.status]}`}>
                           {CONTRACT_STATUS_LABELS[c.status]}
                         </span>
+                        {/* PR-181: 수기 CMT단가 초안/확정 배지 — 상태 배지와 별개로 금액의 신뢰도를 보여준다. */}
+                        {c.cmtPriceConfidence === 'HANDWRITTEN_DRAFT' && (
+                          <span className="inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 bg-yellow-100 text-yellow-800">수기 초안</span>
+                        )}
+                        {c.cmtPriceConfidence === 'MANUAL_CONFIRMED' && (
+                          <span className="inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 bg-emerald-100 text-emerald-800">확정(수기 단가)</span>
+                        )}
                         {new Date(c.issuedAt).toLocaleString()} {c.notes ? `— ${c.notes}` : ''}
                         {c.totalQty != null && <span className="text-gray-500"> (수량 {c.totalQty}{c.targetRdd ? `, 납기 ${c.targetRdd}` : ''})</span>}
                       </div>
@@ -775,7 +802,7 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                         <div className="flex gap-1 shrink-0">
                           <button
                             onClick={() => handleApproveContract(c)}
-                            disabled={contractActionId === c.id}
+                            disabled={contractActionId === c.id || (c.cmtPriceConfidence === 'HANDWRITTEN_DRAFT' && (cmtPriceDraft[c.id] ?? c.cmtPrice ?? '') === '')}
                             className="bg-green-600 text-white px-2 py-1 rounded text-xs disabled:opacity-50"
                           >승인</button>
                           <button
@@ -826,6 +853,31 @@ export const StylesManager: React.FC<StylesManagerProps> = ({ initialStyleNo, on
                           <option value="CMT">CMT</option>
                           <option value="FOB">FOB</option>
                         </select>
+                      </div>
+                    )}
+                    {/* PR-181: 수기 CMT단가 초안 — 승인 전 금액을 다시 확인·입력해야 한다(안전모드). */}
+                    {showApprovalInputs && c.cmtPriceConfidence === 'HANDWRITTEN_DRAFT' && (
+                      <div className="mt-1 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 space-y-1" data-testid={`cmt-price-confirm-${c.id}`}>
+                        <p className="text-xs text-yellow-800">수기 CMT단가 초안: <b>{c.cmtPrice ?? '-'}</b> — 아래에서 금액을 확인·입력 후 승인하세요.</p>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            step="any"
+                            aria-label={`CMT단가 확정 (계약 #${c.id})`}
+                            className="border rounded text-xs px-1 py-0.5 w-28"
+                            value={cmtPriceDraft[c.id] ?? c.cmtPrice ?? ''}
+                            onChange={(e) => setCmtPriceDraft((prev) => ({ ...prev, [c.id]: e.target.value === '' ? '' : Number(e.target.value) }))}
+                          />
+                          <input
+                            type="text"
+                            aria-label={`CMT단가 승인 코멘트 (계약 #${c.id})`}
+                            className="border rounded text-xs px-1 py-0.5 flex-1"
+                            placeholder="승인 코멘트(선택)"
+                            value={cmtPriceNoteDraft[c.id] ?? ''}
+                            onChange={(e) => setCmtPriceNoteDraft((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                          />
+                        </div>
+                        {c.cmtPriceNote && <p className="text-xs text-gray-500">기존 코멘트: {c.cmtPriceNote}</p>}
                       </div>
                     )}
                   </li>

@@ -118,4 +118,77 @@ describe('SalesOrdersService', () => {
       );
     });
   });
+
+  // PR-181: 미도 수기 CMT단가 초안 → 계약(Contract)까지 전달되는 정확한 지점.
+  // commitAnalysis()가 mappingCommitService.commit() 이후 StyleOverview를 다시 읽어, 이번
+  // 요청의 cmtPrice가 실제로 그 값으로 반영됐을 때만(병합 충돌로 막히지 않았을 때만)
+  // HANDWRITTEN_DRAFT로 표시하고 cmtPriceNote를 함께 저장한다.
+  describe('commitAnalysis - 수기 CMT단가 초안 → Contract.cmtPriceConfidence/cmtPriceNote (PR-181)', () => {
+    const mockMasterStyleRepo = { findOne: jest.fn() };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === Contract ? mockContractRepo : mockMasterStyleRepo,
+      );
+      mockMappingCommitService.commit.mockResolvedValue({ success: true, notices: [], warnings: [] });
+      mockSalesOrderSpecsService.save.mockResolvedValue({ id: 1 });
+    });
+
+    const baseOverview = {
+      styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남',
+      buyer: '미도컴퍼니', totalQty: 100, targetRdd: null, documentDate: null,
+    };
+
+    it('병합이 막히지 않고(StyleOverview.cmtPrice === 보낸 값) 코멘트가 있으면 HANDWRITTEN_DRAFT로 생성된다', async () => {
+      mockMasterStyleRepo.findOne.mockResolvedValue({
+        styleNo: 'S1',
+        overview: { totalQty: 100, targetRdd: null, factory: '베트남', buyer: '미도컴퍼니', productionType: 'CMT', cmtPrice: 7500, fobPrice: null },
+      });
+
+      await service.commitAnalysis({
+        overview: { ...baseOverview, handwrittenCmtPriceCandidate: 7500, handwrittenCmtPriceMemo: '7,270 + 230 = 7,500', cmtPrice: 7500, cmtPriceNote: '작지 수기: 7,270 + 230 = 7,500' },
+        bomItems: [], sizeSpecs: [], workNotes: null,
+      } as any);
+
+      expect(mockContractRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ cmtPrice: 7500, cmtPriceConfidence: 'HANDWRITTEN_DRAFT', cmtPriceNote: '작지 수기: 7,270 + 230 = 7,500' }),
+      );
+    });
+
+    it('기존 CMT단가와 달라 병합이 막히면(StyleOverview.cmtPrice가 이번 요청 값과 다름) HANDWRITTEN_DRAFT로 표시하지 않는다', async () => {
+      // mergeOverview가 CMT_PRICE_MISMATCH로 반영을 보류한 경우 — DB에는 기존(이번 요청과
+      // 다른) 값이 그대로 남는다.
+      mockMasterStyleRepo.findOne.mockResolvedValue({
+        styleNo: 'S1',
+        overview: { totalQty: 100, targetRdd: null, factory: '베트남', buyer: '미도컴퍼니', productionType: 'CMT', cmtPrice: 7000, fobPrice: null },
+      });
+
+      await service.commitAnalysis({
+        overview: { ...baseOverview, handwrittenCmtPriceCandidate: 7500, cmtPrice: 7500, cmtPriceNote: '작지 수기: 7,500' },
+        bomItems: [], sizeSpecs: [], workNotes: null,
+      } as any);
+
+      expect(mockContractRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ cmtPrice: 7000, cmtPriceConfidence: null, cmtPriceNote: null }),
+      );
+    });
+
+    it('cmtPrice를 보내지 않으면(초안 없음) cmtPriceConfidence/cmtPriceNote는 null이다', async () => {
+      mockMasterStyleRepo.findOne.mockResolvedValue({
+        styleNo: 'S1',
+        overview: { totalQty: 100, targetRdd: null, factory: '베트남', buyer: '미도컴퍼니', productionType: 'CMT', cmtPrice: null, fobPrice: null },
+      });
+
+      await service.commitAnalysis({
+        overview: { ...baseOverview, handwrittenCmtPriceCandidate: null, cmtPrice: null },
+        bomItems: [], sizeSpecs: [], workNotes: null,
+      } as any);
+
+      expect(mockContractRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ cmtPrice: null, cmtPriceConfidence: null, cmtPriceNote: null }),
+      );
+    });
+  });
 });

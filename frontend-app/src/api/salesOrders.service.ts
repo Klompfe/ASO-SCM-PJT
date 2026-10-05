@@ -22,7 +22,11 @@ export interface AiOverview {
   // PR-168: 미도 전용 — 작지 상단 수기 CMT단가. candidate는 AI 후보(읽기전용 참고용,
   // 미도가 아니면 항상 null), cmtPrice는 사람이 확인/수정한 최종값(이것만 저장된다).
   handwrittenCmtPriceCandidate?: number | null;
+  // PR-181: candidate와 짝인 수기 표기 원문(계산식이면 식 전체) — 코멘트칸 기본값.
+  handwrittenCmtPriceMemo?: string | null;
   cmtPrice?: number | null;
+  // PR-181: cmtPrice의 근거 코멘트 — 저장되는 값(계약 cmtPriceNote까지 전달됨).
+  cmtPriceNote?: string | null;
 }
 
 export interface AiBomItem {
