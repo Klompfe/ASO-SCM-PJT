@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { ItemType } from '../entities/item-type.enum';
 
@@ -36,6 +36,11 @@ export class CreateItemDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @ApiProperty({ description: '품목군 ID(선택, 비우면 미지정)', required: false, nullable: true })
+  @IsOptional()
+  @IsInt()
+  categoryId?: number | null;
 
   @ApiProperty({ description: 'FINISHED_GOOD Item이 속한 MasterStyle의 styleNo', required: false })
   @IsString()

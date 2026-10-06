@@ -7,6 +7,8 @@ import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResu
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
 import { getErrorMessage } from '../utils/errorMessage';
+import { getMaterialCategories, type MaterialCategory } from '../api/materialCategories.service';
+import { activeCategories } from '../utils/materialCategories';
 import { ItemCatalogReport } from './ItemCatalogReport';
 import { Pagination } from './Pagination';
 import { selectBulkApproveTargets } from '../utils/mappingApproval';
@@ -75,7 +77,10 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   // PR-104: type은 기존과 동일하게 기본값 RAW_MATERIAL로 두되 select로 바꿀 수 있게
   // 하고, spec/description/styleNo도 생성 시점에 입력할 수 있게 한다(백엔드
   // CreateItemDto에는 이미 있었지만 화면에 입력란이 없어 죽어있던 필드들).
-  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '' });
+  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '', categoryId: null });
+  // PR-183: 품목군(선택). 전체 목록(비활성 포함)을 한 번 받아 이름 표시에 쓰고, 선택지는 활성만 보여준다.
+  const [materialCategories, setMaterialCategories] = useState<MaterialCategory[]>([]);
+  const [editCategoryId, setEditCategoryId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   // PR-117: 카탈로그 보고서 — 열려 있는 동안 현재 검색조건(filter.type/keyword)에 맞는 전체 품목을 불러온다.
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -169,6 +174,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   }, [filter]);
 
   useEffect(() => {
+    getMaterialCategories().then((res) => setMaterialCategories(Array.isArray(res) ? res : (res?.data ?? []))).catch(() => setMaterialCategories([]));
     loadItems();
   }, [loadItems]);
 
@@ -214,7 +220,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       });
       toast.success('품목이 생성되었습니다.');
       loadItems();
-      setNewItem({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '' });
+      setNewItem({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '', categoryId: null });
     } catch (error) {
       // toast.error는 Axios 인터셉터에서 처리됨
     } finally {
@@ -232,6 +238,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       description: item.description || '',
       styleNo: item.styleNo || '',
     });
+    setEditCategoryId(item.categoryId != null ? String(item.categoryId) : '');
   };
 
   const cancelEditItem = () => {
@@ -248,6 +255,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
         spec: editItemForm.spec,
         description: editItemForm.description,
         styleNo: editItemForm.styleNo || undefined,
+        // PR-183: 빈 값은 null로 보내 품목군을 해제한다(undefined면 그대로 둠).
+        categoryId: editCategoryId ? Number(editCategoryId) : null,
       });
       toast.success('품목 정보가 수정되었습니다.');
       cancelEditItem();
@@ -695,6 +704,21 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                 ))}
               </select>
             </div>
+            {/* PR-183: 품목군은 선택 사항 — 자동으로 채우지 않는다. */}
+            <div className="flex flex-col">
+              <label className="text-sm text-gray-600 mb-1">품목군 (선택)</label>
+              <select
+                className="border border-gray-300 rounded px-3 py-2"
+                aria-label="품목군"
+                value={newItem.categoryId ?? ''}
+                onChange={(e) => setNewItem({ ...newItem, categoryId: e.target.value ? Number(e.target.value) : null })}
+              >
+                <option value="">- 없음 -</option>
+                {activeCategories(materialCategories).map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
             <div className="flex flex-col">
               <label className="text-sm text-gray-600 mb-1">규격</label>
               <input className="border border-gray-300 rounded px-3 py-2" placeholder="규격" value={newItem.spec} onChange={(e) => setNewItem({...newItem, spec: e.target.value})} />
@@ -751,6 +775,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                 <th className="px-4 py-2 text-left">규격</th>
                 <th className="px-4 py-2 text-left">설명</th>
                 <th className="px-4 py-2 text-left">스타일번호</th>
+                <th className="px-4 py-2 text-left">품목군</th>
                 <th className="px-4 py-2 text-left">Action</th>
               </tr>
             </thead>
@@ -809,6 +834,14 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         <span className="text-gray-400">-</span>
                       )}
                     </td>
+                    <td className="px-4 py-2">
+                      <select className="border rounded px-2 py-1" aria-label="품목군 변경" value={editCategoryId} onChange={(e) => setEditCategoryId(e.target.value)}>
+                        <option value="">- 없음 -</option>
+                        {activeCategories(materialCategories).map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                       <button className="text-blue-600" onClick={() => handleUpdateItem(item.id)}>저장</button>
                       <button className="text-gray-500" onClick={cancelEditItem}>취소</button>
@@ -824,6 +857,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                     <td className="px-4 py-2">{item.spec ?? '-'}</td>
                     <td className="px-4 py-2">{item.description ?? '-'}</td>
                     <td className="px-4 py-2">{item.styleNo ?? '-'}</td>
+                    <td className="px-4 py-2">{materialCategories.find((c) => c.id === item.categoryId)?.name ?? '-'}</td>
                     <td className="px-4 py-2">
                       <button className="text-blue-600" onClick={() => startEditItem(item)}>수정</button>
                     </td>

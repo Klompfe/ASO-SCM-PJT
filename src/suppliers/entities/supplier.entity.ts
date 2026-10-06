@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
 import { Item } from '../../items/entities/item.entity';
+import { MaterialCategory } from '../../material-categories/entities/material-category.entity';
 
 @Entity('suppliers')
 export class Supplier {
@@ -55,6 +56,15 @@ export class Supplier {
     inverseJoinColumn: { name: 'itemId', referencedColumnName: 'id' },
   })
   mainItems?: Item[];
+
+  // PR-183: 취급 품목군(다대다). 세부 종류는 BOM/단가 룩업이 맡고, 여기서는 '실/테이프' 같은 분류만.
+  @ManyToMany(() => MaterialCategory)
+  @JoinTable({
+    name: 'supplier_material_categories',
+    joinColumn: { name: 'supplierId', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'categoryId', referencedColumnName: 'id' },
+  })
+  categories?: MaterialCategory[];
 
   @CreateDateColumn()
   createdAt: Date;

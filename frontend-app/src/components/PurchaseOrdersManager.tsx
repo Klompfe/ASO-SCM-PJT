@@ -24,8 +24,9 @@ import { PackingReceiptsModal } from './PackingReceiptsModal';
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { ShipmentsManager } from './ShipmentsManager';
 import { SupplierQuickCreateModal } from './SupplierQuickCreateModal';
+import { categoryFilterState, supplierSearchCategoryId } from '../utils/materialCategories';
 
-interface ItemRef { id: number; name: string; code: string }
+interface ItemRef { id: number; name: string; code: string; categoryId?: number | null }
 
 const emptyForm: CreatePurchaseOrder = { supplierId: 0, itemId: 0, quantity: 1, unitPrice: 0 };
 
@@ -61,6 +62,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const formValuesRef = useRef({ supplier: null as SupplierRef | null, unitPrice: 0, autofilled: false });
   const [filterSupplier, setFilterSupplier] = useState<SupplierRef | null>(null);
   const [filterItem, setFilterItem] = useState<ItemRef | null>(null);
+  // PR-183: "이 품목군 취급 업체만 보기" — 기본 켜짐. 품목에 품목군이 있을 때만 보이고, 켜면 폼의 공급업체 검색을 그 품목군 업체로 거른다(자동 선택은 하지 않음).
+  const [byItemCategory, setByItemCategory] = useState(true);
   // PR-074: 포장내역은 발주 하위 흐름이라 별도 탭이 아니라 발주 행에서 모달로 연다.
   const [packingReceiptsFor, setPackingReceiptsFor] = useState<PurchaseOrder | null>(null);
   // PR-172: 공급업체가 아직 없을 때 SuppliersManager 탭으로 넘어가면(이 앱은 탭 전환
@@ -101,6 +104,14 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     const list = Array.isArray(res) ? res : (res?.data ?? []);
     return list.slice(0, 30);
   }, []);
+  // 발주 폼 전용 공급업체 검색: 품목군 필터(체크 시)를 적용한다. 목록 필터(searchSuppliers)에는 적용하지 않는다.
+  const itemCategorySearchId = supplierSearchCategoryId(categoryFilterState(item?.categoryId, byItemCategory));
+  const searchFormSuppliers = useCallback(async (keyword: string): Promise<SupplierRef[]> => {
+    const res = await getSuppliers({ keyword: keyword || undefined, categoryId: itemCategorySearchId });
+    const list = Array.isArray(res) ? res : (res?.data ?? []);
+    return list.slice(0, 30);
+  }, [itemCategorySearchId]);
+  const categoryFilter = categoryFilterState(item?.categoryId, byItemCategory);
   const searchRawMaterials = useCallback(async (keyword: string): Promise<ItemRef[]> => {
     const res = await getItems({ keyword: keyword || undefined, type: 'RAW_MATERIAL', limit: 20 });
     return Array.isArray(res) ? res : (res?.items ?? []);
@@ -312,7 +323,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               <SearchSelectField<SupplierRef>
                 value={supplier}
                 onChange={(picked) => { setSupplier(picked); setAutofilled(false); }}
-                search={searchSuppliers}
+                search={searchFormSuppliers}
                 getKey={(x) => x.id}
                 getLabel={(x) => `${x.name} (${x.code})`}
                 renderRow={(x) => (<span>{x.name} <span className="text-gray-400 text-xs">{x.code}</span></span>)}
@@ -329,6 +340,16 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 + 새 공급업체 등록
               </button>
             </div>
+            {categoryFilter.visible && (
+              <label className="flex items-center gap-1 text-xs text-gray-600 mt-1">
+                <input
+                  type="checkbox"
+                  checked={categoryFilter.checked}
+                  onChange={(e) => setByItemCategory(e.target.checked)}
+                />
+                이 품목군 취급 업체만 보기
+              </label>
+            )}
           </div>
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">수량</label>

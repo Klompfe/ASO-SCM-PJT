@@ -23,6 +23,7 @@ import { ImportShipmentManager } from './components/ImportShipmentManager';
 import { InventoryReport } from './components/InventoryReport';
 import { BrandManager } from './components/BrandManager';
 import { MaterialPackagingUnitRulesManager } from './components/MaterialPackagingUnitRulesManager';
+import { MaterialCategoriesManager } from './components/MaterialCategoriesManager';
 import { StatusCodesManager } from './components/StatusCodesManager';
 import { Sidebar, TAB_LABELS, type TabId } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
@@ -281,6 +282,7 @@ function App() {
         case 'inventories': return <InventoryReport />;
         case 'brands': return <BrandManager />;
         case 'materialPackagingUnitRules': return <MaterialPackagingUnitRulesManager />;
+        case 'materialCategories': return <MaterialCategoriesManager />;
         case 'statusCodes': return <StatusCodesManager />;
         default:
           // Routing Fallback: If unknown, default to Dashboard

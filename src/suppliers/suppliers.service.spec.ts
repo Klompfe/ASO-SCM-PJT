@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { SuppliersService } from './suppliers.service';
 import { Supplier } from './entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
+import { MaterialCategory } from '../material-categories/entities/material-category.entity';
 
 describe('SuppliersService', () => {
   let service: SuppliersService;
@@ -30,6 +31,13 @@ describe('SuppliersService', () => {
         },
         {
           provide: getRepositoryToken(Item),
+          useValue: {
+            findBy: jest.fn().mockResolvedValue([]),
+          },
+        },
+        {
+          // PR-183: categoryIds 해석용. 기본은 빈 결과(기존 테스트는 품목군을 쓰지 않음).
+          provide: getRepositoryToken(MaterialCategory),
           useValue: {
             findBy: jest.fn().mockResolvedValue([]),
           },
@@ -186,7 +194,8 @@ describe('SuppliersService', () => {
       expect(await service.findAll()).toEqual([{ id: 2 }, { id: 1 }]);
       await service.findAll({ keyword: '   ' });
       await service.findAll({});
-      expect(repo.find).toHaveBeenCalledWith({ relations: ['mainItems'], order: { id: 'DESC' } });
+      // PR-183: 응답에 취급 품목군(categories)도 함께 실린다.
+      expect(repo.find).toHaveBeenCalledWith({ relations: ['mainItems', 'categories'], order: { id: 'DESC' } });
       expect(repo.createQueryBuilder).not.toHaveBeenCalled();
     });
 
@@ -260,6 +269,45 @@ describe('SuppliersService', () => {
       await service.update(1, { mainItemIds: [20] } as any);
       const saved = (repo.save as jest.Mock).mock.calls[0][0];
       expect(saved.mainItems).toEqual([{ id: 20, name: '새품목' }]);
+    });
+  });
+
+  // PR-183: 취급 품목군(categoryIds) 연결 — undefined=변경 없음, []=전부 해제, 없는 id=400.
+  describe('create/update — 취급 품목군(categoryIds) 연결', () => {
+    it('categoryIds를 여러 개 주면 해당 품목군들을 연결해 저장한다', async () => {
+      const cats = [{ id: 1, name: '겉감' }, { id: 3, name: '실' }];
+      const categoryRepo = (service as any).categoryRepository;
+      categoryRepo.findBy.mockResolvedValueOnce(cats);
+      (repo.find as jest.Mock).mockResolvedValue([]);
+      const result = await service.create({ name: '품목군 업체', categoryIds: [1, 3] } as any);
+      expect(result.categories).toEqual(cats);
+    });
+
+    it('categoryIds를 빈 배열로 보내면 연결 없이 저장한다', async () => {
+      (repo.find as jest.Mock).mockResolvedValue([]);
+      const result = await service.create({ name: '품목군 없음', categoryIds: [] } as any);
+      expect(result.categories).toEqual([]);
+    });
+
+    it('존재하지 않는 품목군 ID가 섞여 있으면 400', async () => {
+      const categoryRepo = (service as any).categoryRepository;
+      categoryRepo.findBy.mockResolvedValueOnce([{ id: 1, name: '겉감' }]);
+      (repo.find as jest.Mock).mockResolvedValue([]);
+      await expect(service.create({ name: 'X', categoryIds: [1, 999] } as any)).rejects.toThrow(BadRequestException);
+    });
+
+    it('update에서 categoryIds를 보내지 않으면 기존 품목군을 건드리지 않는다', async () => {
+      const existing = { id: 7, name: 'A', categories: [{ id: 1 }] };
+      (repo.findOne as jest.Mock).mockResolvedValue(existing);
+      const result = await service.update(7, { name: 'B' } as any);
+      expect(result.categories).toEqual([{ id: 1 }]);
+    });
+
+    it('update에서 categoryIds를 빈 배열로 보내면 전부 해제한다', async () => {
+      const existing = { id: 7, name: 'A', categories: [{ id: 1 }] };
+      (repo.findOne as jest.Mock).mockResolvedValue(existing);
+      const result = await service.update(7, { categoryIds: [] } as any);
+      expect(result.categories).toEqual([]);
     });
   });
 });

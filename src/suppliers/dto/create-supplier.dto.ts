@@ -57,4 +57,14 @@ export class CreateSupplierDto {
   @Type(() => Number)
   @IsInt({ each: true })
   mainItemIds?: number[];
+
+  // PR-183: 취급 품목군 ID 목록(MaterialCategory.id). undefined면 변경 없음, []면 전부 해제.
+  // 화면은 이 필드를 쓰고, mainItemIds는 기존 데이터/API 호환을 위해 그대로 둔다.
+  @ApiPropertyOptional({ description: '취급 품목군 ID 목록', example: [4, 5], type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @Type(() => Number)
+  @IsInt({ each: true })
+  categoryIds?: number[];
 }
