@@ -78,3 +78,13 @@ main 반영 전에 Neon 테스트 브랜치(운영 DB 복사본, 호스트 `ep-d
 4. **반복 실행 안전성**: 같은 복사본에서 `migration:revert` → `1791500000000`만 되돌려짐(`DROP TABLE`/`DROP COLUMN` 로그가 이 마이그레이션이 만든 객체에만 한정됨, 다른 37개 마이그레이션은 그대로) → 다시 `migration:run` → 에러 없이 재적용, `migration:show`에서 다시 `[X]`로 확인.
 
 **결론: 1단계 통과.** 아래 main 반영을 진행한다.
+
+## 9. main 반영 완료
+
+- `origin/main`이 `0504335`에서 움직이지 않은 것을 확인한 뒤 `git merge --ff-only`로 fast-forward.
+- **최종 main SHA: `1a19a03`** (`617c4e6` feat(PR-183) + `1a19a03` docs(이 보고서의 8번 절 추가), 둘 다 그대로 main에 포함).
+- 푸시 직전에 다시 확인: 백엔드 build 통과, 백엔드 `jest` 57 suites/707 tests 통과, 백엔드 e2e 62 suites/466 tests 통과(`--maxWorkers=2`로 재확인 — 기본 동시성에서 3개 suite가 리소스 경합으로 간헐 실패했으나 개별 실행과 동시성 축소 실행 모두 통과해 PR-183과 무관한 기존 병렬실행 불안정으로 판단), 프론트 `tsc`/`vitest`(44 files/285 tests) 통과.
+- `git push origin main` 완료.
+- 브랜치 `feat/supplier-material-categories`는 삭제하지 않았다.
+- **확인 필요**: Render 배포 로그에서 `AddMaterialCategories1791500000000` 마이그레이션이 실제로 적용됐는지 제시님이 확인해 주셔야 한다(이 보고서 8번 절의 검증은 별도 Neon 테스트 브랜치에서 한 것이고, 실제 운영 DB 적용은 이 push로 트리거되는 Render 배포 과정에서 처음 이뤄진다).
+- 후속 정리 후보: `frontend-app/src/utils/mainItemsPicker.ts`(더 이상 화면에서 쓰이지 않음, 기존 테스트가 있어 이번에 삭제하지 않음).
