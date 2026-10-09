@@ -9,6 +9,7 @@ import { ExportShipment } from './entities/export-shipment.entity';
 import { ExportShipmentLine } from './entities/export-shipment-line.entity';
 import { ExportShipmentDefaultsService } from '../export-shipment-defaults/export-shipment-defaults.service';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
+import { CustomsExchangeRatesService } from '../customs-exchange-rates/customs-exchange-rates.service';
 
 // PR-102: 스타일번호/자재명(description)/선적건번호(sheetNo) 검색 필터.
 describe('ExportShipmentsService.findAll — 검색 필터 (PR-102)', () => {
@@ -40,6 +41,7 @@ describe('ExportShipmentsService.findAll — 검색 필터 (PR-102)', () => {
         { provide: getRepositoryToken(ExportShipmentLine), useValue: {} },
         { provide: ExportShipmentDefaultsService, useValue: {} },
         { provide: BrandPrefixRulesService, useValue: { findAll: jest.fn().mockResolvedValue([]) } },
+        { provide: CustomsExchangeRatesService, useValue: { lookup: jest.fn().mockResolvedValue({ found: false, previous: null }) } },
       ],
     }).compile();
 
@@ -129,6 +131,7 @@ describe('ExportShipmentsService.updateExchangeRate / confirmLinePrice (PR-157)'
         { provide: getRepositoryToken(ExportShipmentLine), useValue: { findOne: jest.fn(), save: jest.fn((x) => x) } },
         { provide: ExportShipmentDefaultsService, useValue: {} },
         { provide: BrandPrefixRulesService, useValue: {} },
+        { provide: CustomsExchangeRatesService, useValue: { lookup: jest.fn().mockResolvedValue({ found: false, previous: null }) } },
       ],
     }).compile();
 

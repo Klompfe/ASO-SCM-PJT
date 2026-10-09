@@ -18,6 +18,8 @@ import { selectRawCandidate, selectConvertedOption, clearSelection, resolveSourc
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { getCurrentUser, type CurrentUser } from '../api/auth.service';
 import { getExportShipmentDefaults } from '../api/exportShipmentDefaults.service';
+import { lookupCustomsExchangeRate, type ExchangeRateType, type ExchangeRateLookupResult } from '../api/customsExchangeRates.service';
+import { buildInvoiceRateBadge, sourceLabel } from '../utils/customsExchangeRates';
 import { getErrorMessage } from '../utils/errorMessage';
 
 const STATUS_LABELS: Record<string, string> = { DRAFT: '초안', REVIEWED: '검토완료', FINALIZED: '확정' };
@@ -42,6 +44,27 @@ export const ExportShipmentManager: React.FC = () => {
   // 막혀 있어(/csp/ 전체 차단) 구현하지 않았다. 문자열로 따로 관리하는 이유는
   // GenerateExportShipment.exchangeRateUsdKrw가 number라 빈 입력을 그대로 두기 위함.
   const [exchangeRateInput, setExchangeRateInput] = useState('');
+  // PR-184: Invoice Date가 입력되고 환율 칸이 비어 있을 때 관세청 주간환율을 추천값으로
+  // 미리 채운다. 사용자가 직접 고치면(터치) 더 이상 덮어쓰지 않는다.
+  const [createRateType, setCreateRateType] = useState<ExchangeRateType>('EXPORT');
+  const [createRateTouched, setCreateRateTouched] = useState(false);
+  const [createRateLookup, setCreateRateLookup] = useState<ExchangeRateLookupResult | null>(null);
+  useEffect(() => {
+    if (!header.invoiceDate) {
+      setCreateRateLookup(null);
+      return;
+    }
+    lookupCustomsExchangeRate({ rateType: createRateType, currency: 'USD', date: header.invoiceDate })
+      .then((res) => {
+        setCreateRateLookup(res);
+        if (!createRateTouched && exchangeRateInput.trim() === '' && res.found) {
+          setExchangeRateInput(String(res.rate));
+        }
+      })
+      .catch(() => setCreateRateLookup(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [header.invoiceDate, createRateType]);
+  const createRateBadge = buildInvoiceRateBadge(createRateLookup, createRateType, createRateTouched);
 
   const [shipments, setShipments] = useState<ExportShipment[]>([]);
   const [selected, setSelected] = useState<ExportShipment | null>(null);
@@ -152,6 +175,8 @@ export const ExportShipmentManager: React.FC = () => {
       setSelectedPoIds([]);
       setHeader(emptyHeader);
       setExchangeRateInput('');
+      setCreateRateTouched(false);
+      setCreateRateLookup(null);
       applyDefaultsToHeader();
       await loadShipments();
       setSelected(res);
@@ -226,6 +251,31 @@ export const ExportShipmentManager: React.FC = () => {
   // PR-157: 문서 상세에서도 환율을 나중에 입력/수정할 수 있다 — PurchaseOrder 기준
   // 자동계산 라인만 새 환율로 재계산되고, 이미 확정(MANUAL/MIDO_PRICE_TABLE)한 라인은 유지된다.
   const [detailExchangeRateInput, setDetailExchangeRateInput] = useState('');
+  const [detailRateType, setDetailRateType] = useState<ExchangeRateType>('EXPORT');
+  const [detailRateTouched, setDetailRateTouched] = useState(false);
+  const [detailRateLookup, setDetailRateLookup] = useState<ExchangeRateLookupResult | null>(null);
+  // 문서를 바꿔서 열면(selected.id 변경) 입력칸/추천 상태를 새로 시작한다.
+  useEffect(() => {
+    setDetailExchangeRateInput('');
+    setDetailRateTouched(false);
+    setDetailRateLookup(null);
+  }, [selected?.id]);
+  useEffect(() => {
+    if (!selected?.invoiceDate) {
+      setDetailRateLookup(null);
+      return;
+    }
+    lookupCustomsExchangeRate({ rateType: detailRateType, currency: 'USD', date: selected.invoiceDate.slice(0, 10) })
+      .then((res) => {
+        setDetailRateLookup(res);
+        if (!detailRateTouched && detailExchangeRateInput.trim() === '' && res.found) {
+          setDetailExchangeRateInput(String(res.rate));
+        }
+      })
+      .catch(() => setDetailRateLookup(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selected?.invoiceDate, detailRateType]);
+  const detailRateBadge = buildInvoiceRateBadge(detailRateLookup, detailRateType, detailRateTouched);
   const handleUpdateExchangeRate = async () => {
     if (!selected || detailExchangeRateInput.trim() === '') return;
     try {
@@ -233,6 +283,7 @@ export const ExportShipmentManager: React.FC = () => {
       toast.success('환율이 저장되었습니다.');
       setSelected(res);
       setDetailExchangeRateInput('');
+      setDetailRateTouched(false);
     } catch (err: any) {
       toast.error(getErrorMessage(err, '환율 저장에 실패했습니다.'));
     }
@@ -342,6 +393,15 @@ export const ExportShipmentManager: React.FC = () => {
           <input className="border p-2 rounded text-sm" placeholder="Carrier" value={header.carrier} onChange={(e) => setHeader({ ...header, carrier: e.target.value })} />
           <input type="date" className="border p-2 rounded text-sm" placeholder="Sailing Date" value={header.sailingDate} onChange={(e) => setHeader({ ...header, sailingDate: e.target.value })} />
           <input type="date" className="border p-2 rounded text-sm" placeholder="Invoice Date" value={header.invoiceDate} onChange={(e) => setHeader({ ...header, invoiceDate: e.target.value })} />
+          <select
+            className="border p-2 rounded text-sm"
+            aria-label="추천받을 환율 구분"
+            value={createRateType}
+            onChange={(e) => { setCreateRateType(e.target.value as ExchangeRateType); setCreateRateTouched(false); }}
+          >
+            <option value="EXPORT">수출(기본)</option>
+            <option value="IMPORT">수입</option>
+          </select>
           <input
             type="number"
             step="0.01"
@@ -349,9 +409,23 @@ export const ExportShipmentManager: React.FC = () => {
             placeholder="환율(USD/KRW, 수동 입력)"
             aria-label="환율(USD/KRW)"
             value={exchangeRateInput}
-            onChange={(e) => setExchangeRateInput(e.target.value)}
+            onChange={(e) => { setExchangeRateInput(e.target.value); setCreateRateTouched(true); }}
           />
         </div>
+        {createRateBadge.kind === 'suggested' && (
+          <div className="text-xs text-blue-700 bg-blue-50 rounded p-2">
+            관세청 주간환율({createRateBadge.rateType === 'EXPORT' ? '수출' : '수입'}) {createRateBadge.validFrom}~{createRateBadge.validTo} 적용 — 확인 필요
+          </div>
+        )}
+        {createRateBadge.kind === 'manual' && (
+          <div className="text-xs text-gray-500">수동 수정</div>
+        )}
+        {createRateBadge.kind === 'not_found' && (
+          <div className="text-xs text-yellow-700 bg-yellow-50 rounded p-2">
+            이 INVOICE 작성일이 속한 주의 {createRateType === 'EXPORT' ? '수출' : '수입'} 환율이 등록되지 않았습니다 — 주간 환율 화면에서 등록하세요.
+            {createRateBadge.previous && <span className="block text-gray-400 mt-0.5">직전 등록 주: {createRateBadge.previous} (참고)</span>}
+          </div>
+        )}
         <button onClick={handleGenerate} disabled={generating} className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50">
           {generating ? '생성 중...' : '수출선적서류 생성'}
         </button>
@@ -454,24 +528,47 @@ export const ExportShipmentManager: React.FC = () => {
               Invoice Date: {selected.invoiceDate ? selected.invoiceDate.slice(0, 10) : '-'} · Sailing Date: {selected.sailingDate ? selected.sailingDate.slice(0, 10) : '-'}
             </div>
 
-            <div className="flex items-end gap-2 mb-4 bg-gray-50 p-2 rounded text-sm">
-              <div>
-                환율(USD/KRW): <b>{selected.exchangeRateUsdKrw ?? '미입력'}</b>
-                {selected.exchangeRateDate && <span className="text-gray-400"> ({selected.exchangeRateDate.slice(0, 10)} 기준)</span>}
+            <div className="flex flex-col gap-1 mb-4 bg-gray-50 p-2 rounded text-sm">
+              <div className="flex items-end gap-2">
+                <div>
+                  환율(USD/KRW): <b>{selected.exchangeRateUsdKrw ?? '미입력'}</b>
+                  {selected.exchangeRateDate && <span className="text-gray-400"> ({selected.exchangeRateDate.slice(0, 10)} 기준)</span>}
+                  <span className="text-gray-400 text-xs ml-1">({sourceLabel(selected.exchangeRateSource)})</span>
+                </div>
+                {selected.status !== 'FINALIZED' && (
+                  <>
+                    <select
+                      className="border p-1 rounded text-xs"
+                      aria-label="상세 추천 환율 구분"
+                      value={detailRateType}
+                      onChange={(e) => { setDetailRateType(e.target.value as ExchangeRateType); setDetailRateTouched(false); }}
+                    >
+                      <option value="EXPORT">수출(기본)</option>
+                      <option value="IMPORT">수입</option>
+                    </select>
+                    <input
+                      type="number"
+                      step="0.01"
+                      aria-label="환율 수정"
+                      className="border p-1 rounded w-28"
+                      placeholder="새 환율"
+                      value={detailExchangeRateInput}
+                      onChange={(e) => { setDetailExchangeRateInput(e.target.value); setDetailRateTouched(true); }}
+                    />
+                    <button onClick={handleUpdateExchangeRate} className="bg-gray-700 text-white px-2 py-1 rounded text-xs hover:bg-gray-800">환율 저장</button>
+                  </>
+                )}
               </div>
-              {selected.status !== 'FINALIZED' && (
-                <>
-                  <input
-                    type="number"
-                    step="0.01"
-                    aria-label="환율 수정"
-                    className="border p-1 rounded w-28"
-                    placeholder="새 환율"
-                    value={detailExchangeRateInput}
-                    onChange={(e) => setDetailExchangeRateInput(e.target.value)}
-                  />
-                  <button onClick={handleUpdateExchangeRate} className="bg-gray-700 text-white px-2 py-1 rounded text-xs hover:bg-gray-800">환율 저장</button>
-                </>
+              {detailRateBadge.kind === 'suggested' && (
+                <div className="text-xs text-blue-700">
+                  관세청 주간환율({detailRateBadge.rateType === 'EXPORT' ? '수출' : '수입'}) {detailRateBadge.validFrom}~{detailRateBadge.validTo} 적용 — 확인 필요
+                </div>
+              )}
+              {detailRateBadge.kind === 'not_found' && (
+                <div className="text-xs text-yellow-700">
+                  이 INVOICE 작성일이 속한 주의 {detailRateType === 'EXPORT' ? '수출' : '수입'} 환율이 등록되지 않았습니다 — 주간 환율 화면에서 등록하세요.
+                  {detailRateBadge.previous && <span className="text-gray-400 ml-1">직전 등록 주: {detailRateBadge.previous} (참고)</span>}
+                </div>
               )}
             </div>
 

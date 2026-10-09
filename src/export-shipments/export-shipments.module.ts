@@ -9,12 +9,14 @@ import { ExportShipmentsService } from './export-shipments.service';
 import { ExportShipmentsController } from './export-shipments.controller';
 import { ExportShipmentDefaultsModule } from '../export-shipment-defaults/export-shipment-defaults.module';
 import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules.module';
+import { CustomsExchangeRatesModule } from '../customs-exchange-rates/customs-exchange-rates.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([PurchaseOrder, PackingReceipt, BomItem, ExportShipment, ExportShipmentLine]),
     ExportShipmentDefaultsModule,
     BrandPrefixRulesModule,
+    CustomsExchangeRatesModule,
   ],
   controllers: [ExportShipmentsController],
   providers: [ExportShipmentsService],

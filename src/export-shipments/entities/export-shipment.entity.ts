@@ -75,6 +75,12 @@ export class ExportShipment {
   @Column({ type: 'date', nullable: true })
   exchangeRateDate?: Date | null;
 
+  // PR-184: 저장된 exchangeRateUsdKrw가 그 주의 관세청 주간환율(수출/수입) 중 어느 것과
+  // 같은지 서버가 스스로 판정해 저장한다(프론트가 보낸 구분을 신뢰하지 않음). 기존 행은
+  // null("출처 미기록")로 남고 소급 계산하지 않는다.
+  @Column({ type: 'varchar', nullable: true })
+  exchangeRateSource?: string | null;
+
   @OneToMany(() => ExportShipmentLine, (line) => line.exportShipment, { cascade: true })
   lines?: ExportShipmentLine[];
 

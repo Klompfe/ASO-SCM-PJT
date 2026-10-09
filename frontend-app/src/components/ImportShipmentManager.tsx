@@ -20,6 +20,7 @@ import { ImportShipmentVoyagePanel } from './ImportShipmentVoyagePanel';
 import { effectiveStyleNo, isNewStyleNo, validateVoyageDates } from '../utils/importShipmentForm';
 import { describeImportFilters, importShipmentColumns, summarizeShipments } from '../utils/importShipmentReport';
 import { groupByInvoiceNo } from '../utils/importShipmentGrouping';
+import { ImportExchangeRateReference } from './ImportExchangeRateReference';
 
 const emptyLine: CreateImportShipmentLine = {
   itemType: '',
@@ -573,6 +574,7 @@ export const ImportShipmentManager: React.FC = () => {
                   </div>
 
                   <ImportShipmentVoyagePanel shipment={s} onSaved={() => load(appliedFilter)} />
+                  <ImportExchangeRateReference date={s.invoiceDate ?? s.etd} />
 
                   <div className="overflow-x-auto">
                   <table className="text-sm">

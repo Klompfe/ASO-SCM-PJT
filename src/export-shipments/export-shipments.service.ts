@@ -20,6 +20,8 @@ import { FindExportPerformanceDto } from './dto/find-export-performance.dto';
 import { aggregateExportPerformance, type BuyerByStyleNo } from './utils/export-performance.util';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
+import { CustomsExchangeRatesService, type ExchangeRateLookupResult } from '../customs-exchange-rates/customs-exchange-rates.service';
+import { ExchangeRateType } from '../customs-exchange-rates/entities/customs-exchange-rate.entity';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
   arr.reduce((total, item) => total + (Number(item[key]) || 0), 0);
@@ -46,7 +48,37 @@ export class ExportShipmentsService {
     private readonly exportShipmentLineRepository: Repository<ExportShipmentLine>,
     private readonly exportShipmentDefaultsService: ExportShipmentDefaultsService,
     private readonly brandPrefixRulesService: BrandPrefixRulesService,
+    private readonly customsExchangeRatesService: CustomsExchangeRatesService,
   ) {}
+
+  // Render 서버는 UTC이므로 날짜 비교는 한국 시간 기준으로 맞춘다(customs-exchange-rates.service.ts와 동일 방식).
+  private toKstDateStr(value: Date | string): string {
+    if (typeof value === 'string') return value.slice(0, 10);
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(value);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+    return `${get('year')}-${get('month')}-${get('day')}`;
+  }
+
+  // PR-184: 저장하려는 환율값이 그 주의 관세청 주간환율(수출/수입) 중 어느 것과 같은지
+  // 서버가 스스로 판정한다(프론트가 보낸 구분을 신뢰하지 않음). 둘 다 같으면 수출 우선,
+  // 그 주에 등록된 행이 없거나 값이 둘 다 다르면 수동 입력(MANUAL)으로 본다.
+  private async determineExchangeRateSource(invoiceDate: Date | string | null | undefined, rate: number | null | undefined): Promise<string | null> {
+    if (rate == null || !invoiceDate) return null;
+    const dateStr = this.toKstDateStr(invoiceDate);
+    const [exportRate, importRate] = await Promise.all([
+      this.customsExchangeRatesService.lookup(ExchangeRateType.EXPORT, 'USD', dateStr),
+      this.customsExchangeRatesService.lookup(ExchangeRateType.IMPORT, 'USD', dateStr),
+    ]);
+    const matches = (r: ExchangeRateLookupResult) => r.found && r.rate != null && Math.abs(r.rate - rate) < 1e-6;
+    if (matches(exportRate)) return 'CUSTOMS_WEEKLY_EXPORT';
+    if (matches(importRate)) return 'CUSTOMS_WEEKLY_IMPORT';
+    return 'MANUAL';
+  }
 
   // PR-075: purchaseOrderIds(들)의 PackingReceipt를 styleNo+자재 기준으로 집계해
   // ExportShipmentLine을 자동 생성한다.
@@ -206,6 +238,9 @@ export class ExportShipmentsService {
     // 이 경우 에러 없이 그냥 dto 값(없으면 null)만으로 진행한다(헤더 공란 유지).
     const defaults = await this.exportShipmentDefaultsService.find();
 
+    // PR-184: 저장 전에 환율 출처를 판정한다(생성 시점에 환율이 있을 때만 의미가 있음).
+    const exchangeRateSource = await this.determineExchangeRateSource(dto.invoiceDate ?? null, dto.exchangeRateUsdKrw ?? null);
+
     const shipment = await this.exportShipmentRepository.save(
       this.exportShipmentRepository.create({
         styleNos: Array.from(styleNoSet),
@@ -222,6 +257,7 @@ export class ExportShipmentsService {
         // 저장한다(선적일 대신 — 어느 쪽이 맞는지 애매해 완료 보고에서 확인을 요청한다).
         exchangeRateUsdKrw: dto.exchangeRateUsdKrw ?? null,
         exchangeRateDate: dto.exchangeRateUsdKrw != null ? (dto.invoiceDate ? new Date(dto.invoiceDate) : new Date()) : null,
+        exchangeRateSource,
       }),
     );
 
@@ -425,6 +461,7 @@ export class ExportShipmentsService {
 
     shipment.exchangeRateUsdKrw = dto.exchangeRateUsdKrw;
     shipment.exchangeRateDate = shipment.invoiceDate ?? new Date();
+    shipment.exchangeRateSource = await this.determineExchangeRateSource(shipment.invoiceDate ?? null, dto.exchangeRateUsdKrw);
     await this.exportShipmentRepository.save(shipment);
 
     // 재계산 대상 라인만 추려 receipt/발주를 한 번에(IN절) 가져온다 — 라인마다 매번

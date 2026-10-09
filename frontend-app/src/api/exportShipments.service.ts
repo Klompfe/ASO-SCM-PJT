@@ -48,6 +48,8 @@ export interface ExportShipment {
   sailingDate?: string;
   exchangeRateUsdKrw?: number | null;
   exchangeRateDate?: string | null;
+  // PR-184: 서버가 스스로 판정한 출처('CUSTOMS_WEEKLY_EXPORT' | 'CUSTOMS_WEEKLY_IMPORT' | 'MANUAL' | null).
+  exchangeRateSource?: string | null;
   createdAt: string;
   lines: ExportShipmentLine[];
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { ItemsManager } from './components/ItemsManager';
 import { WorkOrdersManager } from './components/WorkOrdersManager';
@@ -23,10 +23,14 @@ import { ImportShipmentManager } from './components/ImportShipmentManager';
 import { InventoryReport } from './components/InventoryReport';
 import { BrandManager } from './components/BrandManager';
 import { MaterialPackagingUnitRulesManager } from './components/MaterialPackagingUnitRulesManager';
+import { CustomsExchangeRatesManager } from './components/CustomsExchangeRatesManager';
+import { WeeklyExchangeRatePopup, WeeklyExchangeRateBanner } from './components/WeeklyExchangeRatePopup';
 import { StatusCodesManager } from './components/StatusCodesManager';
 import { Sidebar, TAB_LABELS, type TabId } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
 import { getCurrentUser, type CurrentUser } from './api/auth.service';
+import { getCustomsExchangeRateStatus, type ExchangeRateStatus } from './api/customsExchangeRates.service';
+import { shouldShowWeeklyRatePopup, wasPopupDismissedThisSession, canEnterWeeklyRate } from './utils/customsExchangeRates';
 import './App.css';
 
 function App() {
@@ -65,6 +69,42 @@ function App() {
     getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null));
   }, [isAuthenticated]);
   const canManageUsers = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
+
+  // PR-184: 로그인 직후(그리고 저장된 토큰으로 인증이 복원되는 경우 둘 다) 이번 주
+  // 관세청 환율이 비어 있으면 알려준다. 조회 실패는 로그인/업무를 막지 않고 콘솔에만 남긴다.
+  const [weeklyRateStatus, setWeeklyRateStatus] = useState<ExchangeRateStatus | null>(null);
+  const [showWeeklyRatePopup, setShowWeeklyRatePopup] = useState(false);
+  const [showWeeklyRateBanner, setShowWeeklyRateBanner] = useState(false);
+  const weeklyRateCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser || weeklyRateCheckedRef.current) return;
+    weeklyRateCheckedRef.current = true;
+    getCustomsExchangeRateStatus()
+      .then((status) => {
+        setWeeklyRateStatus(status);
+        if (!shouldShowWeeklyRatePopup(status)) return;
+        if (canEnterWeeklyRate(currentUser.role)) {
+          if (!wasPopupDismissedThisSession()) setShowWeeklyRatePopup(true);
+        } else {
+          setShowWeeklyRateBanner(true);
+        }
+      })
+      .catch((err) => {
+        console.error('이번 주 관세청 환율 상태를 확인하지 못했습니다', err);
+      });
+  }, [isAuthenticated, currentUser]);
+
+  const handleWeeklyRateSaved = () => {
+    getCustomsExchangeRateStatus()
+      .then((status) => {
+        setWeeklyRateStatus(status);
+        if (!shouldShowWeeklyRatePopup(status)) setShowWeeklyRatePopup(false);
+      })
+      .catch(() => {
+        // 재조회 실패는 조용히 넘어간다 — 이미 저장은 성공했다.
+      });
+  };
   // PR-079: "선적서류 기본정보" 탭도 동일하게 MANAGER/ADMIN 전용이다 — canManageUsers와
   // 조건은 같지만 별도 탭을 가리키는 이름이라 헷갈리지 않게 따로 둔다.
   const isManagerOrAdmin = canManageUsers;
@@ -281,6 +321,7 @@ function App() {
         case 'inventories': return <InventoryReport />;
         case 'brands': return <BrandManager />;
         case 'materialPackagingUnitRules': return <MaterialPackagingUnitRulesManager />;
+        case 'customsExchangeRates': return <CustomsExchangeRatesManager />;
         case 'statusCodes': return <StatusCodesManager />;
         default:
           // Routing Fallback: If unknown, default to Dashboard
@@ -311,6 +352,7 @@ function App() {
       />
 
       <div className="flex-1 flex flex-col min-w-0">
+        {showWeeklyRateBanner && <WeeklyExchangeRateBanner onClose={() => setShowWeeklyRateBanner(false)} />}
         <header className="bg-white border-b border-[#e2e8f0] px-8 py-[18px] flex items-center justify-between">
           <h1 className="text-lg font-semibold text-gray-900">{TAB_LABELS[activeTab] ?? 'SCM Dashboard'}</h1>
           <div className="flex items-center gap-3">
@@ -340,6 +382,14 @@ function App() {
           </div>
         </main>
       </div>
+
+      {showWeeklyRatePopup && weeklyRateStatus && (
+        <WeeklyExchangeRatePopup
+          status={weeklyRateStatus}
+          onClose={() => setShowWeeklyRatePopup(false)}
+          onSaved={handleWeeklyRateSaved}
+        />
+      )}
     </div>
   );
 }
