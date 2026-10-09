@@ -55,5 +55,26 @@ e2e 중 발견한 결함: 품목 생성 시 없는 `categoryId`가 FK 위반 500
 ## 7. 알려진 사항 / 후속
 
 - `frontend-app/src/utils/mainItemsPicker.ts`는 더 이상 화면에서 쓰지 않지만 기존 테스트가 있어 남겨 두었다. 정리는 후속 PR에서.
-- 운영 DB에서 마이그레이션 실행은 이 PR 범위 밖이다(머지 후 별도 승인 필요).
 - 실 브라우저 스크린샷(발주 폼)은 아직 없다.
+
+## 8. 운영 복사본 검증 (MERGE-5, 2026-10-09)
+
+main 반영 전에 Neon 테스트 브랜치(운영 DB 복사본, 호스트 `ep-divine-scene-b3mhdu6u...`, 운영 호스트 `ep-soft-sound-b3lvd0oe...`와 다름 확인)에서 `DB_HOST`만 바꿔(`NODE_ENV=production` 고정) 마이그레이션을 사전 검증했다. 운영 DB 자체는 건드리지 않았다(이번 단계에서 마이그레이션을 직접 실행한 적 없음).
+
+1. **`migration:show`**: `1791500000000-AddMaterialCategories`가 `[ ]`(미적용)으로 나왔다 — 기대한 상태.
+2. **`migration:run`**: 에러 없이 완료(`COMMIT`까지 로그 확인).
+3. **실행 전/후 비교** (운영 DB를 읽기 전용으로 조회한 값과 테스트 복사본의 마이그레이션 적용 후 값):
+
+   | 항목 | 운영 DB(실행 전 기준) | 테스트 복사본(마이그레이션 적용 후) |
+   |---|---|---|
+   | `items` 행 수 | 355 | 355 |
+   | `suppliers` 행 수 | 9 | 9 |
+   | `supplier_main_items` 행 수 | 0 | 0 |
+   | `material_categories` | (테이블 없음) | 10행(겉감~기타, sortOrder 1~10, 전부 활성) |
+   | `supplier_material_categories` | (테이블 없음) | 존재(빈 테이블) |
+   | `items.categoryId` 컬럼 | (없음) | 존재(nullable) |
+
+   기존 테이블 행 수가 그대로 유지됐고, 새 테이블/컬럼만 추가됐다.
+4. **반복 실행 안전성**: 같은 복사본에서 `migration:revert` → `1791500000000`만 되돌려짐(`DROP TABLE`/`DROP COLUMN` 로그가 이 마이그레이션이 만든 객체에만 한정됨, 다른 37개 마이그레이션은 그대로) → 다시 `migration:run` → 에러 없이 재적용, `migration:show`에서 다시 `[X]`로 확인.
+
+**결론: 1단계 통과.** 아래 main 반영을 진행한다.
