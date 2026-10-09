@@ -16,6 +16,10 @@ import { PackingReceiptsController } from './packing-receipts.controller';
 import { PackingReceiptsReportController } from './packing-receipts-report.controller';
 import { AuthModule } from '../auth/auth.module';
 import { MidoPriceTableModule } from '../mido-price-table/mido-price-table.module';
+import { BrandPriceRulesModule } from '../brand-price-rules/brand-price-rules.module';
+import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules.module';
+import { CustomsExchangeRatesModule } from '../customs-exchange-rates/customs-exchange-rates.module';
+import { PriceReferenceService } from './price-reference.service';
 
 @Module({
   imports: [
@@ -23,8 +27,11 @@ import { MidoPriceTableModule } from '../mido-price-table/mido-price-table.modul
     PassportModule.register({ defaultStrategy: 'jwt' }),
     AuthModule,
     MidoPriceTableModule,
+    BrandPriceRulesModule,
+    BrandPrefixRulesModule,
+    CustomsExchangeRatesModule,
   ],
   controllers: [PurchaseOrdersController, PackingReceiptsController, PackingReceiptsReportController],
-  providers: [PurchaseOrdersService, PackingReceiptsService, PurchaseOrderDocumentService],
+  providers: [PurchaseOrdersService, PackingReceiptsService, PurchaseOrderDocumentService, PriceReferenceService],
 })
 export class PurchaseOrdersModule {}

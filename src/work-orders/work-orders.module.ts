@@ -7,6 +7,7 @@ import { WorkOrdersService } from './work-orders.service';
 import { WorkOrdersController } from './work-orders.controller';
 import { AuthModule } from '../auth/auth.module';
 import { StatusCodesModule } from '../status-codes/status-codes.module';
+import { MaterialPackagingUnitRulesModule } from '../material-packaging-unit-rules/material-packaging-unit-rules.module';
 
 // PR-133: 내부 생산 실행 지시(작업지시)만 다룬다. 수주(고객사로부터 받은 주문) 등록 흐름(작업지시서 업로드/AI 분석/저장)은
 // SalesOrdersModule로 분리되었다 — 두 모듈은 서로 무관하다.
@@ -16,6 +17,7 @@ import { StatusCodesModule } from '../status-codes/status-codes.module';
     PassportModule.register({ defaultStrategy: 'jwt' }),
     AuthModule,
     StatusCodesModule,
+    MaterialPackagingUnitRulesModule,
   ],
   controllers: [WorkOrdersController],
   providers: [WorkOrdersService],

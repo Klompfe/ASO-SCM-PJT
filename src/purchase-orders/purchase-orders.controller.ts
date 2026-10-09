@@ -11,12 +11,14 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { PriceReferenceService } from './price-reference.service';
 import { PurchaseOrderDocumentService } from './purchase-order-document.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { BulkCreatePurchaseOrdersDto } from './dto/bulk-create-purchase-orders.dto';
 import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto';
+import { GetPriceReferenceDto } from './dto/get-price-reference.dto';
 import { PurchaseOrder } from './entities/purchase-order.entity';
 
 @ApiTags('Purchase Orders (구매 주문 관리)')
@@ -26,6 +28,7 @@ export class PurchaseOrdersController {
   constructor(
     private readonly poService: PurchaseOrdersService,
     private readonly documentService: PurchaseOrderDocumentService,
+    private readonly priceReferenceService: PriceReferenceService,
   ) {}
 
   @Post()
@@ -67,6 +70,13 @@ export class PurchaseOrdersController {
 
   // PR-173: 고정 경로라 ':id'보다 먼저 선언해야 한다(안 그러면 ':id'가 "material-context"를
   // id로 먼저 가로채 ParseIntPipe에서 400이 난다 — boms.controller.ts의 'duplicates'와 동일한 이유).
+  // PR-185: 단가표(미도 단가표/브랜드 전용가) 참고단가 — 고정 경로라 ':id'보다 먼저 선언.
+  @Get('price-reference')
+  @ApiOperation({ summary: '단가표(USD) 참고단가 후보 — 브랜드 전용가 → 미도 단가표 순, 자동 확정 없음' })
+  getPriceReference(@Query() dto: GetPriceReferenceDto) {
+    return this.priceReferenceService.getPriceReference(dto);
+  }
+
   @Get('material-context')
   @ApiOperation({ summary: '발주 생성 폼용 — 품목이 연결된 스타일의 생산유형(CMT/FOB) 조회(BOM 미연결이면 둘 다 null)' })
   @ApiQuery({ name: 'itemId', required: true, type: Number })

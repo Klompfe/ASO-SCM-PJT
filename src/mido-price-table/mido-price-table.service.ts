@@ -29,9 +29,6 @@ export interface MeterPriceConversionInfo {
   determined: boolean;
   options: MeterPriceConversionOption[];
   warning?: string;
-  // PR-182 요구사항 C: 다데+암홀이 한 줄("TAPE 10MM")에 합쳐진 것으로 보이는(종류
-  // 미지정) 롤 라인에만 참고 문구를 붙인다 — 과거 실제 INVOICE 청구 관행 안내.
-  referenceNote?: string;
 }
 
 export interface MidoPriceCandidateWithConversion extends MidoPriceItem {
@@ -39,7 +36,9 @@ export interface MidoPriceCandidateWithConversion extends MidoPriceItem {
 }
 
 const MISSING_SUBTYPE_WARNING = '실/테이프 종류 미지정 — 선택해 주세요';
-const TAPE_HISTORICAL_NOTE = '참고: 이전 INVOICE는 TAPE 10MM을 $0.04로 일괄 청구함(다데 기준)';
+// PR-185: "이전 INVOICE는 TAPE 10MM을 $0.04로 일괄 청구함" 안내 문구는 실제로는 단가표
+// 기준(다데 $0.04/롤, 암홀 $0.50/롤)으로 각각 계산해야 하는데 과거 관행을 그대로 따르는
+// 것으로 오해할 수 있어 제거했다(제시님 결정) — 종류 미지정이어도 두 후보를 그대로 나열만 한다.
 
 @Injectable()
 export class MidoPriceTableService {
@@ -129,7 +128,6 @@ export class MidoPriceTableService {
       determined: false,
       options: rulesToUse.map(toOption),
       warning: MISSING_SUBTYPE_WARNING,
-      ...(category === 'ROLL' ? { referenceNote: TAPE_HISTORICAL_NOTE } : {}),
     };
   }
 }

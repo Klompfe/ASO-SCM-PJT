@@ -36,6 +36,7 @@ import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { BrandPrefixRulesModule } from './brand-prefix-rules/brand-prefix-rules.module';
 import { MaterialPackagingUnitRulesModule } from './material-packaging-unit-rules/material-packaging-unit-rules.module';
 import { CustomsExchangeRatesModule } from './customs-exchange-rates/customs-exchange-rates.module';
+import { BrandPriceRulesModule } from './brand-price-rules/brand-price-rules.module';
 import { MaterialCategoriesModule } from './material-categories/material-categories.module';
 import { StatusCodesModule } from './status-codes/status-codes.module';
 import { MidoPriceTableModule } from './mido-price-table/mido-price-table.module';
@@ -108,6 +109,7 @@ import { getPostgresConnectionOptions } from './common/database/postgres-connect
     BrandPrefixRulesModule,
     MaterialPackagingUnitRulesModule,
     CustomsExchangeRatesModule,
+    BrandPriceRulesModule,
     MaterialCategoriesModule,
   ],
   controllers: [HealthController],

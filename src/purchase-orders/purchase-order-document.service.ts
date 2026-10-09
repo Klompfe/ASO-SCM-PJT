@@ -42,7 +42,9 @@ export class PurchaseOrderDocumentService {
       itemEnglishName: bom.itemEnglishName,
       composition: bom.composition,
       hsCode: bom.hsCode,
-      styleNo: bom.styleNo,
+      // PR-185: 발주가 명시적으로 스타일에 연결돼 있으면 그 값을 우선한다(BOM 추정값보다
+      // 신뢰도가 높음 — 사람이 직접 연결/확인한 값). 미연결 발주는 기존처럼 BOM 추정값.
+      styleNo: po.styleNo ?? bom.styleNo,
       factory: bom.factory,
       quantity: Number(po.quantity),
       unitPrice: po.unitPrice != null ? Number(po.unitPrice) : null,

@@ -17,7 +17,6 @@ export interface MeterPriceConversionInfo {
   determined: boolean;
   options: MeterPriceConversionOption[];
   warning?: string;
-  referenceNote?: string;
 }
 
 export interface MidoPriceItem {

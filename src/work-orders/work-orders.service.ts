@@ -12,6 +12,7 @@ import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/
 import { calculateMaterialRequirements } from './utils/material-requirements.util';
 import { pickActiveBom } from '../boms/utils/active-bom.util';
 import { StatusCodesService } from '../status-codes/status-codes.service';
+import { MaterialPackagingUnitRulesService } from '../material-packaging-unit-rules/material-packaging-unit-rules.service';
 
 const STATUS_DOMAIN = 'WORK_ORDER';
 
@@ -31,6 +32,7 @@ export class WorkOrdersService {
     private readonly woRepository: Repository<WorkOrder>,
     private readonly dataSource: DataSource,
     private readonly statusCodesService: StatusCodesService,
+    private readonly materialPackagingUnitRulesService: MaterialPackagingUnitRulesService,
   ) {}
 
   async create(dto: CreateWorkOrderDto): Promise<WorkOrder> {
@@ -262,20 +264,38 @@ export class WorkOrdersService {
     const items = bom?.items ?? [];
 
     const itemIds = [...new Set(items.map((i) => i.material?.id).filter((v): v is number => typeof v === 'number'))];
+    // PR-185 B: orderedQty는 이제 "이 스타일(styleNo)에 연결된" 발주만 센다 — 기존처럼
+    // 그 자재의 모든 발주를 합치면 다른 스타일의 발주가 이 스타일의 부족분 계산에
+    // 섞여 들어간다. 스타일 미연결 발주는 unlinkedOrderedQty로 따로(참고용) 집계한다.
     const ordered = new Map<number, number>();
+    const unlinked = new Map<number, number>();
     if (itemIds.length > 0) {
-      const raw = await manager
+      const rawLinked = await manager
         .createQueryBuilder(PurchaseOrder, 'po')
         .select('po.itemId', 'itemId')
         .addSelect('SUM(po.quantity)', 'qty')
         .where('po.itemId IN (:...itemIds)', { itemIds })
+        .andWhere('po.styleNo = :styleNo', { styleNo })
         .andWhere('po.status != :cancelled', { cancelled: PurchaseOrderStatus.CANCELLED })
         .groupBy('po.itemId')
         .getRawMany();
-      for (const r of raw) ordered.set(Number(r.itemId), Number(r.qty) || 0);
+      for (const r of rawLinked) ordered.set(Number(r.itemId), Number(r.qty) || 0);
+
+      const rawUnlinked = await manager
+        .createQueryBuilder(PurchaseOrder, 'po')
+        .select('po.itemId', 'itemId')
+        .addSelect('SUM(po.quantity)', 'qty')
+        .where('po.itemId IN (:...itemIds)', { itemIds })
+        .andWhere('po.styleNo IS NULL')
+        .andWhere('po.status != :cancelled', { cancelled: PurchaseOrderStatus.CANCELLED })
+        .groupBy('po.itemId')
+        .getRawMany();
+      for (const r of rawUnlinked) unlinked.set(Number(r.itemId), Number(r.qty) || 0);
     }
 
-    const rows = calculateMaterialRequirements(targetQuantity, items, ordered);
+    // PR-185 B-2: 실/테이프 자재는 콘/롤 단위로 환산한다 — material_packaging_unit_rules(PR-175).
+    const packagingRules = await this.materialPackagingUnitRulesService.findAll();
+    const rows = calculateMaterialRequirements(targetQuantity, items, ordered, { unlinkedByItemId: unlinked, packagingRules });
     return {
       reason: null,
       bom: { id: latest.id, bomNo: latest.bomNo, version: latest.version, isActive: latest.isActive !== false },

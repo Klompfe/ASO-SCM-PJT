@@ -399,6 +399,36 @@ export class ExportShipmentsService {
     return shipment;
   }
 
+  // PR-185 D: 라인의 발주(PackingReceipt → PurchaseOrder)에 단가표 참고단가가 있으면
+  // 응답에만 함께 실어 준다(저장하지 않음, 화면의 INVOICE 단가 확정 후보로만 쓰임).
+  // 기존 미도 단가표 후보/확정 규칙은 그대로이고, 이건 추가 후보 하나를 얹는 것뿐이다.
+  // findOneOrFail() 자체에 묶지 않고 상세 조회(컨트롤러)에서만 호출한다 — 다른 내부
+  // 호출부(환율수정/상태전이 등)의 기존 배치조회 횟수(N+1 방지 테스트)에 영향을 주지 않기 위함.
+  async attachPurchaseOrderReferencePrices(shipment: ExportShipment): Promise<ExportShipment> {
+    const receiptIds = [...new Set((shipment.lines ?? []).map((l) => l.packingReceiptId).filter((id): id is number => id != null))];
+    if (receiptIds.length === 0) return shipment;
+    const receipts = await this.packingReceiptRepository.find({ where: { id: In(receiptIds) } });
+    const poIds = [...new Set(receipts.map((r) => r.purchaseOrderId).filter((id): id is number => id != null))];
+    if (poIds.length === 0) return shipment;
+    const pos = await this.purchaseOrderRepository.find({ where: { id: In(poIds) } });
+    const poById = new Map(pos.map((p) => [p.id, p]));
+    const receiptById = new Map(receipts.map((r) => [r.id, r]));
+    for (const line of shipment.lines ?? []) {
+      const receipt = line.packingReceiptId ? receiptById.get(line.packingReceiptId) : undefined;
+      const po = receipt?.purchaseOrderId ? poById.get(receipt.purchaseOrderId) : undefined;
+      // KRW 단가(po.unitPrice)가 있으면 이미 PURCHASE_ORDER 출처로 자동계산됐을 라인이라
+      // 참고단가를 덧붙이지 않는다(요구사항 D: "KRW unitPrice로는 계산되지 않은 라인"만).
+      if (po?.referenceUnitPriceUsd != null && po.unitPrice == null) {
+        (line as any).purchaseOrderReferencePrice = {
+          unitPriceUsd: Number(po.referenceUnitPriceUsd),
+          source: po.referencePriceSource ?? null,
+          note: po.referencePriceNote ?? null,
+        };
+      }
+    }
+    return shipment;
+  }
+
   // DRAFT->REVIEWED는 누구나(인증된 사용자), REVIEWED->FINALIZED는 계약 승인과 동일하게
   // MANAGER/ADMIN만 — 두 전이가 같은 엔드포인트를 쓰므로 RolesGuard 데코레이터로는
   // 표현할 수 없어 서비스 레이어에서 조건부로 검사한다.

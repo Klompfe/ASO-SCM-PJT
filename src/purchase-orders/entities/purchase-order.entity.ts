@@ -84,6 +84,23 @@ export class PurchaseOrder {
   @OneToMany(() => PurchaseOrderLine, (line) => line.purchaseOrder, { cascade: true })
   lines?: PurchaseOrderLine[];
 
+  // PR-185: 스타일 연결(선택) — 있으면 "스타일 연결 트랙"(MasterStyle.styleNo, 서비스에서
+  // 존재/BOM 자재 포함 여부를 검증), 없으면 기존처럼 "스타일 미연결 트랙". 기존 발주는
+  // 전부 null로 남는다(이름/품목으로 추측해 백필하지 않음).
+  @Column({ nullable: true })
+  styleNo?: string | null;
+
+  // PR-185: 단가표(미도 단가표/브랜드 전용가) 참고단가(USD) — PurchaseOrder.unitPrice(KRW
+  // 구매단가)와 완전히 별개다. 서버가 자동으로 채우지 않고, 사람이 고른/입력한 값만 저장한다.
+  @Column({ type: 'decimal', nullable: true })
+  referenceUnitPriceUsd?: number | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  referencePriceSource?: 'BRAND_RULE' | 'MIDO_TABLE' | 'MANUAL' | null;
+
+  @Column({ type: 'text', nullable: true })
+  referencePriceNote?: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

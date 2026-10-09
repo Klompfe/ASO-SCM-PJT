@@ -20,6 +20,8 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
   // 포함) 그대로 유지한다(update()의 "undefined면 안 건드림" 규칙과 동일).
   const [unitPrice, setUnitPrice] = useState<number | null>(order.unitPrice != null ? Number(order.unitPrice) : null);
   const [notes, setNotes] = useState(order.notes ?? '');
+  // PR-185: 스타일 연결/해제/변경 — 비우면 연결 해제, 바꾸지 않으면 서버에 아예 안 보낸다.
+  const [styleNoInput, setStyleNoInput] = useState(order.styleNo ?? '');
   // MERGE-3(PR-176×177): 생성 폼과 같은 색상/사이즈 줄 편집 — 기존 줄이 있으면 채워서 보여준다.
   const [poLines, setPoLines] = useState<PurchaseOrderLine[]>(
     (order.lines ?? []).map((l) => ({ color: l.color ?? '', size: l.size ?? '', qty: l.qty })),
@@ -48,11 +50,13 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
       const linesPayload = hasLines || hadLinesOriginally
         ? poLines.map((l) => ({ color: l.color || undefined, size: l.size || undefined, qty: Number(l.qty) }))
         : undefined;
+      const styleNoChanged = styleNoInput.trim() !== (order.styleNo ?? '');
       const res = await updatePurchaseOrder(order.id, {
         quantity: hasLines ? sumPurchaseOrderLines(poLines) : quantity,
         unitPrice: unitPrice ?? undefined,
         notes,
         lines: linesPayload,
+        ...(styleNoChanged ? { styleNo: styleNoInput.trim() === '' ? null : styleNoInput.trim() } : {}),
       });
       (res?.warnings ?? []).forEach((w: string) => toast(w, { icon: '⚠️' }));
       toast.success(`발주 #${order.id}이(가) 수정되었습니다.`);
@@ -91,6 +95,9 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
         </label>
         <label className="flex flex-col text-sm text-gray-600">비고
           <input className="border rounded px-3 py-2 mt-1" value={notes} onChange={(e) => setNotes(e.target.value)} aria-label="수정 비고" />
+        </label>
+        <label className="flex flex-col text-sm text-gray-600">연결 스타일(선택, 비우면 연결 해제)
+          <input className="border rounded px-3 py-2 mt-1" placeholder="예: MB62SLM103Z" value={styleNoInput} onChange={(e) => setStyleNoInput(e.target.value)} aria-label="연결 스타일" />
         </label>
         <details className="border border-gray-200 rounded p-2 bg-white" open={hasLines}>
           <summary className="cursor-pointer text-sm text-gray-700">색상/사이즈별 상세 (선택){hasLines ? ` — ${poLines.length}줄, 합계 ${sumPurchaseOrderLines(poLines)}` : ''}</summary>

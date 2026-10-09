@@ -1,5 +1,15 @@
 import type { ExcelColumn } from './excelExport';
 
+// PR-185 B-2: 실/테이프 자재(Item.unit이 콘/롤)만 채워진다. 종류 미지정이거나 규칙
+// 테이블에 없으면 대신 conversionWarning만 채워진다(추측해서 환산하지 않음).
+export interface MaterialRequirementPackaging {
+  packagingUnitLabel: string;
+  unitLengthM: number;
+  requiredPackages: number;
+  shortagePackages: number;
+  conversionFormula: string;
+}
+
 export interface MaterialRequirementRow {
   itemId: number;
   itemCode: string;
@@ -8,9 +18,16 @@ export interface MaterialRequirementRow {
   colors: string[];
   consumptionPerUnit: number;
   requiredQty: number;
+  // PR-185 B: 같은 스타일에 연결된 발주 수량 합(기존엔 그 자재의 전체 발주 합계였다).
   orderedQty: number;
+  // PR-185 B: 스타일 미연결 발주 수량 합 — 참고 표시용, shortageQty 계산에서 차감하지 않음.
+  // 작업지시 기준 경로(work-orders 구버전 호출부)에서도 항상 오지만, 기존 테스트 픽스처와의
+  // 호환을 위해 선택 필드로 둔다(없으면 0으로 취급).
+  unlinkedOrderedQty?: number;
   shortageQty: number;
   lineCount: number;
+  packaging?: MaterialRequirementPackaging;
+  conversionWarning?: string;
 }
 
 export type RequirementReason = 'NO_STYLE_NO' | 'NO_BOM' | null;

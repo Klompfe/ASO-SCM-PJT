@@ -39,4 +39,15 @@ export class GetPurchaseOrdersFilterDto extends OptionalPaginationQueryDto {
   @IsOptional()
   @IsString()
   endDate?: string;
+
+  // PR-185: 두 트랙 필터 — STYLE(스타일 연결, styleNo IS NOT NULL) / ITEM_ONLY(스타일 미연결, styleNo IS NULL).
+  @ApiPropertyOptional({ description: '스타일 연결 여부 필터', enum: ['STYLE', 'ITEM_ONLY'] })
+  @IsOptional()
+  @IsEnum(['STYLE', 'ITEM_ONLY'])
+  track?: 'STYLE' | 'ITEM_ONLY';
+
+  @ApiPropertyOptional({ description: '연결된 스타일번호 필터(정확히 일치)' })
+  @IsOptional()
+  @IsString()
+  styleNo?: string;
 }

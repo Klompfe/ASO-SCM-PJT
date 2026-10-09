@@ -31,6 +31,9 @@ export interface ExportShipmentLine {
   materialSubType?: string | null;
   // PR-182: 환산이 적용된 경우 확정 시 저장된 근거 식(예: "미도 단가표 0.00012/m × 2500m = 0.3/콘(코아사)").
   priceBasisNote?: string | null;
+  // PR-185 D: 이 라인의 발주(PurchaseOrder)에 단가표 참고단가가 있고 KRW로 계산되지 않은
+  // 경우에만 응답에 실린다(저장되지 않음, INVOICE 단가 확정 화면의 후보로만 쓰임).
+  purchaseOrderReferencePrice?: { unitPriceUsd: number; source: string | null; note: string | null } | null;
 }
 
 export interface ExportShipment {

@@ -48,8 +48,10 @@ describe('BOM 소요명세서 (PR-120)', () => {
     }
     return bom;
   };
-  const mkPo = async (itemId: number, quantity: number, status?: string) => {
-    const id = (await auth(request(app.getHttpServer()).post('/purchase-orders')).send({ supplierId, itemId, quantity, unitPrice: 1 }).expect(201)).body.data.id;
+  // PR-185: orderedQty는 이제 "같은 styleNo로 연결된" 발주만 센다(기존엔 그 자재의 전체
+  // 발주 합계였다) — 이 파일의 발주는 모두 REQ-STYLE-1 소요량 계산에 쓰이므로 기본으로 연결한다.
+  const mkPo = async (itemId: number, quantity: number, status?: string, styleNo = 'REQ-STYLE-1') => {
+    const id = (await auth(request(app.getHttpServer()).post('/purchase-orders')).send({ supplierId, itemId, quantity, unitPrice: 1, styleNo }).expect(201)).body.data.id;
     if (status) await auth(request(app.getHttpServer()).patch(`/purchase-orders/${id}/status`)).send({ status }).expect(200);
   };
   const mkWo = async (itemId: number, targetQuantity: number) =>

@@ -10,6 +10,7 @@ import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
 import { StatusCodesService } from '../status-codes/status-codes.service';
+import { MaterialPackagingUnitRulesService } from '../material-packaging-unit-rules/material-packaging-unit-rules.service';
 
 describe('WorkOrdersService', () => {
   let service: WorkOrdersService;
@@ -57,6 +58,10 @@ describe('WorkOrdersService', () => {
   const mockStatusCodesService = {
     findAll: jest.fn().mockResolvedValue([]),
   };
+  // PR-185 B-2: 실/테이프 콘·롤 환산 규칙 조회 — 기존 테스트는 규칙 없이도 그대로 통과해야 하므로 빈 배열.
+  const mockMaterialPackagingUnitRulesService = {
+    findAll: jest.fn().mockResolvedValue([]),
+  };
 
 
 
@@ -87,6 +92,10 @@ describe('WorkOrdersService', () => {
         {
           provide: StatusCodesService,
           useValue: mockStatusCodesService,
+        },
+        {
+          provide: MaterialPackagingUnitRulesService,
+          useValue: mockMaterialPackagingUnitRulesService,
         },
       ],
     }).compile();

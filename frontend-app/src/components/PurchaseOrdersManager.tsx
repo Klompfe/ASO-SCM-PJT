@@ -15,20 +15,29 @@ import {
 import { downloadBase64File } from '../utils/fileDownload';
 import { getSuppliers } from '../api/suppliers.service';
 import { getItems, getItem } from '../api/items.service';
+import { getMasterStyles } from '../api/styles.service';
+import { getStyleRequirements } from '../api/workOrders.service';
+import { getBrandPriceRules } from '../api/brandPriceRules.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
-import { pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, buildEditableOrderByItem, isUnitPriceRequired, sumPurchaseOrderLines, type SupplierRef } from '../utils/purchaseOrderForm';
+import {
+  pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, buildEditableOrderByItem, isUnitPriceRequired,
+  sumPurchaseOrderLines, suggestStyleLinkedQuantity, trackBadgeLabel, isQuantityFilled, type SupplierRef,
+} from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { ShipmentsManager } from './ShipmentsManager';
 import { SupplierQuickCreateModal } from './SupplierQuickCreateModal';
 import { categoryFilterState, supplierSearchCategoryId } from '../utils/materialCategories';
+import { PriceReferenceBlock, type PriceReferenceValue } from './PriceReferenceBlock';
 
-interface ItemRef { id: number; name: string; code: string; categoryId?: number | null }
+interface ItemRef { id: number; name: string; code: string; categoryId?: number | null; unit?: string | null }
+interface StyleOption { styleNo: string; overview?: { styleName?: string | null } | null }
 
-const emptyForm: CreatePurchaseOrder = { supplierId: 0, itemId: 0, quantity: 1, unitPrice: 0 };
+const emptyForm: CreatePurchaseOrder = { supplierId: 0, itemId: 0, unitPrice: 0 };
+const emptyPriceRef: PriceReferenceValue = { usd: null, source: null, note: null };
 
 interface PurchaseOrdersManagerProps {
   prefillItemId?: number | null;
@@ -40,11 +49,21 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newPo, setNewPo] = useState<CreatePurchaseOrder>(emptyForm);
+  // PR-185 B: 수량은 더 이상 기본값 1로 시작하지 않는다 — 빈 문자열로 시작해 필수로 검증한다.
+  const [quantityInput, setQuantityInput] = useState('');
   // PR-176: 색상/사이즈별 상세 줄. 비어 있으면 기존처럼 총수량을 직접 입력한다(하위호환).
   const [poLines, setPoLines] = useState<PurchaseOrderLine[]>([]);
   // PR-126: 공급업체/품목은 <select>(최초 100개만 불러와 그 밖의 품목은 선택 불가)가 아니라 서버 검색 선택이다.
   const [supplier, setSupplier] = useState<SupplierRef | null>(null);
   const [item, setItem] = useState<ItemRef | null>(null);
+  // PR-185 A: 발주 폼의 스타일 연결(선택) — 고르면 그 스타일 BOM의 자재만 고를 수 있다("스타일 연결 트랙").
+  const [styleSearch, setStyleSearch] = useState<StyleOption | null>(null);
+  const [styleMaterialRows, setStyleMaterialRows] = useState<MaterialRequirementRow[]>([]);
+  const [styleRowsLoading, setStyleRowsLoading] = useState(false);
+  // PR-185 C: 스타일 미연결 트랙에서 사람이 고르는 브랜드(기본 "선택 안 함" = 미도 단가표만).
+  const [brandOverride, setBrandOverride] = useState('');
+  const [availableBrands, setAvailableBrands] = useState<string[]>([]);
+  const [priceRef, setPriceRef] = useState<PriceReferenceValue>(emptyPriceRef);
   // PR-173: 선택된 품목이 연결된 스타일의 생산유형 — CMT면 단가를 선택 입력으로
   // 허용한다(수출선적서류 작성 시점에만 필요). BOM 미연결/조회 실패/FOB는 모두
   // 기존처럼 단가 필수로 취급한다(null을 "모름=FOB와 동일"로 안전하게 처리).
@@ -62,6 +81,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const formValuesRef = useRef({ supplier: null as SupplierRef | null, unitPrice: 0, autofilled: false });
   const [filterSupplier, setFilterSupplier] = useState<SupplierRef | null>(null);
   const [filterItem, setFilterItem] = useState<ItemRef | null>(null);
+  // PR-185 A: 목록 트랙 필터 — 전체 / 스타일 연결 / 스타일 미연결.
+  const [listTrack, setListTrack] = useState<'ALL' | 'STYLE' | 'ITEM_ONLY'>('ALL');
   // PR-183: "이 품목군 취급 업체만 보기" — 기본 켜짐. 품목에 품목군이 있을 때만 보이고, 켜면 폼의 공급업체 검색을 그 품목군 업체로 거른다(자동 선택은 하지 않음).
   const [byItemCategory, setByItemCategory] = useState(true);
   // PR-074: 포장내역은 발주 하위 흐름이라 별도 탭이 아니라 발주 행에서 모달로 연다.
@@ -85,6 +106,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       const res = await getPurchaseOrders({
         supplierId: filterSupplier?.id || undefined,
         itemId: filterItem?.id || undefined,
+        track: listTrack === 'ALL' ? undefined : listTrack,
       });
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setPurchaseOrders(data);
@@ -94,7 +116,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     } finally {
       setLoading(false);
     }
-  }, [filterSupplier, filterItem]);
+  }, [filterSupplier, filterItem, listTrack]);
 
   formValuesRef.current = { supplier, unitPrice: newPo.unitPrice ?? 0, autofilled };
 
@@ -120,13 +142,35 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     const res = await getItems({ keyword: keyword || undefined, limit: 20 });
     return Array.isArray(res) ? res : (res?.items ?? []);
   }, []);
+  // PR-185 A: 스타일을 고르면 그 스타일 BOM의 자재만 검색 후보로 보여준다(두 트랙을 섞지 않기 위함).
+  const searchStyleMaterials = useCallback(async (keyword: string): Promise<ItemRef[]> => {
+    const kw = keyword.trim().toLowerCase();
+    return styleMaterialRows
+      .filter((r) => !kw || r.itemName.toLowerCase().includes(kw) || r.itemCode.toLowerCase().includes(kw))
+      .map((r) => ({ id: r.itemId, name: r.itemName, code: r.itemCode }));
+  }, [styleMaterialRows]);
+  const searchStyles = useCallback(async (keyword: string): Promise<StyleOption[]> => {
+    const res = await getMasterStyles(keyword ? { styleNo: keyword } : undefined);
+    const list: StyleOption[] = Array.isArray(res) ? res : (res?.items ?? []);
+    return list.slice(0, 30);
+  }, []);
+
+  useEffect(() => {
+    getBrandPriceRules()
+      .then((res) => {
+        const list = Array.isArray(res) ? res : (res?.data ?? []);
+        setAvailableBrands([...new Set(list.map((r: any) => r.brandName))] as string[]);
+      })
+      .catch(() => setAvailableBrands([]));
+  }, []);
 
   // 품목을 고르면 그 품목의 가장 최근 발주 이력으로 공급업체/단가를 미리 채운다(수정 가능). 이력이 없으면 공란.
-  const selectItem = useCallback(async (picked: ItemRef | null, opts?: { quantity?: number }) => {
+  const selectItem = useCallback(async (picked: ItemRef | null, opts?: { quantityInput?: string }) => {
     setItem(picked);
     setAutofillNote(null);
     setItemProductionType(null);
-    if (opts?.quantity) setNewPo((prev) => ({ ...prev, quantity: opts.quantity as number }));
+    setPriceRef(emptyPriceRef);
+    if (opts?.quantityInput !== undefined) setQuantityInput(opts.quantityInput);
     if (!picked) {
       setOrderType(null);
       setOrderTypeHint(null);
@@ -161,8 +205,36 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     }
   }, []);
 
-  const handlePickMaterial = (row: MaterialRequirementRow) => {
-    void selectItem({ id: row.itemId, name: row.itemName, code: row.itemCode }, { quantity: suggestedQuantity(row.shortageQty) });
+  // 스타일 연결 트랙에서 BOM 자재를 고르면: 품목 선택(기존 로직)에 더해 수량을
+  // 부족분(콘/롤 환산 포함, suggestStyleLinkedQuantity)으로 미리 채운다.
+  const selectStyleMaterial = (picked: ItemRef | null) => {
+    if (!picked) { void selectItem(null); return; }
+    const row = styleMaterialRows.find((r) => r.itemId === picked.id);
+    if (!row) { void selectItem(picked); return; }
+    const sugg = suggestStyleLinkedQuantity(row);
+    void selectItem({ ...picked, unit: sugg.unitLabel ?? undefined }, { quantityInput: sugg.quantity != null ? String(sugg.quantity) : '' });
+  };
+
+  useEffect(() => {
+    if (!styleSearch) { setStyleMaterialRows([]); return; }
+    let cancelled = false;
+    setStyleRowsLoading(true);
+    getStyleRequirements(styleSearch.styleNo)
+      .then((res) => { if (!cancelled) setStyleMaterialRows(res.rows); })
+      .catch(() => { if (!cancelled) setStyleMaterialRows([]); })
+      .finally(() => { if (!cancelled) setStyleRowsLoading(false); });
+    return () => { cancelled = true; };
+  }, [styleSearch]);
+
+  const handlePickMaterial = (row: MaterialRequirementRow, styleNo?: string) => {
+    // PR-185: 소요량 화면에서 "이 자재로 발주하기"를 누르면 그 스타일도 함께 연결한다.
+    if (styleNo) {
+      setStyleSearch({ styleNo });
+      setStyleMaterialRows([row]);
+      selectStyleMaterial({ id: row.itemId, name: row.itemName, code: row.itemCode });
+    } else {
+      void selectItem({ id: row.itemId, name: row.itemName, code: row.itemCode }, { quantityInput: String(suggestedQuantity(row.shortageQty)) });
+    }
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
@@ -201,11 +273,16 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setError('공급업체와 품목을 선택해 주세요.');
       return;
     }
+    const hasLines = poLines.length > 0;
+    // PR-185 B: 수량은 더 이상 기본값이 없다 — 라인이 없으면 반드시 입력해야 한다.
+    if (!hasLines && !isQuantityFilled(quantityInput)) {
+      setError('수량을 입력해 주세요(0보다 큰 숫자).');
+      return;
+    }
     if (isUnitPriceRequired(itemProductionType) && (!newPo.unitPrice || newPo.unitPrice <= 0)) {
       setError('품목 단가를 입력해 주세요.');
       return;
     }
-    const hasLines = poLines.length > 0;
     if (hasLines && poLines.some((l) => !Number.isInteger(Number(l.qty)) || Number(l.qty) < 1)) {
       setError('색상/사이즈 줄의 수량은 1 이상의 정수여야 합니다.');
       return;
@@ -218,16 +295,29 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       // CMT 건에서 단가를 비워둔 경우(0) undefined로 보낸다 — "입력 안 함"과 "0원"을 구분한다.
       const unitPrice = newPo.unitPrice && newPo.unitPrice > 0 ? newPo.unitPrice : undefined;
       const orderTypeValue = orderType as 'FIRM' | 'PROVISIONAL';
+      const common = {
+        supplierId: supplier.id, itemId: item.id, unitPrice, orderType: orderTypeValue,
+        notes: newPo.notes,
+        styleNo: styleSearch?.styleNo || undefined,
+        referenceUnitPriceUsd: priceRef.usd ?? undefined,
+        referencePriceSource: priceRef.source ?? undefined,
+        referencePriceNote: priceRef.note ?? undefined,
+      };
       const payload = hasLines
-        ? { ...newPo, unitPrice, quantity: undefined, lines: poLines.map((l) => ({ color: l.color || undefined, size: l.size || undefined, qty: Number(l.qty) })), supplierId: supplier.id, itemId: item.id, orderType: orderTypeValue }
-        : { ...newPo, unitPrice, lines: undefined, supplierId: supplier.id, itemId: item.id, orderType: orderTypeValue };
+        ? { ...common, quantity: undefined, lines: poLines.map((l) => ({ color: l.color || undefined, size: l.size || undefined, qty: Number(l.qty) })) }
+        : { ...common, quantity: Number(quantityInput), lines: undefined };
       const res = await createPurchaseOrder(payload);
       (res?.warnings ?? []).forEach((w: string) => toast(w, { icon: '⚠️' }));
       toast.success('발주가 생성되었습니다.');
       setPoLines([]);
       setNewPo(emptyForm);
+      setQuantityInput('');
       setSupplier(null);
       setItem(null);
+      setStyleSearch(null);
+      setStyleMaterialRows([]);
+      setBrandOverride('');
+      setPriceRef(emptyPriceRef);
       setItemProductionType(null);
       setAutofilled(false);
       setAutofillNote(null);
@@ -271,6 +361,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     return <span className={`px-2 py-1 rounded text-xs font-medium ${style}`}>{status}</span>;
   };
 
+  const lineUnitForPriceRef = item?.unit ?? undefined;
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-semibold text-gray-800">Purchase Orders</h2>
@@ -294,6 +386,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
 
       <StyleShortagePanel
         onPickMaterial={handlePickMaterial}
+        onGoToList={() => setListTrack('ALL')}
         refreshKey={panelRefresh}
         editable={buildEditableOrderByItem(pendingOrders)}
         onEdit={(order, pendingCount) => setEditing({ order, pendingCount })}
@@ -303,11 +396,27 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       <form ref={formRef} onSubmit={handleCreate} className="bg-gray-50 p-4 rounded-lg space-y-2">
         <div className="flex flex-wrap gap-4 items-end">
           <div className="flex flex-col">
-            <label className="text-sm text-gray-600 mb-1">품목(원자재)</label>
+            <label className="text-sm text-gray-600 mb-1">스타일 연결(선택)</label>
+            <SearchSelectField<StyleOption>
+              value={styleSearch}
+              onChange={(picked) => { setStyleSearch(picked); setItem(null); setQuantityInput(''); }}
+              search={searchStyles}
+              getKey={(s) => s.styleNo}
+              getLabel={(s) => s.styleNo}
+              ariaLabel="스타일 연결"
+              placeholder="스타일 미연결(기본)"
+              title="스타일 검색 — 고르면 그 스타일 BOM 자재만 선택할 수 있습니다"
+              allowClear
+              className="w-56"
+            />
+            {styleSearch && <span className="text-xs text-gray-400 mt-1">{styleRowsLoading ? '자재 목록 불러오는 중...' : `${styleMaterialRows.length}종 자재`}</span>}
+          </div>
+          <div className="flex flex-col">
+            <label className="text-sm text-gray-600 mb-1">품목(원자재){styleSearch && <span className="text-blue-600 font-normal"> — 이 스타일 BOM 자재만</span>}</label>
             <SearchSelectField<ItemRef>
               value={item}
-              onChange={(picked) => { void selectItem(picked); }}
-              search={searchRawMaterials}
+              onChange={(picked) => { if (styleSearch) selectStyleMaterial(picked); else void selectItem(picked); }}
+              search={styleSearch ? searchStyleMaterials : searchRawMaterials}
               getKey={(i) => i.id}
               getLabel={(i) => `${i.name} (${i.code})`}
               renderRow={(i) => (<span>{i.name} <span className="text-gray-400 text-xs">{i.code}</span></span>)}
@@ -352,15 +461,16 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             )}
           </div>
           <div className="flex flex-col">
-            <label className="text-sm text-gray-600 mb-1">수량</label>
+            <label className="text-sm text-gray-600 mb-1">수량{item?.unit && <span className="text-gray-400 font-normal"> ({item.unit})</span>}</label>
             <input
               type="number"
               min={1}
               className="border border-gray-300 rounded px-3 py-2 w-32 disabled:bg-gray-100"
-              value={poLines.length > 0 ? sumPurchaseOrderLines(poLines) : newPo.quantity}
+              value={poLines.length > 0 ? sumPurchaseOrderLines(poLines) : quantityInput}
               readOnly={poLines.length > 0}
+              required={poLines.length === 0}
               title={poLines.length > 0 ? '색상/사이즈 줄 합계로 자동 계산됩니다' : undefined}
-              onChange={(e) => setNewPo({ ...newPo, quantity: Number(e.target.value) })}
+              onChange={(e) => setQuantityInput(e.target.value)}
               aria-label="수량"
             />
           </div>
@@ -383,6 +493,15 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               <option value="PROVISIONAL">가발주(CMT)</option>
             </select>
           </div>
+          {!styleSearch && (
+            <div className="flex flex-col">
+              <label className="text-sm text-gray-600 mb-1">적용 브랜드</label>
+              <select className="border border-gray-300 rounded px-3 py-2 w-36" value={brandOverride} onChange={(e) => setBrandOverride(e.target.value)} aria-label="적용 브랜드">
+                <option value="">선택 안 함</option>
+                {availableBrands.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+          )}
           <div className="flex flex-col flex-1 min-w-[200px]">
             <label className="text-sm text-gray-600 mb-1">비고</label>
             <textarea
@@ -397,6 +516,16 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         </div>
         {autofillNote && <p className="text-xs text-blue-700" data-testid="autofill-note">{autofillNote}</p>}
         {orderTypeHint && <p className="text-xs text-gray-500" data-testid="order-type-hint">구분 제안: {orderTypeHint}</p>}
+        {item && (
+          <PriceReferenceBlock
+            itemId={item.id}
+            styleNo={styleSearch?.styleNo}
+            brandName={styleSearch ? undefined : (brandOverride || undefined)}
+            lineUnit={lineUnitForPriceRef}
+            value={priceRef}
+            onChange={setPriceRef}
+          />
+        )}
         {/* PR-176: 색상/사이즈별 상세 — 접었다 펼친다. 줄이 하나라도 있으면 수량은 줄 합계로 계산된다. */}
         <details className="border border-gray-200 rounded p-2 bg-white" open={poLines.length > 0}>
           <summary className="cursor-pointer text-sm text-gray-700">색상/사이즈별 상세 (선택){poLines.length > 0 ? ` — ${poLines.length}줄, 합계 ${sumPurchaseOrderLines(poLines)}` : ''}</summary>
@@ -446,6 +575,21 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             className="w-64"
           />
         </div>
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">트랙</label>
+          <div className="flex gap-1">
+            {(['ALL', 'STYLE', 'ITEM_ONLY'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setListTrack(t)}
+                className={`px-3 py-2 rounded text-sm ${listTrack === t ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+              >
+                {t === 'ALL' ? '전체' : t === 'STYLE' ? '스타일 연결' : '스타일 미연결'}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
@@ -453,6 +597,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="px-4 py-2 text-left">품목</th>
+              <th className="px-4 py-2 text-left">스타일</th>
               <th className="px-4 py-2 text-right">수량</th>
               <th className="px-4 py-2 text-right">단가</th>
               <th className="px-4 py-2 text-right">총액</th>
@@ -468,6 +613,9 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               <Fragment key={po.id}>
               <tr className="hover:bg-gray-50">
                 <td className="px-4 py-2">{po.item?.name ?? `#${po.itemId}`}</td>
+                <td className="px-4 py-2">
+                  <span className={`px-2 py-0.5 rounded-full text-xs ${po.styleNo ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400'}`}>{trackBadgeLabel(po.styleNo)}</span>
+                </td>
                 <td className="px-4 py-2 text-right">{po.quantity}</td>
                 <td className="px-4 py-2 text-right">
                   {po.unitPrice != null ? po.unitPrice : (
@@ -498,6 +646,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                     <>
                       <button className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700" onClick={() => handleReceive(po.id)}>입고 처리</button>
                       <button className="text-red-600" onClick={() => handleCancel(po.id)}>취소</button>
+                      <button className="text-amber-700" onClick={() => setEditing({ order: po, pendingCount: 1 })}>수정</button>
                     </>
                   )}
                   <button className="text-purple-600" onClick={() => setPackingReceiptsFor(po)}>포장내역</button>
@@ -505,7 +654,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               </tr>
               {po.lines && po.lines.length > 0 && (
                 <tr className="bg-gray-50 text-xs text-gray-600">
-                  <td className="px-4 py-1" colSpan={8}>
+                  <td className="px-4 py-1" colSpan={9}>
                     색상/사이즈별: {po.lines.map((l, i) => <span key={i} className="mr-3">{l.color || '-'}/{l.size || '-'} × {l.qty}</span>)}
                   </td>
                 </tr>

@@ -12,12 +12,16 @@ export interface BulkDraftSource {
   itemCode: string;
   shortageQty: number;
   hasEditablePending: boolean;
+  // PR-185 B-2: 실/테이프는 콘/롤 단위로 부족분을 제안한다(없으면 일반 수량으로 제안).
+  packagingShortagePackages?: number;
+  packagingUnitLabel?: string;
 }
 
 interface Draft {
   itemId: number;
   itemName: string;
   itemCode: string;
+  unitLabel?: string;
   include: boolean;
   supplierId: number | null;
   candidateSupplierIds: number[];
@@ -31,6 +35,8 @@ interface Draft {
 
 interface Props {
   sources: BulkDraftSource[];
+  // PR-185 A: 소요량 화면에서 진입하면 그 스타일을 각 행에 자동으로 연결한다.
+  styleNo?: string;
   onDone: () => void;
   onClose: () => void;
 }
@@ -38,7 +44,7 @@ interface Props {
 // PR-179: 일괄발주 2단계 — 1) 자재별 초안(공급업체·수량·단가)을 보여주고 사람이 고친다
 // 2) "일괄 생성"을 눌러야 한 번에 커밋한다. 공급업체는 이력상 후보가 하나일 때만 미리 고르고,
 // 나머지는 추측하지 않고 직접 고르게 둔다.
-export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClose }) => {
+export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, styleNo, onDone, onClose }) => {
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [suppliers, setSuppliers] = useState<{ id: number; name: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -64,7 +70,8 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
           include: !s.hasEditablePending,
           supplierId: resolveBulkSupplierId(candidates),
           candidateSupplierIds: candidates,
-          quantity: suggestedQuantity(s.shortageQty),
+          quantity: s.packagingShortagePackages != null ? Math.max(0, s.packagingShortagePackages) : suggestedQuantity(s.shortageQty),
+          unitLabel: s.packagingUnitLabel,
           unitPrice: latest ? latest.unitPrice : null,
           note: s.hasEditablePending ? '이미 미입고 발주가 있어 기본 제외 — 필요하면 포함' : null,
           orderType: suggestions[i]?.orderType ?? null,
@@ -101,6 +108,7 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
         // MERGE-2: 가발주(CMT)는 단가가 선택 입력이라 비워둔 채 보낼 수 있다(PR-173 정책).
         unitPrice: d.unitPrice ?? undefined,
         orderType: d.orderType as PurchaseOrderType,
+        styleNo,
       })));
       toast.success(`${included.length}건의 발주가 생성되었습니다.`);
       onDone();
@@ -141,7 +149,7 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, onDone, onClos
                   <td className="p-2">
                     <input type="checkbox" checked={d.include} onChange={(e) => update(d.itemId, { include: e.target.checked })} aria-label={`${d.itemName} 포함`} />
                   </td>
-                  <td className="p-2">{d.itemName} <span className="text-xs text-gray-400">{d.itemCode}</span></td>
+                  <td className="p-2">{d.itemName} <span className="text-xs text-gray-400">{d.itemCode}</span>{d.unitLabel && <span className="text-xs text-indigo-600 ml-1">({d.unitLabel})</span>}</td>
                   <td className="p-2">
                     <select
                       className="border rounded px-2 py-1 w-56"

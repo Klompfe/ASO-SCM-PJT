@@ -124,7 +124,6 @@ describe('MidoPriceTableService.findCandidates — 미터단가 콘/롤 환산 (
     expect(conv.determined).toBe(false);
     expect(conv.options.map((o) => o.unitPriceUsd).sort()).toEqual([0.06, 0.3, 0.48]);
     expect(conv.warning).toContain('미지정');
-    expect(conv.referenceNote).toBeUndefined();
   });
 
   it('종류가 미지정이고 후보 이름에 구체적인 종류가 드러나면(다데/암홀) 그 후보 자신의 미터단가로만 환산한다 — 서로 다른 미터단가를 섞지 않는다', async () => {
@@ -134,8 +133,9 @@ describe('MidoPriceTableService.findCandidates — 미터단가 콘/롤 환산 (
     expect(dade.determined).toBe(false);
     expect(dade.options).toEqual([expect.objectContaining({ materialSubType: 'DADE', unitPriceUsd: 0.04 })]);
     expect(amhol.options).toEqual([expect.objectContaining({ materialSubType: 'AMHOL', unitPriceUsd: 0.5 })]);
-    expect(dade.referenceNote).toContain('TAPE 10MM');
-    expect(amhol.referenceNote).toContain('TAPE 10MM');
+    // PR-185: 과거 "TAPE 10MM을 $0.04로 일괄 청구" 안내 문구는 제거했다 — 종류 미지정이어도 후보만 나열한다.
+    expect((dade as any).referenceNote).toBeUndefined();
+    expect((amhol as any).referenceNote).toBeUndefined();
   });
 
   it('후보 이름이 특정 종류를 가리키지 않으면(예: "TAPE 10MM" 한 줄로 합쳐진 표기) 카테고리의 모든 종류를 나열한다', async () => {
@@ -143,7 +143,7 @@ describe('MidoPriceTableService.findCandidates — 미터단가 콘/롤 환산 (
     const result = await service.findCandidates('TAPE 10MM', { lineUnit: 'ROLL' });
     const conv = result.find((r) => r.id === 7)!.conversion!;
     expect(conv.options.map((o) => o.materialSubType).sort()).toEqual(['AMHOL', 'DADE']);
-    expect(conv.referenceNote).toContain('TAPE 10MM');
+    expect((conv as any).referenceNote).toBeUndefined();
   });
 
   it('단가표 단위가 M이 아니면(EA 등) 환산 대상이 아니다', async () => {

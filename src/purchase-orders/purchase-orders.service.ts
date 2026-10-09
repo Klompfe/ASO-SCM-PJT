@@ -14,6 +14,9 @@ import { Supplier } from '../suppliers/entities/supplier.entity';
 import { Item } from '../items/entities/item.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
 import { resolveOptionalPagination } from '../common/dto/optional-pagination-query.dto';
+import { MasterStyle } from '../styles/entities/master-style.entity';
+import { Bom } from '../boms/entities/bom.entity';
+import { pickActiveBom } from '../boms/utils/active-bom.util';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -57,6 +60,10 @@ export class PurchaseOrdersService {
       throw new NotFoundException(`ID가 ${dto.itemId}인 품목을 찾을 수 없습니다.`);
     }
 
+    if (dto.styleNo) {
+      await this.assertStyleLinkable(dto.styleNo, dto.itemId);
+    }
+
     const po = this.poRepository.create({
       quantity,
       unitPrice: dto.unitPrice,
@@ -65,6 +72,11 @@ export class PurchaseOrdersService {
       supplier,
       item,
       lines: lines.map((l) => ({ color: l.color ?? null, size: l.size ?? null, qty: l.qty })),
+      // PR-185: 스타일 연결(선택)과 단가표 참고단가(선택, KRW unitPrice와 별개).
+      styleNo: dto.styleNo ?? null,
+      referenceUnitPriceUsd: dto.referenceUnitPriceUsd ?? null,
+      referencePriceSource: dto.referencePriceSource ?? null,
+      referencePriceNote: dto.referencePriceNote ?? null,
     });
 
     const saved = await this.poRepository.save(po);
@@ -99,6 +111,25 @@ export class PurchaseOrdersService {
     const byStyle = new Map<string, ProductionType | null>();
     for (const r of rows) byStyle.set(r.styleNo, r.productionType ?? null);
     return [...byStyle.entries()].map(([styleNo, productionType]) => ({ styleNo, productionType }));
+  }
+
+  // PR-185: 발주를 스타일에 연결할 때(styleNo 지정) 그 스타일이 존재하고, 최신(활성) BOM에
+  // 이 발주의 자재(itemId)가 실제로 쓰이고 있는지 확인한다. 둘 중 하나라도 아니면 400 —
+  // "스타일 연결"과 "스타일 미연결" 두 트랙을 섞지 않기 위함(BOM에 없는 자재를 억지로
+  // 스타일에 연결하면 소요량 계산이 틀어진다).
+  private async assertStyleLinkable(styleNo: string, itemId: number): Promise<void> {
+    const style = await this.dataSource.getRepository(MasterStyle).findOne({ where: { styleNo } });
+    if (!style) {
+      throw new BadRequestException(`존재하지 않는 스타일번호입니다: ${styleNo}`);
+    }
+    const boms = await this.dataSource.getRepository(Bom).find({ where: { style: { styleNo } }, relations: ['items', 'items.material'] });
+    const latest = pickActiveBom(boms);
+    const hasItem = latest?.items?.some((i) => i.material?.id === itemId) ?? false;
+    if (!hasItem) {
+      throw new BadRequestException(
+        `이 스타일 자재명세에 없는 자재입니다 — 스타일과 연결하지 말고 '스타일 미연결' 발주로 등록하세요.`,
+      );
+    }
   }
 
   // PR-173: 발주 생성 폼이 선택된 품목의 스타일 생산유형(CMT/FOB)을 미리 조회해 단가
@@ -137,6 +168,14 @@ export class PurchaseOrdersService {
       );
     }
 
+    // PR-185: styleNo를 지정한 행은 하나라도 유효하지 않으면(스타일 없음/BOM에 자재 없음)
+    // 아무것도 생성하지 않고 전부 중단한다(단건 생성과 같은 안전 규칙).
+    for (const dto of dtos) {
+      if (dto.styleNo) {
+        await this.assertStyleLinkable(dto.styleNo, dto.itemId);
+      }
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -150,6 +189,10 @@ export class PurchaseOrdersService {
           notes: dto.notes,
           supplier: suppliers.find((s) => s.id === dto.supplierId),
           item: items.find((i) => i.id === dto.itemId),
+          styleNo: dto.styleNo ?? null,
+          referenceUnitPriceUsd: dto.referenceUnitPriceUsd ?? null,
+          referencePriceSource: dto.referencePriceSource ?? null,
+          referencePriceNote: dto.referencePriceNote ?? null,
         });
         created.push(await queryRunner.manager.save(PurchaseOrder, po));
       }
@@ -214,6 +257,16 @@ export class PurchaseOrdersService {
       );
     }
 
+    // PR-185: 두 트랙 필터 — STYLE(styleNo 있음)/ITEM_ONLY(styleNo 없음), 정확히 일치하는 styleNo.
+    if (filter?.track === 'STYLE') {
+      qb.andWhere('po.styleNo IS NOT NULL');
+    } else if (filter?.track === 'ITEM_ONLY') {
+      qb.andWhere('po.styleNo IS NULL');
+    }
+    if (filter?.styleNo) {
+      qb.andWhere('po.styleNo = :styleNoFilter', { styleNoFilter: filter.styleNo });
+    }
+
     // PR-127: DTO에 page/limit가 정의돼 있는데도 예전엔 skip/take를 안 걸어 항상 전량이 반환됐다. page 또는 limit를 명시하면 실제로 적용하고,
     // 둘 다 없으면(원장/리포트 등 전량을 기대하는 기존 호출부) 기존처럼 전량을 반환한다.
     const paging = resolveOptionalPagination(filter);
@@ -247,6 +300,13 @@ export class PurchaseOrdersService {
     if (po.status !== PurchaseOrderStatus.PENDING) {
       throw new BadRequestException(`미입고(PENDING) 상태인 발주만 수정할 수 있습니다. 현재 상태: ${po.status}`);
     }
+    // PR-185 E: 상세 줄(lines)이 이미 있는 발주는 수량을 줄 합계로만 관리한다 — lines를
+    // 보내지 않고 quantity만 바꾸면 줄 합계와 수량이 어긋나므로 거절한다.
+    if (dto.lines === undefined && dto.quantity !== undefined && (po.lines?.length ?? 0) > 0) {
+      throw new BadRequestException(
+        '색상/사이즈 상세가 있는 발주는 수량을 줄 합계로 관리합니다 — lines와 함께 수정하세요.',
+      );
+    }
     const warnings: string[] = [];
     if (dto.lines !== undefined) {
       const newLines = dto.lines;
@@ -266,6 +326,19 @@ export class PurchaseOrdersService {
     }
     if (dto.unitPrice !== undefined) po.unitPrice = dto.unitPrice;
     if (dto.notes !== undefined) po.notes = dto.notes;
+    // PR-185: 스타일 연결 변경/해제. null이면 해제, 값이면 재검증 후 연결(이미 발주된
+    // 미입고 건을 사람이 직접 연결/변경해 주는 용도).
+    if (dto.styleNo !== undefined) {
+      if (dto.styleNo === null) {
+        po.styleNo = null;
+      } else {
+        await this.assertStyleLinkable(dto.styleNo, po.itemId);
+        po.styleNo = dto.styleNo;
+      }
+    }
+    if (dto.referenceUnitPriceUsd !== undefined) po.referenceUnitPriceUsd = dto.referenceUnitPriceUsd;
+    if (dto.referencePriceSource !== undefined) po.referencePriceSource = dto.referencePriceSource;
+    if (dto.referencePriceNote !== undefined) po.referencePriceNote = dto.referencePriceNote;
     const saved = await this.poRepository.save(po);
     return Object.assign(saved, { warnings });
   }

@@ -138,8 +138,9 @@ describe('발주 등록 화면 검색 선택 (PR-126)', () => {
       }
       await post('/master-styles').send({ styleNo: 'SR-NOBOM', factory: '베트남', buyer: 'B', totalQty: 10, brand: 'x', itemType: 'JK', productionType: 'FOB', targetRdd: '2026-12-01' }).expect(201);
       // 원단은 이미 100만큼 발주(취소 건 999는 제외되어야 한다)
-      await post('/purchase-orders').send({ supplierId, itemId: mat.fabric, quantity: 100, unitPrice: 3 }).expect(201);
-      const cancelled = (await post('/purchase-orders').send({ supplierId, itemId: mat.fabric, quantity: 999, unitPrice: 3 }).expect(201)).body.data.id;
+      // PR-185: orderedQty는 styleNo로 연결된 발주만 세므로 SR-STYLE에 연결해 등록한다.
+      await post('/purchase-orders').send({ supplierId, itemId: mat.fabric, quantity: 100, unitPrice: 3, styleNo: 'SR-STYLE' }).expect(201);
+      const cancelled = (await post('/purchase-orders').send({ supplierId, itemId: mat.fabric, quantity: 999, unitPrice: 3, styleNo: 'SR-STYLE' }).expect(201)).body.data.id;
       await auth(request(app.getHttpServer()).patch(`/purchase-orders/${cancelled}/status`)).send({ status: 'CANCELLED' }).expect(200);
     });
 
@@ -176,7 +177,7 @@ describe('발주 등록 화면 검색 선택 (PR-126)', () => {
 
     it('부족 수량대로 발주하면 그 자재의 부족이 0이 된다(스타일 → 부족 자재 → 발주 → 반영 전체 흐름)', async () => {
       const before = byName(await req('?styleNo=SR-STYLE&quantity=1000'))['SR-안감'];
-      await post('/purchase-orders').send({ supplierId, itemId: mat.lining, quantity: Math.ceil(before.shortageQty), unitPrice: 2 }).expect(201);
+      await post('/purchase-orders').send({ supplierId, itemId: mat.lining, quantity: Math.ceil(before.shortageQty), unitPrice: 2, styleNo: 'SR-STYLE' }).expect(201);
       const after = await req('?styleNo=SR-STYLE&quantity=1000');
       expect(byName(after)['SR-안감']).toMatchObject({ orderedQty: 800, shortageQty: 0 });
       expect(after.totals.shortageMaterialCount).toBe(2);

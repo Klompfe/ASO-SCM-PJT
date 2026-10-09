@@ -97,6 +97,50 @@ export function resolveBulkSupplierId(candidateSupplierIds: number[]): number | 
   return unique.length === 1 ? unique[0] : null;
 }
 
+// PR-185 B/B-2: 스타일 연결 트랙에서 자재를 고르면 수량을 부족분으로 미리 채운다.
+// 실/테이프(packaging)는 콘/롤 단위로, 종류 미지정(conversionWarning)이면 추측해서
+// 미터값을 넣지 않고 경고만 보여준다(요구사항: "추측 금지"). 부족분이 0이면 비워 둔다.
+export interface StyleQuantitySuggestion {
+  quantity: number | null;
+  unitLabel: string | null;
+  summary: string;
+  note: string | null;
+}
+
+const fmtQty = (n: number): string => n.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
+const SUFFICIENT_NOTE = '소요량 충족 — 추가 발주는 수량을 직접 입력하세요.';
+
+export function suggestStyleLinkedQuantity(row: MaterialRequirementRow): StyleQuantitySuggestion {
+  if (row.packaging) {
+    const { requiredPackages, shortagePackages, packagingUnitLabel } = row.packaging;
+    return {
+      quantity: shortagePackages > 0 ? shortagePackages : null,
+      unitLabel: packagingUnitLabel,
+      summary: `소요 ${fmtQty(row.requiredQty)}m(${requiredPackages}${packagingUnitLabel}) / 기발주 ${fmtQty(row.orderedQty)}${packagingUnitLabel} / 부족 ${shortagePackages}${packagingUnitLabel}`,
+      note: shortagePackages > 0 ? null : SUFFICIENT_NOTE,
+    };
+  }
+  if (row.conversionWarning) {
+    return { quantity: null, unitLabel: null, summary: `소요 ${fmtQty(row.requiredQty)}m`, note: row.conversionWarning };
+  }
+  const shortage = Math.max(0, row.requiredQty - row.orderedQty);
+  return {
+    quantity: shortage > 0 ? Math.ceil(shortage) : null,
+    unitLabel: null,
+    summary: `소요 ${fmtQty(row.requiredQty)} / 기발주 ${fmtQty(row.orderedQty)} / 부족 ${fmtQty(row.shortageQty)}`,
+    note: shortage > 0 ? null : SUFFICIENT_NOTE,
+  };
+}
+
+// PR-185 A: 목록/배지용 — 스타일 연결 여부 라벨.
+export const trackBadgeLabel = (styleNo: string | null | undefined): string => (styleNo ? styleNo : '미연결');
+
+// PR-185 B: 수량 입력은 기본값 없이 시작해 필수로 바뀐다 — 0 이하/빈 값은 오류.
+export function isQuantityFilled(input: string): boolean {
+  const n = Number(input);
+  return input.trim() !== '' && Number.isFinite(n) && n > 0;
+}
+
 // 일괄발주 행을 커밋해도 되는지: 공급업체·정수 수량(1 이상)이 있어야 하고, 단가는
 // unitPriceRequired가 true일 때만 필요(0 초과)하다.
 // MERGE-2: PR-173이 CMT 발주를 단가 없이 허용하면서, 일괄발주에서만 CMT 건이 단가

@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsPositive, IsString, Min, ValidateNested } from 'class-validator';
 import { PurchaseOrderType } from '../entities/purchase-order.entity';
 
 // PR-176: 색상/사이즈별 상세 한 줄(자유 텍스트 색상/사이즈 + 수량).
@@ -67,4 +67,30 @@ export class CreatePurchaseOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PurchaseOrderLineDto)
   lines?: PurchaseOrderLineDto[];
+
+  // PR-185: 스타일 연결(선택). 있으면 그 스타일이 존재해야 하고(없으면 400) 최신 BOM에
+  // itemId 자재가 있어야 한다(없으면 400 — 두 트랙을 섞지 않기 위함). 없으면(미전송)
+  // 기존처럼 "스타일 미연결" 발주로 등록된다.
+  @ApiPropertyOptional({ description: '연결할 스타일번호(선택) — MasterStyle.styleNo', example: 'MB62SLM103Z' })
+  @IsOptional()
+  @IsString()
+  styleNo?: string;
+
+  // PR-185: 단가표(USD) 참고단가 — 선택 입력, KRW unitPrice와 별개. 서버는 값이 오면
+  // 양수인지만 검증하고 출처·값을 자동으로 채우지 않는다.
+  @ApiPropertyOptional({ description: '단가표 참고단가(USD, 선택)', example: 1.0 })
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  referenceUnitPriceUsd?: number;
+
+  @ApiPropertyOptional({ enum: ['BRAND_RULE', 'MIDO_TABLE', 'MANUAL'], description: '참고단가 출처(선택)' })
+  @IsOptional()
+  @IsEnum(['BRAND_RULE', 'MIDO_TABLE', 'MANUAL'])
+  referencePriceSource?: 'BRAND_RULE' | 'MIDO_TABLE' | 'MANUAL';
+
+  @ApiPropertyOptional({ description: '참고단가 선택 근거/환산식(선택)' })
+  @IsOptional()
+  @IsString()
+  referencePriceNote?: string;
 }

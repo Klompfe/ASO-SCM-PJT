@@ -15,6 +15,12 @@ export interface PurchaseOrder {
   lines?: PurchaseOrderLine[];
   // PR-180: 실발주(FIRM)/가발주(PROVISIONAL). 기존 행은 null일 수 있다(미지정).
   orderType?: 'FIRM' | 'PROVISIONAL' | null;
+  // PR-185: 스타일 연결(선택) — 있으면 "스타일 연결 트랙", 없으면 "스타일 미연결 트랙".
+  styleNo?: string | null;
+  // PR-185: 단가표(USD) 참고단가 — KRW unitPrice와 별개, 선택.
+  referenceUnitPriceUsd?: number | null;
+  referencePriceSource?: 'BRAND_RULE' | 'MIDO_TABLE' | 'MANUAL' | null;
+  referencePriceNote?: string | null;
 }
 
 // PR-176: 색상/사이즈 자유입력 한 줄. 수량은 정수.
@@ -34,6 +40,11 @@ export interface CreatePurchaseOrder {
   lines?: PurchaseOrderLine[];
   notes?: string;
   orderType?: 'FIRM' | 'PROVISIONAL';
+  // PR-185: 스타일 연결(선택). 있으면 서버가 스타일 존재/BOM 자재 포함 여부를 검증한다.
+  styleNo?: string;
+  referenceUnitPriceUsd?: number;
+  referencePriceSource?: 'BRAND_RULE' | 'MIDO_TABLE' | 'MANUAL';
+  referencePriceNote?: string;
 }
 
 // PR-173: 발주 생성 폼이 선택된 품목의 스타일 생산유형(CMT/FOB)을 미리 조회해 단가
@@ -57,6 +68,9 @@ export interface GetPurchaseOrdersFilter {
   // PR-127: page 또는 limit를 주면 서버가 실제로 페이지네이션한다(둘 다 생략하면 전량 — 원장/리포트용)
   page?: number;
   limit?: number;
+  // PR-185: 두 트랙 필터.
+  track?: 'STYLE' | 'ITEM_ONLY';
+  styleNo?: string;
 }
 
 export const getPurchaseOrders = (filter?: GetPurchaseOrdersFilter): Promise<any> =>
@@ -72,13 +86,20 @@ export const updatePurchaseOrderStatus = (
 // MERGE-3: lines를 보내면 기존 줄을 전부 교체하고 quantity를 줄 합계로 다시 계산한다(서버).
 export const updatePurchaseOrder = (
   id: number,
-  data: { quantity?: number; unitPrice?: number; notes?: string; lines?: PurchaseOrderLine[] },
+  data: {
+    quantity?: number; unitPrice?: number; notes?: string; lines?: PurchaseOrderLine[];
+    // PR-185: null이면 스타일 연결 해제, 값이면 재검증 후 연결/변경.
+    styleNo?: string | null;
+    referenceUnitPriceUsd?: number;
+    referencePriceSource?: 'BRAND_RULE' | 'MIDO_TABLE' | 'MANUAL';
+    referencePriceNote?: string;
+  },
 ): Promise<any> => apiClient.patch(`/purchase-orders/${id}`, data);
 
 // PR-179: 일괄발주 — 미리보기에서 확인된 행들을 한 번에 생성(서버는 하나라도 틀리면 전부 취소).
 // MERGE-2: CMT(가발주) 건은 단가가 선택 입력이라 unitPrice를 생략할 수 있다(PR-173 정책).
 export const createPurchaseOrdersBulk = (
-  orders: { supplierId: number; itemId: number; quantity: number; unitPrice?: number; notes?: string; orderType?: 'FIRM' | 'PROVISIONAL' }[],
+  orders: { supplierId: number; itemId: number; quantity: number; unitPrice?: number; notes?: string; orderType?: 'FIRM' | 'PROVISIONAL'; styleNo?: string }[],
 ): Promise<any> => apiClient.post('/purchase-orders/bulk', { orders });
 
 // PR-178: 발주서 표준 양식(엑셀) — base64로 내려온다(Bearer 인증 때문에 직접 링크 불가).
@@ -93,3 +114,41 @@ export interface OrderTypeSuggestion {
 }
 export const getOrderTypeSuggestion = (itemId: number): Promise<OrderTypeSuggestion> =>
   apiClient.get('/purchase-orders/order-type-suggestion', { params: { itemId } });
+
+// PR-185: 단가표(USD) 참고단가 — 브랜드 전용가 → 미도 단가표 순 후보. 서버가 자동으로
+// 하나를 저장하지 않는다(안전모드) — 화면에서 사람이 고르거나 직접 입력한다.
+export interface PriceReferenceConversionOption {
+  materialSubType: string;
+  displayName: string;
+  packagingUnitLabel: string;
+  unitLengthM: number;
+  unitPriceUsd: number;
+  formula: string;
+  unitPriceUsdMax?: number;
+  formulaMax?: string;
+}
+export interface PriceReferenceConversion {
+  determined: boolean;
+  options: PriceReferenceConversionOption[];
+  warning?: string;
+}
+export interface PriceReferenceCandidate {
+  source: 'BRAND_RULE' | 'MIDO_TABLE';
+  label: string;
+  priceUsd: number;
+  priceUsdMax?: number;
+  unit: string;
+  note?: string | null;
+  conversion?: PriceReferenceConversion;
+  brandRuleId?: number;
+  midoPriceItemId?: number;
+}
+export interface PriceReferenceResult {
+  candidates: PriceReferenceCandidate[];
+  suggested: PriceReferenceCandidate | null;
+  unitMismatchWarning?: string;
+  brand: string | null;
+  krw?: { rate: number; validFrom: string; validTo: string; rateType: 'EXPORT'; approxUnitPriceKrw: number };
+}
+export const getPriceReference = (params: { itemId: number; styleNo?: string; brandName?: string; lineUnit?: string; materialSubType?: string }): Promise<PriceReferenceResult> =>
+  apiClient.get('/purchase-orders/price-reference', { params });

@@ -77,8 +77,10 @@ export class ExportShipmentsController {
 
   @Get(':id')
   @ApiOperation({ summary: '수출선적서류 상세 조회 (라인 포함)' })
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.exportShipmentsService.findOneOrFail(id);
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const shipment = await this.exportShipmentsService.findOneOrFail(id);
+    // PR-185 D: 상세 조회에서만 발주서 참고단가(KRW로 계산 안 된 라인)를 함께 붙인다.
+    return this.exportShipmentsService.attachPurchaseOrderReferencePrices(shipment);
   }
 
   @Patch(':id/status')

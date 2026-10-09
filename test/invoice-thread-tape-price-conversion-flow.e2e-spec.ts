@@ -162,7 +162,7 @@ describe('수출 INVOICE 실/테이프 미터단가 → 콘/롤단가 환산 (PR
     expect(dadeCandidate.conversion.options[0].unitPriceUsd).toBe(0.04);
   });
 
-  it('다데/암홀이 합쳐진 것으로 보이는 라인(tapeType 미지정)은 자동 확정하지 않고 두 후보 모두 참고문구와 함께 보여준다', async () => {
+  it('다데/암홀이 합쳐진 것으로 보이는 라인(tapeType 미지정)은 자동 확정하지 않고 두 후보 모두 나열만 한다(PR-185: 과거 일괄청구 안내문은 제거)', async () => {
     const candidates = await auth(request(app.getHttpServer()).get('/mido-price-table/candidates')).query({
       materialName: 'TAPE', lineUnit: 'ROLL',
     }).expect(200);
@@ -170,7 +170,7 @@ describe('수출 INVOICE 실/테이프 미터단가 → 콘/롤단가 환산 (PR
     expect(tapeCandidates).toHaveLength(2);
     for (const c of tapeCandidates) {
       expect(c.conversion.determined).toBe(false);
-      expect(c.conversion.referenceNote).toContain('TAPE 10MM');
+      expect(c.conversion.referenceNote).toBeUndefined();
     }
     expect(tapeCandidates.find((c: any) => c.itemName.includes('다데')).conversion.options[0].unitPriceUsd).toBe(0.04);
     expect(tapeCandidates.find((c: any) => c.itemName.includes('암홀')).conversion.options[0].unitPriceUsd).toBe(0.5);

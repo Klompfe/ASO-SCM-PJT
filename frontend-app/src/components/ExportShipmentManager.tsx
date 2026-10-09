@@ -304,16 +304,26 @@ export const ExportShipmentManager: React.FC = () => {
   // PR-182: 미터단가 → 콘/롤단가 환산이 적용된 경우의 근거 식(검산용) — 환산 옵션을
   // 고르면 채워지고, 원시 후보를 쓰거나 직접 입력하면 비운다(실제로 쓴 값과 근거가 항상 일치).
   const [priceBasisNoteInput, setPriceBasisNoteInput] = useState<string | null>(null);
+  // PR-185 D: 라인의 발주(PurchaseOrder)에 단가표 참고단가가 있으면(KRW로 계산 안 된 라인만)
+  // 기존 미도 후보 맨 위에 추가로 보여준다 — 자동 확정은 안 하고 사람이 "이 값 사용"을 눌러야 한다.
+  const [poReferencePrice, setPoReferencePrice] = useState<ExportShipmentLine['purchaseOrderReferencePrice']>(null);
   const openPriceEditor = async (line: ExportShipmentLine) => {
     setPriceEditingLineId(line.id);
     setManualUsdInput('');
     setSelectedCandidateId(null);
     setPriceBasisNoteInput(null);
+    setPoReferencePrice(line.purchaseOrderReferencePrice ?? null);
     try {
       setPriceCandidates(await findMidoPriceCandidates(line.description, { lineUnit: line.unit, materialSubType: line.materialSubType }));
     } catch {
       setPriceCandidates([]);
     }
+  };
+  const usePoReferenceValue = () => {
+    if (!poReferencePrice) return;
+    setManualUsdInput(String(poReferencePrice.unitPriceUsd));
+    setSelectedCandidateId(null); // 미도 후보 id가 아니므로 확정 시 MANUAL로 저장된다.
+    setPriceBasisNoteInput(`발주서 참고단가 $${poReferencePrice.unitPriceUsd}(${poReferencePrice.source ?? '출처 미기록'}${poReferencePrice.note ? `, ${poReferencePrice.note}` : ''})`);
   };
 
   const useCandidateValue = (c: MidoPriceItem) => {
@@ -662,6 +672,12 @@ export const ExportShipmentManager: React.FC = () => {
               코아사 2500M, 오바사·스쿠이사 4000M, 폴리지누이도 500M 콘 기준). 서버는 자동으로 하나를 고르지 않으니
               최종 숫자를 아래 입력란에 직접 넣어 확정해 주세요.
             </p>
+            {poReferencePrice && (
+              <div className="border border-indigo-200 bg-indigo-50 rounded px-2 py-1 mb-2 flex items-center justify-between text-sm" data-testid="po-reference-price-candidate">
+                <span>발주서 참고단가 ${poReferencePrice.unitPriceUsd} ({poReferencePrice.source ?? '출처 미기록'}{poReferencePrice.note ? `, ${poReferencePrice.note}` : ''})</span>
+                <button type="button" onClick={usePoReferenceValue} className="text-xs border rounded px-2 py-0.5 ml-2 shrink-0 text-indigo-700 border-indigo-300 hover:bg-indigo-100">이 값 사용</button>
+              </div>
+            )}
             {priceCandidates.length > 0 ? (
               <ul className="text-sm mb-3 space-y-1 max-h-56 overflow-y-auto">
                 {priceCandidates.map((c) => {
@@ -705,9 +721,6 @@ export const ExportShipmentManager: React.FC = () => {
                           })}
                           {c.conversion.warning && (
                             <p className="text-xs text-amber-700" data-testid={`conversion-warning-${c.id}`}>⚠ {c.conversion.warning}</p>
-                          )}
-                          {c.conversion.referenceNote && (
-                            <p className="text-xs text-gray-400">{c.conversion.referenceNote}</p>
                           )}
                         </div>
                       )}

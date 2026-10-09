@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickLatestOrderDefaults, resolveAutofill, sortForShortage, suggestedQuantity, isUnitPriceRequired } from './purchaseOrderForm';
+import { pickLatestOrderDefaults, resolveAutofill, sortForShortage, suggestedQuantity, isUnitPriceRequired, suggestStyleLinkedQuantity, trackBadgeLabel, isQuantityFilled } from './purchaseOrderForm';
 import type { PurchaseOrder } from '../api/purchaseOrders.service';
 import type { MaterialRequirementRow } from './bomRequirementReport';
 
@@ -156,5 +156,67 @@ describe('일괄발주 보조 규칙 (PR-179)', () => {
     expect(isBulkRowReady({ supplierId: null, quantity: 3, unitPrice: null }, false)).toBe(false); // 공급업체는 여전히 필수
     expect(isBulkRowReady({ supplierId: 1, quantity: 2.5, unitPrice: null }, false)).toBe(false); // 수량은 여전히 정수 필수
     expect(isBulkRowReady({ supplierId: 1, quantity: 3, unitPrice: null }, true)).toBe(false); // 기본값(true)은 기존과 동일
+  });
+});
+
+// PR-185: 스타일 연결 트랙 — 자재를 고르면 수량을 부족분(콘/롤 환산 포함)으로 미리 채운다.
+describe('suggestStyleLinkedQuantity', () => {
+  const baseRow = (over: Partial<MaterialRequirementRow> = {}): MaterialRequirementRow => ({
+    itemId: 1, itemCode: 'M1', itemName: '자재', categories: [], colors: [],
+    consumptionPerUnit: 1, requiredQty: 100, orderedQty: 30, unlinkedOrderedQty: 0, shortageQty: 70, lineCount: 1,
+    ...over,
+  });
+
+  it('일반 자재는 부족분(올림)을 그대로 제안하고 단위 라벨은 없다', () => {
+    const r = suggestStyleLinkedQuantity(baseRow({ requiredQty: 100.2, orderedQty: 30, shortageQty: 70.2 }));
+    expect(r.quantity).toBe(71);
+    expect(r.unitLabel).toBeNull();
+    expect(r.note).toBeNull();
+  });
+
+  it('부족분이 0이면 수량을 비우고 "소요량 충족" 안내를 준다', () => {
+    const r = suggestStyleLinkedQuantity(baseRow({ requiredQty: 100, orderedQty: 150, shortageQty: 0 }));
+    expect(r.quantity).toBeNull();
+    expect(r.note).toContain('소요량 충족');
+  });
+
+  it('실/테이프(packaging)는 shortagePackages를 콘/롤 단위로 제안한다', () => {
+    const r = suggestStyleLinkedQuantity(baseRow({
+      packaging: { packagingUnitLabel: '콘', unitLengthM: 4000, requiredPackages: 76, shortagePackages: 26, conversionFormula: 'x' },
+    }));
+    expect(r.quantity).toBe(26);
+    expect(r.unitLabel).toBe('콘');
+    expect(r.summary).toContain('콘');
+  });
+
+  it('packaging이 있어도 shortagePackages가 0이면 비우고 안내한다', () => {
+    const r = suggestStyleLinkedQuantity(baseRow({
+      packaging: { packagingUnitLabel: '롤', unitLengthM: 50, requiredPackages: 3, shortagePackages: 0, conversionFormula: 'x' },
+    }));
+    expect(r.quantity).toBeNull();
+    expect(r.note).toContain('소요량 충족');
+  });
+
+  it('종류 미지정(conversionWarning)이면 미터값을 넣지 않고 경고만 준다(추측 금지)', () => {
+    const r = suggestStyleLinkedQuantity(baseRow({ conversionWarning: '실/테이프 종류 미지정 — 선택해 주세요' }));
+    expect(r.quantity).toBeNull();
+    expect(r.unitLabel).toBeNull();
+    expect(r.note).toBe('실/테이프 종류 미지정 — 선택해 주세요');
+  });
+});
+
+describe('trackBadgeLabel / isQuantityFilled', () => {
+  it('styleNo가 있으면 그대로, 없으면 "미연결"', () => {
+    expect(trackBadgeLabel('MB62SLM103Z')).toBe('MB62SLM103Z');
+    expect(trackBadgeLabel(null)).toBe('미연결');
+    expect(trackBadgeLabel(undefined)).toBe('미연결');
+  });
+
+  it('수량은 빈 값/0 이하면 유효하지 않다(기본값 1 제거 회귀 확인)', () => {
+    expect(isQuantityFilled('')).toBe(false);
+    expect(isQuantityFilled('0')).toBe(false);
+    expect(isQuantityFilled('-1')).toBe(false);
+    expect(isQuantityFilled('abc')).toBe(false);
+    expect(isQuantityFilled('5')).toBe(true);
   });
 });

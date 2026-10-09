@@ -19,6 +19,8 @@ export type EditableOrderMap = Map<number, { order: PurchaseOrder; pendingCount:
 interface ShortageTableProps {
   rows: MaterialRequirementRow[];
   onPick: (row: MaterialRequirementRow) => void;
+  // PR-185 B: 미연결 발주 수량이 있으면 "발주 목록에서 스타일을 연결하세요" 안내를 보여줄 때 쓴다.
+  onGoToList?: () => void;
   editable?: EditableOrderMap;
   onEdit?: (order: PurchaseOrder, pendingCount: number) => void;
   // PR-179: 일괄발주용 체크박스(선택 상태는 호출하는 쪽이 가진다).
@@ -27,7 +29,7 @@ interface ShortageTableProps {
 }
 
 // 부족 자재 표(표시 전용). 부족 수량이 있는 행이 위에 오고 강조된다(정렬은 호출하는 쪽의 sortForShortage).
-export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, editable, onEdit, selected, onToggle }) => {
+export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, editable, onEdit, selected, onToggle, onGoToList }) => {
   const th = 'px-2 py-1 text-left text-xs bg-gray-100 border border-gray-200';
   const td = 'px-2 py-1 text-sm border border-gray-200';
   return (
@@ -39,7 +41,8 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
             <th className={th}>자재</th>
             <th className={th}>카테고리</th>
             <th className={`${th} text-right`}>필요 총수량</th>
-            <th className={`${th} text-right`}>이미 발주</th>
+            <th className={`${th} text-right`}>발주(스타일 연결)</th>
+            <th className={`${th} text-right`}>발주(미연결, 참고)</th>
             <th className={`${th} text-right`}>부족 수량</th>
             <th className={th}></th>
             {onToggle && <th className={th}>일괄</th>}
@@ -53,11 +56,25 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                   <input type="checkbox" checked={selected?.has(r.itemId) ?? false} onChange={() => onToggle(r.itemId)} aria-label={`${r.itemName} 일괄발주 선택`} />
                 </td>
               )}
-              <td className={td}>{r.itemName}{r.itemCode && <span className="block text-xs text-gray-400">{r.itemCode}</span>}</td>
+              <td className={td}>
+                {r.itemName}{r.itemCode && <span className="block text-xs text-gray-400">{r.itemCode}</span>}
+                {r.packaging && <span className="block text-xs text-amber-700">{r.packaging.conversionFormula}</span>}
+                {r.conversionWarning && <span className="block text-xs text-amber-700" data-testid={`conversion-warning-${r.itemId}`}>⚠ {r.conversionWarning}</span>}
+              </td>
               <td className={td}>{r.categories.join(', ') || '-'}</td>
-              <td className={`${td} text-right`}>{fmt(r.requiredQty)}</td>
-              <td className={`${td} text-right`}>{fmt(r.orderedQty)}</td>
-              <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(r.shortageQty)}</td>
+              <td className={`${td} text-right`}>{r.packaging ? `${fmt(r.requiredQty)}m (${r.packaging.requiredPackages}${r.packaging.packagingUnitLabel})` : fmt(r.requiredQty)}</td>
+              <td className={`${td} text-right`}>{r.packaging ? `${r.orderedQty}${r.packaging.packagingUnitLabel}` : fmt(r.orderedQty)}</td>
+              <td className={`${td} text-right text-gray-400`} data-testid={`unlinked-ordered-${r.itemId}`}>
+                {(r.unlinkedOrderedQty ?? 0) > 0 ? (
+                  <>
+                    {r.packaging ? `${r.unlinkedOrderedQty}${r.packaging.packagingUnitLabel}` : fmt(r.unlinkedOrderedQty ?? 0)}
+                    <button type="button" className="block text-xs text-blue-600 underline ml-auto" onClick={onGoToList}>
+                      미연결 발주 — 스타일을 연결하세요
+                    </button>
+                  </>
+                ) : '-'}
+              </td>
+              <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{r.packaging ? `${r.packaging.shortagePackages}${r.packaging.packagingUnitLabel}` : fmt(r.shortageQty)}</td>
               <td className={td}>
                 {editable?.has(r.itemId) && onEdit ? (
                   <button type="button" className="bg-amber-600 text-white px-2 py-1 rounded text-xs hover:bg-amber-700 whitespace-nowrap" onClick={() => { const e = editable.get(r.itemId)!; onEdit(e.order, e.pendingCount); }}>수정하기</button>
@@ -78,13 +95,15 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
 // 바꾸지 않는 "보조 검색"이다: 스타일을 고르면 그 스타일의 활성 BOM으로 필요 자재/이미 발주/부족을 보여주고(PR-120 소요명세서와
 // 같은 서버 계산), 부족한 자재를 골라 발주 폼으로 넘긴다.
 export const StyleShortagePanel: React.FC<{
-  onPickMaterial: (row: MaterialRequirementRow) => void;
+  onPickMaterial: (row: MaterialRequirementRow, styleNo: string) => void;
+  // PR-185 B: "미연결 발주 N개" 안내를 눌렀을 때 발주 목록 화면으로 이동.
+  onGoToList?: () => void;
   refreshKey?: number;
   editable?: EditableOrderMap;
   onEdit?: (order: PurchaseOrder, pendingCount: number) => void;
   // PR-179: 일괄발주 완료 후 호출(발주 목록/미입고 발주 새로고침용).
   onBulkDone?: () => void;
-}> = ({ onPickMaterial, refreshKey = 0, editable, onEdit, onBulkDone }) => {
+}> = ({ onPickMaterial, onGoToList, refreshKey = 0, editable, onEdit, onBulkDone }) => {
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [style, setStyle] = useState<StyleOption | null>(null);
@@ -201,7 +220,8 @@ export const StyleShortagePanel: React.FC<{
             )}
             <ShortageTable
               rows={rows}
-              onPick={onPickMaterial}
+              onPick={(row) => onPickMaterial(row, style!.styleNo)}
+              onGoToList={onGoToList}
               editable={editable}
               onEdit={onEdit}
               selected={selectedItems}
@@ -224,7 +244,11 @@ export const StyleShortagePanel: React.FC<{
               itemCode: r.itemCode,
               shortageQty: r.shortageQty,
               hasEditablePending: editable?.has(r.itemId) ?? false,
+              // PR-185 B-2: 실/테이프는 부족분을 콘/롤 단위로 제안한다.
+              packagingShortagePackages: r.packaging?.shortagePackages,
+              packagingUnitLabel: r.packaging?.packagingUnitLabel,
             }))}
+          styleNo={style!.styleNo}
           onClose={() => setBulkOpen(false)}
           onDone={() => { setBulkOpen(false); setSelectedItems(new Set()); onBulkDone?.(); }}
         />
