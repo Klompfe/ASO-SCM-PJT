@@ -102,4 +102,15 @@ Written for: 이 저장소를 관리하는 개발자(마이그레이션/검증 �
 
 ### 7.5 main 반영
 
-"Render 확인 완료" 확인을 받아 진행한다(1~2단계 결과는 위와 같다). `origin/main`이 `0c45e61`에서 움직이지 않음을 재확인한 뒤 `git switch main && git merge --ff-only feat/customs-exchange-rates`로 반영하고, 최종 SHA·재검증 결과는 이 보고서 끝에 "8. main 반영 완료" 절로 추가한다.
+"Render 확인 완료" 확인을 받아 진행했다. `origin/main`이 `0c45e61`에서 움직이지 않음을 재확인한 뒤 `git switch main && git merge --ff-only feat/customs-exchange-rates`로 반영했다(아래 8절).
+
+## 8. main 반영 완료
+
+- `origin/main`이 `0c45e61`에서 움직이지 않은 것을 재확인한 뒤 `git merge --ff-only`로 fast-forward.
+- **최종 main SHA: `9b90929`** (`985f97c` merge(origin/main→PR-184 충돌 해결) + `9b90929` docs(7절 추가), 둘 다 main에 포함. PR-183의 `617c4e6`/`1a19a03`도 당연히 포함).
+- 푸시 직전에 다시 확인: 백엔드 build 통과, `jest` 58 suites/721 tests 통과, 프론트 `tsc --noEmit`/`vitest run`(47 files/309 tests) 통과.
+- `git push origin main` 완료.
+- 브랜치 `feat/customs-exchange-rates`는 삭제하지 않았다.
+- **확인 필요**: Render 배포 로그에서 `AddCustomsExchangeRates1791600000000`(실제 클래스명) 마이그레이션이 적용됐는지 제시님이 확인해 주셔야 한다. 7.2절 검증은 Neon 테스트 브랜치에서 한 것이고, 운영 DB에는 이 push로 트리거되는 Render 배포 과정에서 처음 적용된다.
+- **별도 확인이 필요한 기존 결함**: 7.4절에 적은 `export_shipment_lines.materialSubType`/`priceBasisNote` 컬럼 누락(운영 DB에서 확인됨, `GET /export-shipments` 500 에러 유발) — 이 PR과 무관하며 고치지 않았다. 원인 조사·수정은 별도로 판단해 주세요.
+- PR-185는 이 반영이 끝났으므로 제시님이 다시 보내면 선행 조건이 충족된다.
