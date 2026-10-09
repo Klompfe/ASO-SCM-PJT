@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { createSupplier, type CreateSupplier, type Supplier } from '../api/suppliers.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { CategoryChips } from './CategoryChips';
 
 const emptyForm: CreateSupplier = { name: '', businessNumber: '', contactPhone: '', email: '', address: '', abbrCode: '' };
 
@@ -15,10 +16,10 @@ interface SupplierQuickCreateModalProps {
 // 상태가 사라짐 — react-router 없음) 빠르게 등록할 수 있는 팝업. SuppliersManager.tsx의
 // 등록 폼(이름/업체약칭/사업자번호/연락처/이메일/주소)과 createSupplier 호출만
 // 재사용하고, 오버레이/레이아웃은 PackingReceiptsModal.tsx와 동일한 스타일을 따른다.
-// PR-171(주요품목)이 이 PR 작성 시점에 main에 병합되어 있지 않아 주요품목 선택란은
-// 포함하지 않는다(기본 필드만으로 등록 가능 — 어차피 선택 항목).
+// PR-183: 주요품목(개별 품목 검색) 대신 취급 품목군 칩을 고른다(선택 항목 — 비워도 등록 가능).
 export const SupplierQuickCreateModal: React.FC<SupplierQuickCreateModalProps> = ({ onCreated, onClose }) => {
   const [form, setForm] = useState<CreateSupplier>(emptyForm);
+  const [categoryIds, setCategoryIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -27,7 +28,7 @@ export const SupplierQuickCreateModal: React.FC<SupplierQuickCreateModalProps> =
     setError(null);
     setSubmitting(true);
     try {
-      const created = await createSupplier(form);
+      const created = await createSupplier({ ...form, categoryIds });
       toast.success(`공급업체가 등록되었습니다. (코드: ${created?.code ?? '-'})`);
       onCreated(created);
       onClose();
@@ -70,6 +71,10 @@ export const SupplierQuickCreateModal: React.FC<SupplierQuickCreateModalProps> =
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">주소</label>
             <input className="border border-gray-300 rounded px-3 py-2" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          </div>
+          <div className="flex flex-col col-span-2 md:col-span-3">
+            <label className="text-sm text-gray-600 mb-1">취급 품목군 (선택)</label>
+            <CategoryChips selectedIds={categoryIds} onChange={setCategoryIds} ariaLabel="취급 품목군" />
           </div>
           <div className="col-span-2 md:col-span-3 flex gap-2">
             <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50" disabled={submitting}>

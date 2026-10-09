@@ -11,6 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { Item, ItemType } from './entities/item.entity';
 import { GetItemsFilterDto } from './dto/get-items-filter.dto';
+import { MaterialCategory } from '../material-categories/entities/material-category.entity';
 import * as XLSX from 'xlsx';
 
 export interface CreateItemInput {
@@ -22,6 +23,8 @@ export interface CreateItemInput {
   spec?: string;
   description?: string;
   styleNo?: string;
+  // PR-183: 품목군(선택). 없으면 비워 둔다 — 추측해서 채우지 않는다.
+  categoryId?: number | null;
 }
 
 export interface UpdateItemInput {
@@ -33,6 +36,8 @@ export interface UpdateItemInput {
   spec?: string;
   description?: string;
   styleNo?: string;
+  // PR-183: null이면 품목군 해제, 생략(undefined)이면 변경 없음.
+  categoryId?: number | null;
 }
 
 @Injectable()
@@ -44,6 +49,14 @@ export class ItemsService {
     private readonly itemRepository: Repository<Item>,
     private readonly dataSource: DataSource,
   ) {}
+
+  // PR-183: 품목군 존재 여부 확인 — 없는 id를 조용히 저장하지 않는다.
+  private async assertCategoryExists(categoryId: number): Promise<void> {
+    const category = await this.dataSource.getRepository(MaterialCategory).findOne({ where: { id: categoryId } });
+    if (!category) {
+      throw new BadRequestException(`존재하지 않는 품목군 ID: ${categoryId}`);
+    }
+  }
 
   async create(dto: CreateItemInput): Promise<Item> {
     this.logger.log(`Creating new item with code: ${dto.code}`);
@@ -66,6 +79,8 @@ export class ItemsService {
     if (existingItem) {
       throw new ConflictException(`이미 존재하는 품목 코드입니다: ${dto.code}`);
     }
+    // PR-183: 없는 품목군 id는 트랜잭션을 열기 전에 400으로 거절한다(FK 위반이 500으로 바뀌지 않게).
+    if (dto.categoryId != null) await this.assertCategoryExists(dto.categoryId);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -84,6 +99,7 @@ export class ItemsService {
       if (dto.spec) newItem.spec = dto.spec;
       if (dto.description) newItem.description = dto.description;
       if (dto.styleNo) newItem.styleNo = dto.styleNo;
+      if (dto.categoryId != null) newItem.categoryId = dto.categoryId;
 
       const savedItem = await queryRunner.manager.save(newItem);
       await queryRunner.commitTransaction();
@@ -182,6 +198,10 @@ export class ItemsService {
     if (dto.spec !== undefined) item.spec = dto.spec;
     if (dto.description !== undefined) item.description = dto.description;
     if (dto.styleNo !== undefined) item.styleNo = dto.styleNo;
+    if (dto.categoryId !== undefined) {
+      if (dto.categoryId !== null) await this.assertCategoryExists(dto.categoryId);
+      item.categoryId = dto.categoryId;
+    }
 
     try {
       const updatedItem = await this.itemRepository.save(item);

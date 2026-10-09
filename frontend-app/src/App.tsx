@@ -25,6 +25,7 @@ import { BrandManager } from './components/BrandManager';
 import { MaterialPackagingUnitRulesManager } from './components/MaterialPackagingUnitRulesManager';
 import { CustomsExchangeRatesManager } from './components/CustomsExchangeRatesManager';
 import { WeeklyExchangeRatePopup, WeeklyExchangeRateBanner } from './components/WeeklyExchangeRatePopup';
+import { MaterialCategoriesManager } from './components/MaterialCategoriesManager';
 import { StatusCodesManager } from './components/StatusCodesManager';
 import { Sidebar, TAB_LABELS, type TabId } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
@@ -322,6 +323,7 @@ function App() {
         case 'brands': return <BrandManager />;
         case 'materialPackagingUnitRules': return <MaterialPackagingUnitRulesManager />;
         case 'customsExchangeRates': return <CustomsExchangeRatesManager />;
+        case 'materialCategories': return <MaterialCategoriesManager />;
         case 'statusCodes': return <StatusCodesManager />;
         default:
           // Routing Fallback: If unknown, default to Dashboard

@@ -17,7 +17,8 @@ export type TabId =
   | 'brands'
   | 'statusCodes'
   | 'materialPackagingUnitRules'
-  | 'customsExchangeRates';
+  | 'customsExchangeRates'
+  | 'materialCategories';
 
 interface NavItem {
   id: TabId;
@@ -82,6 +83,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'materialPackagingUnitRules', label: '자재 포장단위' },
       // PR-184: 관세청 주간환율(수출/수입) 수동 입력 마스터.
       { id: 'customsExchangeRates', label: '주간 환율' },
+      // PR-183: 공급업체 취급 품목군(겉감·안감·실 …) 마스터.
+      { id: 'materialCategories', label: '품목군 관리' },
       { id: 'exportShipmentDefaults', label: '선적서류 기본정보', adminOnly: true },
       // PR-140: 목록 화면 상태값(작업지시 Filter by Status 등) 마스터 테이블 관리.
       { id: 'statusCodes', label: '상태코드 관리', adminOnly: true },
@@ -119,6 +122,12 @@ const ICONS: Record<TabId, React.ReactNode> = {
     <svg {...ICON_PROPS}>
       <circle cx="12" cy="12" r="9" />
       <path d="M9 9h.01M15 15h.01M15 9l-6 6" />
+    </svg>
+  ),
+  materialCategories: (
+    <svg {...ICON_PROPS}>
+      <path d="M3 7h7l2 2h9v10H3z" />
+      <path d="M3 11h18" />
     </svg>
   ),
   materialPackagingUnitRules: (

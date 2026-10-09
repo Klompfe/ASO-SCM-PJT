@@ -13,6 +13,8 @@ export interface Item {
   // 입력해야 하는 값(BOM 커밋 등 다른 경로에서 자동으로 채워지지 않음, work-orders.
   // service.ts가 재고 차감 시 이 값으로 스타일을 찾는다).
   styleNo?: string;
+  // PR-183: 품목군(선택). null이면 연결 해제.
+  categoryId?: number | null;
 }
 
 export interface GetItemsFilter {
@@ -31,6 +33,7 @@ export interface CreateItem {
   spec?: string;
   description?: string;
   styleNo?: string;
+  categoryId?: number | null;
 }
 
 export type UpdateItem = Partial<CreateItem>;

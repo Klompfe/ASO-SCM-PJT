@@ -3,6 +3,8 @@ import {
   PrimaryGeneratedColumn,
   Column,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -10,6 +12,7 @@ import { Inventory } from '../../inventories/entities/inventory.entity';
 import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
 import { WorkOrder } from '../../work-orders/entities/work-order.entity';
 import { ItemType } from './item-type.enum';
+import { MaterialCategory } from '../../material-categories/entities/material-category.entity';
 
 export { ItemType };
 
@@ -62,6 +65,14 @@ export class Item {
   // 관계 대신 값만 저장하며, MasterStyle 조회는 서비스 레이어에서 styleNo로 별도 수행한다.
   @Column({ nullable: true })
   styleNo?: string;
+
+  // PR-183: 품목군(선택 입력). 기존 품목은 비어 있는 상태로 두고, 자동으로 추측해 채우지 않는다.
+  @Column({ nullable: true })
+  categoryId?: number | null;
+
+  @ManyToOne(() => MaterialCategory, { nullable: true })
+  @JoinColumn({ name: 'categoryId' })
+  category?: MaterialCategory | null;
 
   @OneToMany(() => Inventory, (inventory) => inventory.item)
   inventories?: Inventory[];

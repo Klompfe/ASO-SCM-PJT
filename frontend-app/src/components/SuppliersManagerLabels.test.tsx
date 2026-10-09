@@ -2,18 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
 
-// PR-171: 공급업체 등록 폼/목록에 "주요품목" 다중 선택 UI가 추가됐는지 정적 렌더로
-// 확인한다(검색 팝업 클릭→선택 상호작용은 이 프로젝트 테스트 환경(renderToStaticMarkup만
-// 사용, jsdom 없음)에서는 검증할 수 없다 — 그 부분의 핵심 로직(중복 선택 방지)은
-// mainItemsPicker.test.ts에서 순수 함수로 분리해 테스트한다).
+// PR-171/PR-183: 공급업체 등록 폼/목록의 라벨을 정적 렌더로 확인한다(jsdom 없음 — 칩 클릭 같은
+// 상호작용은 검증 불가, 핵심 규칙은 utils/materialCategories.test.ts에서 순수 함수로 검증).
 vi.mock('../api/suppliers.service', () => ({ getSuppliers: vi.fn(), createSupplier: vi.fn(), updateSupplier: vi.fn(), deleteSupplier: vi.fn() }));
-vi.mock('../api/items.service', () => ({ getItems: vi.fn() }));
+vi.mock('../api/materialCategories.service', () => ({ getMaterialCategories: vi.fn() }));
 
 import { SuppliersManager } from './SuppliersManager';
 
-describe('SuppliersManager 주요품목 UI (PR-171)', () => {
-  it('등록 폼과 목록 테이블에 "주요품목" 라벨/컬럼이 표시된다', () => {
+describe('SuppliersManager 취급 품목군 UI (PR-183)', () => {
+  it('등록 폼과 목록 테이블에 "취급 품목군" 라벨/컬럼이 표시되고 품목 검색 라벨은 없다', () => {
     const html = renderToStaticMarkup(createElement(SuppliersManager, {}));
-    expect(html).toContain('주요품목');
+    expect(html).toContain('취급 품목군');
+    expect(html).toContain('품목군 필터');
+    expect(html).not.toContain('주요품목 검색');
   });
 });
