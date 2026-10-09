@@ -2,9 +2,9 @@
 
 Written for: 이 저장소를 관리하는 개발자(마이그레이션/검증 결과를 확인하려는 사람).
 
-- 브랜치: `feat/customs-exchange-rates` (`origin/main`의 `0504335`에서 분기 — PR-183은 아직 main에 없고, 이 PR은 그 내용에 의존하지 않는다)
-- queue 정책: `pause-after` — main 병합은 하지 않음. 푸시는 이 브랜치만.
-- 운영 DB: 마이그레이션 실행 없음, 서버 기동 없음. 검증은 sqlite e2e와 단위 테스트로만 수행.
+- 브랜치: `feat/customs-exchange-rates` (`origin/main`의 `0504335`에서 분기해 작업 — 이후 `origin/main`이 PR-183 반영으로 `0c45e61`까지 움직여 MERGE-6에서 병합/충돌 해결함, 7절 참고)
+- queue 정책: `pause-after`로 시작했으나, MERGE-6 지시에서 "Render 확인 완료" 확인을 받아 main 반영까지 진행함(8절).
+- 운영 DB: 직접 마이그레이션 실행·서버 기동 없음(아래는 모두 Neon 테스트 브랜치에서 수행). sqlite e2e·단위 테스트에 더해, MERGE-6에서 테스트 브랜치 기준 실데이터 점검을 추가로 수행했다(7절).
 
 ## 1. 구현 요약
 
@@ -49,4 +49,57 @@ Written for: 이 저장소를 관리하는 개발자(마이그레이션/검증 �
 
 - 실제 주간 환율(수출/수입) 값을 "주간 환율" 화면에서 입력해 주셔야 운영에서 추천이 동작한다.
 - 샘플 TY-260918K의 1343이 수출/수입 환율 중 어느 쪽인지, 같은 주의 수출·수입 환율 두 값을 등록한 뒤 비교해서 확인이 필요하다(이 PR은 "모른다"를 전제로 구분 선택 드롭다운을 뒀다).
-- 다음 단계(main 반영)에서 운영 DB에 이 마이그레이션이 배포되면, 위 4번에 적어둔 실데이터 확인(테스트 행 2개 등록 → 실제 INVOICE 1건에서 추천/출처 확인 → 테스트 행 삭제)을 진행해야 한다.
+
+## 7. 운영 복사본 검증 + main 병합 충돌 해결 (MERGE-6, 2026-10-09/10)
+
+### 7.1 main 병합 충돌 해결
+
+`origin/main`이 `0c45e61`(PR-183 반영)로 움직여 PR-184 브랜치가 fast-forward 불가능해졌다. `git merge origin/main`으로 합치고 예상된 3개 파일·7곳 충돌을 전부 "양쪽 다 유지"로 해결했다(다른 파일은 건드리지 않음, 병합 후 `grep -rn '<<<<<<<\|>>>>>>>' src frontend-app/src` 결과 없음 확인):
+
+- `src/app.module.ts`: `CustomsExchangeRatesModule` import/등록과 `MaterialCategoriesModule` import/등록 모두 유지.
+- `frontend-app/src/components/Sidebar.tsx`: `TabId`에 `'customsExchangeRates'`·`'materialCategories'` 모두, NAV 항목 "주간 환율"·"품목군 관리" 모두, `ICONS`에 두 아이콘의 `<svg>` 블록 모두 온전하게 유지(태그 안 깨짐 확인).
+- `frontend-app/src/App.tsx`: `CustomsExchangeRatesManager`/`WeeklyExchangeRatePopup`와 `MaterialCategoriesManager` import 모두, `switch`의 두 `case` 모두 유지.
+
+병합 커밋: `985f97c` ("merge: origin/main(PR-183) into PR-184").
+
+병합 후 재검증: 백엔드 `npm run build` 통과, `jest` 58 suites/721 tests 통과, e2e `--maxWorkers=2`로 63 suites/475 tests 통과(기본 동시성에서는 리소스 경합으로 3개 suite가 간헐 실패 — 개별 재실행/동시성 축소 재실행 모두 통과해 코드 결함이 아님을 확인, PR-183 MERGE-5 때와 같은 현상). 프론트 `tsc --noEmit`/`vitest run` 47 files·309 tests 통과.
+
+### 7.2 Neon 테스트 브랜치(`ep-divine-scene-b3mhdu6u...`, 2026-10-10 13:59 KST 자동 삭제 예정) 마이그레이션 사전 검증
+
+1. `migration:show`: `1791500000000`(PR-183)은 `[X]`, `1791600000000`(PR-184)은 `[ ]` — 기대한 상태.
+2. `migration:run`: 에러 없이 완료.
+3. **실행 전/후 비교**(읽기 전용 쿼리):
+
+   | 항목 | 실행 전 | 실행 후 |
+   |---|---|---|
+   | `export_shipments` 행 수 | 1 | 1 |
+   | `items` 행 수 | 355 | 355 |
+   | `suppliers` 행 수 | 9 | 9 |
+   | `exchangeRateUsdKrw`가 NOT NULL인 행 수 / 합계 | 1 / 1300 | 1 / 1300 |
+   | `exchangeRateDate`가 NOT NULL인 행 수 | 1 | 1 |
+   | `exchangeRateSource`가 NOT NULL인 행 수 | (컬럼 없음) | 0 |
+
+   기존 `export_shipments`의 `exchangeRateUsdKrw`/`exchangeRateDate` 값이 전혀 바뀌지 않았고(소급 계산 없음), 새 컬럼은 기존 행에 대해 모두 null로 남았다. `customs_exchange_rates` 테이블 존재(0행), `export_shipments.exchangeRateSource` 컬럼 존재(nullable) 확인.
+4. **반복 실행 안전성**: `migration:revert` → `1791600000000`만 되돌려짐(`DROP COLUMN exchangeRateSource`, `DROP TABLE customs_exchange_rates`만 실행됨, `1791500000000`은 그대로) → `migration:run` → 에러 없이 재적용 → `migration:show`에서 다시 `[X]` 확인.
+
+**결론: 1단계 통과.**
+
+### 7.3 테스트 브랜치에서 실데이터 점검(Puppeteer, 버려도 되는 복사본에서만 수행)
+
+`npm run build` 중 `tsconfig.build.tsbuildinfo`(증분 빌드 캐시)가 낡아 있어 `dist/main.js`가 재생성되지 않는 문제를 발견 — 삭제 후 재빌드로 해결(이 PR·다른 PR의 소스 코드 결함이 아니라 로컬 빌드 캐시 문제). `NODE_ENV=production`, `DB_HOST=`테스트 브랜치로 백엔드(`node dist/main.js`, 포트 3000)와 프론트 `vite` 개발 서버(포트 5173)를 띄우고, 테스트 계정을 등록해 MANAGER로 격상한 뒤(테스트 브랜치 DB에서만) Puppeteer(헤드리스 Chrome)로 확인했다. 스크린샷은 로컬 산출물로 저장했다(레포에는 커밋하지 않음).
+
+- **로그인 직후 팝업(환율 둘 다 없음)**: "이번 주 관세청 환율이 등록되지 않았습니다" 제목과 수출/수입 입력 폼 두 개가 모두 렌더됨. 적용 시작일 기본값이 오늘(`2026-10-09`), 종료일이 +6일(`2026-10-15`)로 자동 채워짐.
+- **수출 환율(1343) 저장 → 수입 환율 폼만 남음 → 수입 환율(1350) 저장 → 팝업 닫힘**(대시보드로 돌아가 "수입 환율이 등록되었습니다" 토스트 확인). 이후 `GET /customs-exchange-rates/status`를 API로 재확인한 결과 `EXPORT.found=true(1343)`, `IMPORT.found=true(1350)` — 팝업 플로우가 실제로 DB에 반영됐음을 확인.
+- **"주간 환율" 관리 화면**: 수출 탭에 방금 저장한 1343.0000(2026-10-09~2026-10-15) 행이 목록에 표시됨.
+- **INVOICE 생성 폼 추천(찾음)**: Invoice Date에 `2026-10-09`를 입력하자 환율 입력칸이 `1343`으로 자동 채워지고 "관세청 주간환율(수출) 2026-10-09~2026-10-15 적용 — 확인 필요" 배지가 떴다(페이지 텍스트로 직접 확인).
+- **수입통관 참고 표시(찾음)**: 실제 수입통관 건(`356X11WC1`, invoiceDate `2026-09-21`)의 주를 덮는 테스트 수입 환율(1333, `note: 'PR-184 TEST - import ref demo'`)을 등록한 뒤, 해당 건 카드에 "참고: 해당 주 수입 환율 1,333 (2026-09-18~2026-09-24)"가 정확히 표시됨.
+
+이 점검에 쓴 테스트 계정·환율 행은 테스트 브랜치에만 있고(운영 DB에는 아무 것도 쓰지 않음), 이 브랜치는 2026-10-10 13:59(KST) 자동 삭제되므로 별도로 지우지 않았다.
+
+### 7.4 발견한 사실 — PR-184와 무관한 기존 운영 결함
+
+실데이터 점검 중 `GET /export-shipments`가 **운영 DB에서 이미 500 에러**를 내고 있음을 발견했다: `export_shipment_lines` 테이블에 `materialSubType`/`priceBasisNote` 컬럼이 없는데, `migrations` 테이블에는 `AddExportLineMaterialSubTypeAndPriceBasisNote1791400000000`이 적용된 것으로 기록돼 있다(테스트 브랜치와 실제 운영 DB 둘 다 읽기 전용으로 확인 — 같은 증상). 추정 원인은 알 수 없고(해당 마이그레이션 실행 당시 DDL이 실패했는데 기록만 남았거나, 별도 경로로 컬럼이 제거됐을 가능성), **이 PR의 범위 밖이라 고치지 않았다.** 이 때문에 수출선적서류 목록·상세 조회가 현재 운영에서 broken 상태일 수 있으며, 이번 점검에서 "기존 INVOICE 1건 상세에서 추천/출처 확인"은 이 결함 때문에 하지 못했다(대신 새 INVOICE 생성 폼에서 같은 추천 로직이 동작함을 확인했다 — 코드 경로는 동일). **제시님이 별도로 확인·수정을 판단해야 하는 기존 결함입니다.**
+
+### 7.5 main 반영
+
+"Render 확인 완료" 확인을 받아 진행한다(1~2단계 결과는 위와 같다). `origin/main`이 `0c45e61`에서 움직이지 않음을 재확인한 뒤 `git switch main && git merge --ff-only feat/customs-exchange-rates`로 반영하고, 최종 SHA·재검증 결과는 이 보고서 끝에 "8. main 반영 완료" 절로 추가한다.
