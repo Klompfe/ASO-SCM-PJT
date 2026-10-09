@@ -43,7 +43,8 @@ Render Postgres, Railway Postgres, Neon 등 관리형 Postgres 인스턴스를 �
 | `DB_PASSWORD` | Postgres 비밀번호 | (시크릿으로 관리) |
 | `DB_DATABASE` | 데이터베이스 이름 | `neondb` |
 | `DB_SSL` | SSL 연결 여부 (관리형 Postgres는 대부분 `true` 필요) | `true` |
-| `NODE_ENV` | `production`으로 설정해야 TypeORM `synchronize`가 꺼지고 마이그레이션으로만 스키마를 관리한다 | `production` |
+| `NODE_ENV` | 프로덕션 환경 표시(로깅 등에 쓰임) | `production` |
+| `DB_SYNCHRONIZE` | **FIX-1**: Postgres `synchronize`를 켜는 명시적 옵트인. `true`여도 `DB_HOST`가 로컬(`localhost`/`127.0.0.1`/docker-compose의 `postgres`)이 아니면 서버가 시작 시 에러로 종료된다 — 원격(Neon 등) DB에서는 미설정(또는 `false`)으로 두고 마이그레이션만 쓴다 | 미설정(원격 DB는 항상 이렇게) |
 | `JWT_SECRET` | JWT 서명 키 (강력한 랜덤 값, 반드시 시크릿으로 관리) | — |
 | `JWT_EXPIRES_IN` | JWT 만료 시간 | `1h` |
 | `GEMINI_API_KEY` | 작업지시서 AI 분석용 Gemini API 키 (미설정 시 목업 데이터로 동작) | — |
@@ -70,9 +71,11 @@ Render Postgres, Railway Postgres, Neon 등 관리형 Postgres 인스턴스를 �
 
 ## 4. 마이그레이션 적용 방식: 컨테이너 시작 시 자동 실행
 
-`NODE_ENV=production`에서는 TypeORM `synchronize`가 꺼져 있으므로, 마이그레이션 없이는
-스키마가 생기지 않는다. 수동 실행 대신 **컨테이너가 뜰 때마다 자동으로 마이그레이션을 먼저
-적용한 뒤 서버를 시작**하도록 되어 있다:
+**FIX-1(2026-10)**: Postgres 경로의 `synchronize`는 더 이상 `NODE_ENV`로 결정되지 않는다 —
+`DB_SYNCHRONIZE=true` + 로컬 Postgres 호스트일 때만 켜지고, 그 외(원격 DB를 가리키는 모든
+배포 환경 포함)에는 항상 꺼져 있다(`src/common/database/should-synchronize-postgres.util.ts`).
+즉 원격 DB에서는 마이그레이션 없이는 스키마가 생기지 않는다. 수동 실행 대신 **컨테이너가
+뜰 때마다 자동으로 마이그레이션을 먼저 적용한 뒤 서버를 시작**하도록 되어 있다:
 
 - `package.json`의 `start:prod`: `npm run migration:run:prod && node dist/main`
 - 루트 `Dockerfile`의 `CMD`: `npm run start:prod`
