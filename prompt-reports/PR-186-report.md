@@ -110,3 +110,35 @@ PR-183~185와 같은 이유(새 컬럼이 존재하는 환경이 아직 없음)�
 
 ### 새 SHA
 이 보고서를 포함한 커밋까지 push 완료 — 최종 SHA는 `git log --oneline -1 feat/item-thread-tape-subtype`로 확인.
+
+## 10. 운영 복사본 검증 (MERGE-7, Neon 테스트 브랜치)
+
+- 테스트 브랜치: `ep-hidden-bonus-b37lym8r.c-4.ap-southeast-1.aws.neon.tech`(운영 복사본, 버려도 되는 사본). `origin/main`을 먼저 브랜치에 병합(FIX-1 반영, `app.module.ts` 자동 병합 — 충돌 없음), 빌드/전체 테스트 재확인 후 진행.
+
+### 마이그레이션 적용/되돌리기/재적용 검증
+
+| 단계 | 결과 |
+|---|---|
+| `migration:show`(적용 전) | `1791700000000`(PR-185), `1791800000000`(PR-186)만 `[ ]` 미적용 — 나머지 40건은 전부 적용됨(FIX-1 포함) |
+| `migration:run` | 2건 모두 에러 없이 적용 |
+| 확인(읽기) | `purchase_order`에 `styleNo`/`referenceUnitPriceUsd`/`referencePriceSource`/`referencePriceNote` + `IDX_purchase_order_styleNo` 인덱스 존재. `brand_price_rules`에 뮤트 3행(겉감 $1.00/YD, 안감 $0.15/YD, 행어 $0.001/EA) 정확히 시드. `items`에 `materialSubType`/`packagingReviewedAt` 존재, 적용 직후 두 컬럼 다 `NULL`인 행 수 = 0건(= 아무것도 자동으로 채워지지 않음, 설계대로). |
+| 기존 데이터 불변 확인 | `purchase_order`: 1건, qty 합 7, unitPrice 합 0.01 — 적용 전/후 동일. `items`: 355건, `unit` 분포(전부 `EA`) — 적용 전/후 동일. 기존 `purchase_order.styleNo IS NOT NULL` 건수 = 0(기존 1건은 그대로 미연결 유지). |
+| `migration:revert` ×1 | `1791800000000`만 되돌려짐(`items` 두 컬럼 DROP) — `migration:show` 재확인 결과 `1791700000000`은 그대로 `[X]` 적용 상태 유지, `1791800000000`만 `[ ]`로 복귀 |
+| `migration:revert` ×1(두 번째) | `1791700000000`도 되돌려짐(`brand_price_rules` DROP, `purchase_order` 4컬럼 + 인덱스 DROP) |
+| `migration:run`(재적용) | 2건 모두 에러 없이 다시 적용, 뮤트 시드 3행도 `ON CONFLICT DO NOTHING`으로 정상 재삽입 |
+
+### 실데이터 라이브 검증(Puppeteer, MANAGER로 승격한 테스트 계정)
+
+실제 스타일 `MB72JKM101A`의 BOM에 들어있는 미검토 실 자재(`오바사 60S/3H THREAD`, id 129, consumption 470, `Item.unit='EA'`)로 전체 흐름을 확인했다.
+
+1. **종류 지정 전**: 소요량 조회에서 `conversionWarning: "실/테이프 종류 미지정 — 선택해 주세요"`만 뜨고 `packaging` 필드는 없음(미터 수량 추측 안 함) — 설계대로.
+2. **실/테이프 후보 조회**(`GET /items/thread-tape-candidates?reviewed=false`): 이 자재가 추천 `OBA_SA_SKU_I_SA`("오바사·스쿠이사", 이유: 자재명에 "오바사" 포함)와 함께 나옴. 스크린샷(`docs/merge7-screenshots/02-thread-tape-classification.png`)에서 실제 후보 54건 전체가 추천값과 함께 렌더되는 것을 확인(실제 운영 데이터 — 다데/암홀/코아사/오바사 혼재).
+3. **일괄 지정 적용**(`POST /items/thread-tape-classification`, MANAGER 토큰): `{ "updated": 1 }` 성공.
+4. **종류 지정 후**: 같은 소요량 조회에서 `conversionWarning`이 사라지고 `packaging: { packagingUnitLabel: '콘', unitLengthM: 4000, requiredPackages: 1, conversionFormula: '470m ÷ 4000m/콘 = 0.12 → 1콘' }`로 채워짐 — **`Item.unit`이 `'EA'`로 남아있는데도 콘 환산이 정상 동작**(이게 이 PR의 핵심 목표였다).
+5. **영향 범위 확인**: 같은 스타일 BOM의 라벨 자재(`MAIN+SIZE LABEL 메인라벨`, id 125)는 `packaging`/`conversionWarning` 둘 다 없이 그대로(일반 자재로 취급) — 종류 지정이 다른 자재에 번지지 않음을 직접 비교로 확인.
+6. **BOM 미포함 자재 400**: 같은 스타일에 없는 자재(id 461)로 스타일 연결 시도 → 400, 메시지 "이 스타일 자재명세에 없는 자재입니다 — 스타일과 연결하지 말고 '스타일 미연결' 발주로 등록하세요."(PR-185 로직, PR-186과 함께 정상 작동 확인).
+7. **화면 스크린샷**: `01-purchase-orders.png`(발주관리 — 트랙 필터, 스타일 배지), `02-thread-tape-classification.png`(실/테이프 종류 지정 화면 — MANAGER 계정으로 "선택 적용" 버튼이 활성 상태로 보임, PR-186-FIX의 권한 분기가 의도대로 동작함을 시각적으로도 확인).
+
+### 남긴 테스트 데이터
+
+이 Neon 테스트 브랜치는 "버려도 되는 복사본"으로 명시적으로 허용된 곳이라, 테스트 발주(5건), 테스트 계정(1건), 실 자재 2건(`id 129`, `id 280` — 이전 점검에서 이미 분류돼 있었음)의 `materialSubType` 지정을 정리하지 않고 그대로 두었다. main/운영 DB에는 어떤 쓰기도 하지 않았다(0단계 전부 읽기 전용).
