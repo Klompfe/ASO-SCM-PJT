@@ -73,6 +73,23 @@ export class ItemsController {
     return await this.itemsService.bulkInsert(bulkInsertDto.data, bulkInsertDto.policy);
   }
 
+  // PR-186 D: ':id' 라우트보다 먼저 선언해야 한다(안 그러면 'thread-tape-candidates'가
+  // ParseIntPipe에 걸려 ":id" 핸들러로 잘못 매칭된다).
+  @ApiOperation({ summary: '실/테이프로 보이는 자재 중 종류 미지정(또는 all/true) 목록과 추천값' })
+  @ApiResponse({ status: 200, description: '조회 성공' })
+  @Get('thread-tape-candidates')
+  async getThreadTapeCandidates(@Query('reviewed') reviewed?: 'true' | 'false' | 'all') {
+    return await this.itemsService.getThreadTapeCandidates(reviewed);
+  }
+
+  @ApiOperation({ summary: '실/테이프 종류 일괄 지정(전부 유효해야 전부 적용)' })
+  @ApiResponse({ status: 200, description: '적용 성공' })
+  @ApiResponse({ status: 400, description: '존재하지 않는 품목 ID 또는 종류' })
+  @Post('thread-tape-classification')
+  async classifyThreadTape(@Body() body: { assignments: { itemId: number; materialSubType: string | null }[] }) {
+    return await this.itemsService.classifyThreadTape(body.assignments);
+  }
+
   @ApiOperation({ summary: '특정 품목 상세 조회' })
   @ApiResponse({ status: 200, description: '조회 성공' })
   @ApiResponse({ status: 404, description: '품목을 찾을 수 없음' })

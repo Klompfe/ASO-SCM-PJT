@@ -87,9 +87,9 @@ describe('BOM 소요량 계산 (PR-120)', () => {
     const tapeBi = (id: number, material: any, consumption: unknown, tapeType: string | null, colorCode = 'BK') => ({
       id, material, consumption, category: '테이프', colorCode, tapeType,
     });
-    const obaRule = { materialSubType: 'OBA_SA_SKU_I_SA', packagingUnitLabel: '콘', unitLengthM: 4000 };
-    const coaRule = { materialSubType: 'COA_SA', packagingUnitLabel: '콘', unitLengthM: 2500 };
-    const dadeRule = { materialSubType: 'DADE', packagingUnitLabel: '롤', unitLengthM: 50 };
+    const obaRule = { materialSubType: 'OBA_SA_SKU_I_SA', displayName: '오바사·스쿠이사', packagingUnitLabel: '콘', unitLengthM: 4000 };
+    const coaRule = { materialSubType: 'COA_SA', displayName: '코아사', packagingUnitLabel: '콘', unitLengthM: 2500 };
+    const dadeRule = { materialSubType: 'DADE', displayName: '다데', packagingUnitLabel: '롤', unitLengthM: 50 };
 
     it('오바사 301,270m → 76콘(4,000m/콘)으로 환산되고 formula가 남는다', () => {
       const [row] = calculateMaterialRequirements(
@@ -125,7 +125,7 @@ describe('BOM 소요량 계산 (PR-120)', () => {
     it('색상별로 올림한 합계가 전체 합산 올림과 다를 수 있다(색상별 올림이 실제 규칙)', () => {
       // 색상 A: 2001m → ceil(2001/2000)=2, 색상 B: 2001m → ceil(2001/2000)=2, 합계 4
       // 반면 전체를 먼저 합치면 4002m → ceil(4002/2000)=3 (다른 값) — 색상별 올림(4)이 맞다.
-      const rule = { materialSubType: 'COA_SA', packagingUnitLabel: '콘', unitLengthM: 2000 };
+      const rule = { materialSubType: 'COA_SA', displayName: '코아사', packagingUnitLabel: '콘', unitLengthM: 2000 };
       const [row] = calculateMaterialRequirements(
         1,
         [
@@ -176,6 +176,72 @@ describe('BOM 소요량 계산 (PR-120)', () => {
       );
       expect(row.packaging?.requiredPackages).toBe(76);
       expect(row.packaging?.shortagePackages).toBe(26); // 76 - 50
+    });
+  });
+
+  // PR-186: BOM 행(threadType/tapeType)이 전부 미지정인 운영 데이터 문제 — 자재(Item) 단위로
+  // 한 번만 종류를 지정해도(Item.unit이 'EA'여도) 환산되게 하는 Item-레벨 폴백 경로.
+  describe('PR-186: 자재(Item) 단위 종류 지정 폴백', () => {
+    const matSub = (id: number, name: string, materialSubType: string | null, opts: { unit?: string; packagingReviewedAt?: Date } = {}) => ({
+      id, code: `M${id}`, name, unit: opts.unit, materialSubType, packagingReviewedAt: opts.packagingReviewedAt ?? null,
+    });
+    const obaRule = { materialSubType: 'OBA_SA_SKU_I_SA', displayName: '오바사·스쿠이사', packagingUnitLabel: '콘', unitLengthM: 4000 };
+
+    it('Item.unit이 "EA"여도 Item.materialSubType이 지정돼 있으면 콘/롤로 환산한다', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [bi(1, matSub(10, '오바사', 'OBA_SA_SKU_I_SA', { unit: 'EA' }), 301270)],
+        new Map(),
+        { packagingRules: [obaRule] },
+      );
+      expect(row.packaging).toMatchObject({ packagingUnitLabel: '콘', unitLengthM: 4000, requiredPackages: 76 });
+      expect(row.conversionWarning).toBeUndefined();
+    });
+
+    it('종류 미지정 + 이름이 실/테이프로 보이고 + 검토 안 함(packagingReviewedAt 없음) → 경고만, 미터 제안 없음', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [bi(1, matSub(10, '오바사 THREAD', null, { unit: 'EA' }), 301270)],
+        new Map(),
+        { packagingRules: [obaRule] },
+      );
+      expect(row.packaging).toBeUndefined();
+      expect(row.conversionWarning).toBe('실/테이프 종류 미지정 — 선택해 주세요');
+    });
+
+    it('검토완료(packagingReviewedAt 있음) + 종류 미지정 → "실/테이프 아님"으로 확정된 일반 자재, 경고 없음', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [bi(1, matSub(10, '오바사 THREAD', null, { unit: 'EA', packagingReviewedAt: new Date('2026-01-01') }), 301270)],
+        new Map(),
+        { packagingRules: [obaRule] },
+      );
+      expect(row.packaging).toBeUndefined();
+      expect(row.conversionWarning).toBeUndefined();
+    });
+
+    it('종류는 Item에 있으나 규칙 테이블에 없음(데이터 누락) → 경고', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [bi(1, matSub(10, '지누이도', 'POLY_JINUIDO', { unit: 'EA' }), 10000)],
+        new Map(),
+        { packagingRules: [obaRule] }, // POLY_JINUIDO 규칙 없음
+      );
+      expect(row.packaging).toBeUndefined();
+      expect(row.conversionWarning).toBe('실/테이프 종류 미지정 — 선택해 주세요');
+    });
+
+    it('BOM 행의 threadType이 Item.materialSubType보다 우선한다', () => {
+      const coaRule = { materialSubType: 'COA_SA', displayName: '코아사', packagingUnitLabel: '콘', unitLengthM: 2500 };
+      const threadBi = { id: 1, material: matSub(10, '코아사', 'OBA_SA_SKU_I_SA', { unit: 'EA' }), consumption: 74360, category: '실', colorCode: 'BK', threadType: 'COA_SA' };
+      const [row] = calculateMaterialRequirements(1, [threadBi], new Map(), { packagingRules: [obaRule, coaRule] });
+      expect(row.packaging).toMatchObject({ packagingUnitLabel: '콘', unitLengthM: 2500, requiredPackages: 30 });
+    });
+
+    it('실/테이프로 보이지 않는 일반 자재는 검토 여부와 무관하게 경고가 없다', () => {
+      const [row] = calculateMaterialRequirements(1, [bi(1, matSub(10, '일반원단', null, { unit: 'EA' }), 5)], new Map());
+      expect(row.packaging).toBeUndefined();
+      expect(row.conversionWarning).toBeUndefined();
     });
   });
 });

@@ -74,6 +74,22 @@ export class Item {
   @JoinColumn({ name: 'categoryId' })
   category?: MaterialCategory | null;
 
+  // PR-186: 실/테이프 종류(material_packaging_unit_rules.materialSubType 값, 예: COA_SA) —
+  // BOM 행(bom_item_details.threadType/tapeType)이 785건 전부 미지정인 운영 데이터 문제를
+  // 자재 단위로 한 번만 지정해서 해결한다. BOM 행에 값이 있으면 그게 우선(effectiveSubType).
+  @Column({ nullable: true })
+  materialSubType?: string | null;
+
+  // PR-186: 사람이 이 자재의 실/테이프 종류를 검토했다는 표시 — 종류를 지정했거나
+  // "실/테이프 아님"으로 확정(materialSubType=null로 유지하면서 이 값만 채움)한 시각.
+  // 값이 없으면 "아직 검토 안 함" — looksLikeThreadOrTape이면 경고만 내고 추측하지 않는다.
+  // type을 명시하지 않아야 한다 — 'timestamp'는 sqlite(e2e 테스트 DB)에서 지원하지 않는
+  // 타입이라 명시하면 DataTypeNotSupportedError로 서버가 뜨지 않는다. 타입 없이 두면
+  // TypeORM이 TS 타입(Date)에서 드라이버별로 알맞은 컬럼 타입(Postgres timestamp without
+  // time zone / sqlite datetime)을 추론한다.
+  @Column({ nullable: true })
+  packagingReviewedAt?: Date | null;
+
   @OneToMany(() => Inventory, (inventory) => inventory.item)
   inventories?: Inventory[];
 

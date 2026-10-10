@@ -15,6 +15,9 @@ export interface Item {
   styleNo?: string;
   // PR-183: 품목군(선택). null이면 연결 해제.
   categoryId?: number | null;
+  // PR-186: 실/테이프 종류(material_packaging_unit_rules.materialSubType 값). null이면 미지정.
+  materialSubType?: string | null;
+  packagingReviewedAt?: string | null;
 }
 
 export interface GetItemsFilter {
@@ -34,6 +37,7 @@ export interface CreateItem {
   description?: string;
   styleNo?: string;
   categoryId?: number | null;
+  materialSubType?: string | null;
 }
 
 export type UpdateItem = Partial<CreateItem>;
@@ -64,3 +68,19 @@ export const uploadPreview = (file: File): Promise<any> => {
 };
 export const bulkInsert = (data: { styleInfo: any, matrix: any, materials: any[] }, policy: 'OVERWRITE' | 'SKIP'): Promise<any> =>
   apiClient.post('/items/bulk-insert', { data, policy });
+
+// PR-186 D: 실/테이프로 보이는 자재 중 종류 미지정(또는 all/true) 후보 + 추천값(정확히 1개
+// 규칙에 매칭될 때만). 자동 확정이 아니라 사람이 확인 후 classifyThreadTape로 적용한다.
+export interface ThreadTapeCandidate {
+  id: number;
+  code: string;
+  name: string;
+  unit: string | null;
+  materialSubType: string | null;
+  packagingReviewedAt: string | null;
+  suggestion: { materialSubType: string; displayName: string; reason: string } | null;
+}
+export const getThreadTapeCandidates = (reviewed: 'true' | 'false' | 'all' = 'false'): Promise<ThreadTapeCandidate[]> =>
+  apiClient.get('/items/thread-tape-candidates', { params: { reviewed } });
+export const classifyThreadTape = (assignments: { itemId: number; materialSubType: string | null }[]): Promise<{ updated: number }> =>
+  apiClient.post('/items/thread-tape-classification', { assignments });

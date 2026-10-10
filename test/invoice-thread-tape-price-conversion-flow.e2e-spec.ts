@@ -72,6 +72,8 @@ describe('수출 INVOICE 실/테이프 미터단가 → 콘/롤단가 환산 (PR
     styleNo: string;
     threadType?: string;
     tapeType?: string;
+    // PR-186: BOM 행(threadType/tapeType)이 없을 때의 자재(Item) 단위 종류 지정 — effectiveSubType 폴백.
+    itemMaterialSubType?: string;
     qty: number;
   }) => {
     const supplierRes = await auth(request(app.getHttpServer()).post('/suppliers')).send({ name: `TT 공급사 ${tag}` }).expect(201);
@@ -80,6 +82,7 @@ describe('수출 INVOICE 실/테이프 미터단가 → 콘/롤단가 환산 (PR
       name: opts.itemName,
       type: 'RAW_MATERIAL',
       unit: opts.unit,
+      ...(opts.itemMaterialSubType ? { materialSubType: opts.itemMaterialSubType } : {}),
     }).expect(201);
     const poRes = await auth(request(app.getHttpServer()).post('/purchase-orders')).send({
       supplierId: supplierRes.body.data.id, itemId: itemRes.body.data.id, quantity: opts.qty, unitPrice: 1,
@@ -129,6 +132,17 @@ describe('수출 INVOICE 실/테이프 미터단가 → 콘/롤단가 환산 (PR
     }).expect(200);
     expect(Number(confirmRes.body.data.amountUsd)).toBe(3); // 0.3 × 10콘
     expect(confirmRes.body.data.priceBasisNote).toContain('코아사');
+  });
+
+  // PR-186: BOM 행에 threadType/tapeType이 없어도, 자재(Item)에 미리 지정한 materialSubType이
+  // 있으면 INVOICE 라인에도 그 값이 복사된다(effectiveSubType — BOM 행이 있으면 그게 우선, 여긴 없는 경우).
+  it('BOM 행에 종류가 없어도 자재(Item)에 지정한 종류가 있으면 라인에 복사된다', async () => {
+    const styleNo = `TT-ITEMSUB-${tag}`;
+    const poId = await setup({ itemName: `TT 자재지정 ${tag}`, unit: 'CONE', styleNo, itemMaterialSubType: 'COA_SA', qty: 7 });
+
+    const gen = await auth(request(app.getHttpServer()).post('/export-shipments/generate').query({ purchaseOrderIds: String(poId) })).send({}).expect(201);
+    const line = gen.body.data.lines[0];
+    expect(line.materialSubType).toBe('COA_SA');
   });
 
   it('종류 미지정(threadType 없음)이면 자동 환산하지 않고 실 종류별 후보가 전부 나열된다', async () => {

@@ -19,7 +19,8 @@ export type TabId =
   | 'materialPackagingUnitRules'
   | 'customsExchangeRates'
   | 'materialCategories'
-  | 'brandPriceRules';
+  | 'brandPriceRules'
+  | 'threadTapeClassification';
 
 interface NavItem {
   id: TabId;
@@ -82,6 +83,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'brands', label: '브랜드 관리' },
       // PR-175: 실/테이프 자재 종류별 포장단위(콘/롤) 환산 기준 마스터.
       { id: 'materialPackagingUnitRules', label: '자재 포장단위' },
+      // PR-186: 실/테이프 종류를 자재(Item) 단위로 지정하는 일괄 적용 화면.
+      { id: 'threadTapeClassification', label: '실/테이프 종류 지정' },
       // PR-184: 관세청 주간환율(수출/수입) 수동 입력 마스터.
       { id: 'customsExchangeRates', label: '주간 환율' },
       // PR-183: 공급업체 취급 품목군(겉감·안감·실 …) 마스터.
@@ -142,6 +145,12 @@ const ICONS: Record<TabId, React.ReactNode> = {
     <svg {...ICON_PROPS}>
       <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z" />
       <path d="M3 8l9 5 9-5M12 13v8" />
+    </svg>
+  ),
+  threadTapeClassification: (
+    <svg {...ICON_PROPS}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v5M12 17v5M3 12h5M16 12h5" />
     </svg>
   ),
   dashboard: (

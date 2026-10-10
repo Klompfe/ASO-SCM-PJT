@@ -12,7 +12,15 @@ import { Repository, DataSource, In } from 'typeorm';
 import { Item, ItemType } from './entities/item.entity';
 import { GetItemsFilterDto } from './dto/get-items-filter.dto';
 import { MaterialCategory } from '../material-categories/entities/material-category.entity';
+import { MaterialPackagingUnitRule } from '../material-packaging-unit-rules/entities/material-packaging-unit-rule.entity';
+import { looksLikeThreadOrTape, buildThreadTapeSuggestion } from '../common/utils/packaging-subtype.util';
 import * as XLSX from 'xlsx';
+
+export interface ThreadTapeClassificationAssignment {
+  itemId: number;
+  // null이면 "실/테이프 아님"으로 확정(검토완료, 종류는 비움).
+  materialSubType: string | null;
+}
 
 export interface CreateItemInput {
   code: string;
@@ -25,6 +33,8 @@ export interface CreateItemInput {
   styleNo?: string;
   // PR-183: 품목군(선택). 없으면 비워 둔다 — 추측해서 채우지 않는다.
   categoryId?: number | null;
+  // PR-186: 실/테이프 종류(선택). 없으면 비워 둔다 — 추측해서 채우지 않는다.
+  materialSubType?: string | null;
 }
 
 export interface UpdateItemInput {
@@ -38,6 +48,8 @@ export interface UpdateItemInput {
   styleNo?: string;
   // PR-183: null이면 품목군 해제, 생략(undefined)이면 변경 없음.
   categoryId?: number | null;
+  // PR-186: null이면 종류 해제, 생략(undefined)이면 변경 없음.
+  materialSubType?: string | null;
 }
 
 @Injectable()
@@ -55,6 +67,14 @@ export class ItemsService {
     const category = await this.dataSource.getRepository(MaterialCategory).findOne({ where: { id: categoryId } });
     if (!category) {
       throw new BadRequestException(`존재하지 않는 품목군 ID: ${categoryId}`);
+    }
+  }
+
+  // PR-186: 없는(규칙 테이블에 없는) 실/테이프 종류 코드를 조용히 저장하지 않는다.
+  private async assertMaterialSubTypeExists(materialSubType: string): Promise<void> {
+    const rule = await this.dataSource.getRepository(MaterialPackagingUnitRule).findOne({ where: { materialSubType } });
+    if (!rule) {
+      throw new BadRequestException(`존재하지 않는 실/테이프 종류입니다: ${materialSubType}`);
     }
   }
 
@@ -81,6 +101,7 @@ export class ItemsService {
     }
     // PR-183: 없는 품목군 id는 트랜잭션을 열기 전에 400으로 거절한다(FK 위반이 500으로 바뀌지 않게).
     if (dto.categoryId != null) await this.assertCategoryExists(dto.categoryId);
+    if (dto.materialSubType != null) await this.assertMaterialSubTypeExists(dto.materialSubType);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -100,6 +121,7 @@ export class ItemsService {
       if (dto.description) newItem.description = dto.description;
       if (dto.styleNo) newItem.styleNo = dto.styleNo;
       if (dto.categoryId != null) newItem.categoryId = dto.categoryId;
+      if (dto.materialSubType != null) newItem.materialSubType = dto.materialSubType;
 
       const savedItem = await queryRunner.manager.save(newItem);
       await queryRunner.commitTransaction();
@@ -201,6 +223,10 @@ export class ItemsService {
     if (dto.categoryId !== undefined) {
       if (dto.categoryId !== null) await this.assertCategoryExists(dto.categoryId);
       item.categoryId = dto.categoryId;
+    }
+    if (dto.materialSubType !== undefined) {
+      if (dto.materialSubType !== null) await this.assertMaterialSubTypeExists(dto.materialSubType);
+      item.materialSubType = dto.materialSubType;
     }
 
     try {
@@ -334,6 +360,81 @@ export class ItemsService {
       const error = err as Error;
       this.logger.error(`Excel parsing failed: ${error.message}`, error.stack);
       throw new BadRequestException(`엑셀 파일 처리 중 오류가 발생했습니다: ${error.message}`);
+    }
+  }
+
+  // PR-186 D: 실/테이프로 보이는(looksLikeThreadOrTape) 자재 중 아직 검토 안 된 것을 찾아
+  // 종류를 추천한다(buildThreadTapeSuggestion — 추천은 정확히 1개 규칙에 매칭될 때만).
+  // 자동 확정은 하지 않는다 — 사람이 bulk-apply(classifyThreadTape)로 직접 적용해야 한다.
+  async getThreadTapeCandidates(reviewed: 'true' | 'false' | 'all' = 'false') {
+    const [items, rules] = await Promise.all([
+      this.itemRepository.find(),
+      this.dataSource.getRepository(MaterialPackagingUnitRule).find(),
+    ]);
+
+    const isReviewed = (item: Item) => !!item.packagingReviewedAt || item.materialSubType != null;
+
+    return items
+      .filter((item) => looksLikeThreadOrTape(item.name, rules))
+      .filter((item) => (reviewed === 'all' ? true : reviewed === 'true' ? isReviewed(item) : !isReviewed(item)))
+      .map((item) => ({
+        id: item.id,
+        code: item.code,
+        name: item.name,
+        unit: item.unit ?? null,
+        materialSubType: item.materialSubType ?? null,
+        packagingReviewedAt: item.packagingReviewedAt ?? null,
+        suggestion: buildThreadTapeSuggestion(item.name, rules),
+      }));
+  }
+
+  // PR-186 D: 추천을 사람이 확인한 뒤 일괄 적용한다 — 전부 유효해야 전부 적용(all-or-nothing).
+  // materialSubType이 null이면 "실/테이프 아님"으로 확정(packagingReviewedAt만 채움).
+  async classifyThreadTape(assignments: ThreadTapeClassificationAssignment[]): Promise<{ updated: number }> {
+    if (!assignments || assignments.length === 0) {
+      throw new BadRequestException('적용할 항목이 없습니다.');
+    }
+
+    const itemIds = assignments.map((a) => a.itemId);
+    const items = await this.itemRepository.find({ where: { id: In(itemIds) } });
+    const itemById = new Map(items.map((i) => [i.id, i]));
+
+    const subTypes = [...new Set(assignments.map((a) => a.materialSubType).filter((v): v is string => v != null))];
+    const rules = subTypes.length > 0
+      ? await this.dataSource.getRepository(MaterialPackagingUnitRule).find({ where: { materialSubType: In(subTypes) } })
+      : [];
+    const validSubTypes = new Set(rules.map((r) => r.materialSubType));
+
+    for (const a of assignments) {
+      if (!itemById.has(a.itemId)) {
+        throw new BadRequestException(`존재하지 않는 품목 ID: ${a.itemId}`);
+      }
+      if (a.materialSubType != null && !validSubTypes.has(a.materialSubType)) {
+        throw new BadRequestException(`존재하지 않는 실/테이프 종류입니다: ${a.materialSubType}`);
+      }
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const now = new Date();
+      for (const a of assignments) {
+        const item = itemById.get(a.itemId)!;
+        item.materialSubType = a.materialSubType;
+        item.packagingReviewedAt = now;
+        await queryRunner.manager.save(item);
+      }
+      await queryRunner.commitTransaction();
+      this.logger.log(`실/테이프 종류 일괄 적용 완료: ${assignments.length}건`);
+      return { updated: assignments.length };
+    } catch (err) {
+      const error = err as Error;
+      await queryRunner.rollbackTransaction();
+      this.logger.error(`실/테이프 종류 일괄 적용 실패: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('실/테이프 종류 일괄 적용 중 오류가 발생했습니다.');
+    } finally {
+      await queryRunner.release();
     }
   }
 

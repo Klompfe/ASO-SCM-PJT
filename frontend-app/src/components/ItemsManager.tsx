@@ -8,6 +8,7 @@ import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
 import { getErrorMessage } from '../utils/errorMessage';
 import { getMaterialCategories, type MaterialCategory } from '../api/materialCategories.service';
+import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
 import { activeCategories } from '../utils/materialCategories';
 import { ItemCatalogReport } from './ItemCatalogReport';
 import { Pagination } from './Pagination';
@@ -77,10 +78,14 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   // PR-104: type은 기존과 동일하게 기본값 RAW_MATERIAL로 두되 select로 바꿀 수 있게
   // 하고, spec/description/styleNo도 생성 시점에 입력할 수 있게 한다(백엔드
   // CreateItemDto에는 이미 있었지만 화면에 입력란이 없어 죽어있던 필드들).
-  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '', categoryId: null });
+  const [newItem, setNewItem] = useState<CreateItem>({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '', categoryId: null, materialSubType: null });
   // PR-183: 품목군(선택). 전체 목록(비활성 포함)을 한 번 받아 이름 표시에 쓰고, 선택지는 활성만 보여준다.
   const [materialCategories, setMaterialCategories] = useState<MaterialCategory[]>([]);
   const [editCategoryId, setEditCategoryId] = useState<string>('');
+  // PR-186: 실/테이프 종류(선택) — 규칙 테이블(material_packaging_unit_rules)에 없는 값은
+  // 저장할 수 없으므로(백엔드 400) 드롭다운 선택지도 같은 테이블에서 가져온다.
+  const [packagingRules, setPackagingRules] = useState<MaterialPackagingUnitRule[]>([]);
+  const [editMaterialSubType, setEditMaterialSubType] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   // PR-117: 카탈로그 보고서 — 열려 있는 동안 현재 검색조건(filter.type/keyword)에 맞는 전체 품목을 불러온다.
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -175,6 +180,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
 
   useEffect(() => {
     getMaterialCategories().then((res) => setMaterialCategories(Array.isArray(res) ? res : (res?.data ?? []))).catch(() => setMaterialCategories([]));
+    getMaterialPackagingUnitRules().then((res) => setPackagingRules(Array.isArray(res) ? res : (res?.data ?? []))).catch(() => setPackagingRules([]));
     loadItems();
   }, [loadItems]);
 
@@ -220,7 +226,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       });
       toast.success('품목이 생성되었습니다.');
       loadItems();
-      setNewItem({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '', categoryId: null });
+      setNewItem({ code: '', name: '', englishName: '', unit: '', type: 'RAW_MATERIAL', spec: '', description: '', styleNo: '', categoryId: null, materialSubType: null });
     } catch (error) {
       // toast.error는 Axios 인터셉터에서 처리됨
     } finally {
@@ -239,11 +245,13 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       styleNo: item.styleNo || '',
     });
     setEditCategoryId(item.categoryId != null ? String(item.categoryId) : '');
+    setEditMaterialSubType(item.materialSubType ?? '');
   };
 
   const cancelEditItem = () => {
     setEditingItemId(null);
     setEditItemForm({ name: '', englishName: '', unit: '', spec: '', description: '', styleNo: '' });
+    setEditMaterialSubType('');
   };
 
   const handleUpdateItem = async (id: number) => {
@@ -257,6 +265,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
         styleNo: editItemForm.styleNo || undefined,
         // PR-183: 빈 값은 null로 보내 품목군을 해제한다(undefined면 그대로 둠).
         categoryId: editCategoryId ? Number(editCategoryId) : null,
+        // PR-186: 빈 값은 null로 보내 종류 지정을 해제한다(미지정으로 되돌림).
+        materialSubType: editMaterialSubType || null,
       });
       toast.success('품목 정보가 수정되었습니다.');
       cancelEditItem();
@@ -719,6 +729,21 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                 ))}
               </select>
             </div>
+            {/* PR-186: 실/테이프 종류(선택) — 소요량 계산이 BOM 행 대신 이 값을 쓸 수 있게 한다. */}
+            <div className="flex flex-col">
+              <label className="text-sm text-gray-600 mb-1">실/테이프 종류 (선택)</label>
+              <select
+                className="border border-gray-300 rounded px-3 py-2"
+                aria-label="실/테이프 종류"
+                value={newItem.materialSubType ?? ''}
+                onChange={(e) => setNewItem({ ...newItem, materialSubType: e.target.value || null })}
+              >
+                <option value="">- 없음 -</option>
+                {packagingRules.map((r) => (
+                  <option key={r.materialSubType} value={r.materialSubType}>{r.displayName}</option>
+                ))}
+              </select>
+            </div>
             <div className="flex flex-col">
               <label className="text-sm text-gray-600 mb-1">규격</label>
               <input className="border border-gray-300 rounded px-3 py-2" placeholder="규격" value={newItem.spec} onChange={(e) => setNewItem({...newItem, spec: e.target.value})} />
@@ -776,6 +801,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                 <th className="px-4 py-2 text-left">설명</th>
                 <th className="px-4 py-2 text-left">스타일번호</th>
                 <th className="px-4 py-2 text-left">품목군</th>
+                <th className="px-4 py-2 text-left">실/테이프 종류</th>
                 <th className="px-4 py-2 text-left">Action</th>
               </tr>
             </thead>
@@ -842,6 +868,14 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         ))}
                       </select>
                     </td>
+                    <td className="px-4 py-2">
+                      <select className="border rounded px-2 py-1" aria-label="실/테이프 종류 변경" value={editMaterialSubType} onChange={(e) => setEditMaterialSubType(e.target.value)}>
+                        <option value="">- 없음 -</option>
+                        {packagingRules.map((r) => (
+                          <option key={r.materialSubType} value={r.materialSubType}>{r.displayName}</option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                       <button className="text-blue-600" onClick={() => handleUpdateItem(item.id)}>저장</button>
                       <button className="text-gray-500" onClick={cancelEditItem}>취소</button>
@@ -858,6 +892,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                     <td className="px-4 py-2">{item.description ?? '-'}</td>
                     <td className="px-4 py-2">{item.styleNo ?? '-'}</td>
                     <td className="px-4 py-2">{materialCategories.find((c) => c.id === item.categoryId)?.name ?? '-'}</td>
+                    <td className="px-4 py-2">{packagingRules.find((r) => r.materialSubType === item.materialSubType)?.displayName ?? '-'}</td>
                     <td className="px-4 py-2">
                       <button className="text-blue-600" onClick={() => startEditItem(item)}>수정</button>
                     </td>

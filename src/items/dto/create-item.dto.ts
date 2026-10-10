@@ -46,4 +46,11 @@ export class CreateItemDto {
   @IsString()
   @IsOptional()
   styleNo?: string;
+
+  // PR-186: 실/테이프 종류(material_packaging_unit_rules.materialSubType 값, 예: 'COA_SA').
+  // 값이 있으면 규칙 테이블에 존재해야 한다(없으면 400) — 추측해서 저장하지 않는다.
+  @ApiProperty({ description: '실/테이프 종류(선택) — material_packaging_unit_rules.materialSubType 값', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  materialSubType?: string | null;
 }

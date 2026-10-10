@@ -11,7 +11,13 @@ describe('ItemsService', () => {
 
   const mockItemRepository = {
     findOne: jest.fn(),
+    find: jest.fn(),
     save: jest.fn(),
+  };
+
+  const mockRuleRepository = {
+    findOne: jest.fn(),
+    find: jest.fn(),
   };
 
   const mockQueryRunnerManager = {
@@ -29,13 +35,18 @@ describe('ItemsService', () => {
 
   const mockDataSource = {
     createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
+    getRepository: jest.fn().mockReturnValue(mockRuleRepository),
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
     mockDataSource.createQueryRunner.mockReturnValue(mockQueryRunner);
+    mockDataSource.getRepository.mockReturnValue(mockRuleRepository);
     mockQueryRunnerManager.save.mockImplementation((entity: any) => Promise.resolve({ id: 1, ...entity }));
     mockItemRepository.findOne.mockResolvedValue(null);
+    mockItemRepository.find.mockResolvedValue([]);
+    mockRuleRepository.findOne.mockResolvedValue(null);
+    mockRuleRepository.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -159,6 +170,132 @@ describe('ItemsService', () => {
       expect(mockItemRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({ spec: '65"', description: '수정된 설명' }),
       );
+    });
+  });
+
+  // PR-186: 실/테이프 종류(materialSubType) 지정 — 규칙 테이블에 없는 값은 400으로 거절한다(추측 저장 금지).
+  describe('create/update - materialSubType 검증 (PR-186)', () => {
+    it('규칙 테이블에 있는 materialSubType으로 생성하면 저장된다', async () => {
+      mockRuleRepository.findOne.mockResolvedValue({ materialSubType: 'COA_SA', displayName: '코아사' });
+      const result = await service.create({ code: 'SUB_1', name: '코아사 45S', type: ItemType.RAW_MATERIAL, materialSubType: 'COA_SA' });
+      expect(result.materialSubType).toBe('COA_SA');
+    });
+
+    it('규칙 테이블에 없는 materialSubType으로 생성하면 BadRequestException', async () => {
+      mockRuleRepository.findOne.mockResolvedValue(null);
+      await expect(
+        service.create({ code: 'SUB_2', name: '없는종류', type: ItemType.RAW_MATERIAL, materialSubType: 'NOT_EXIST' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('수정 시 materialSubType을 null로 보내면 해제된다(검증 없이)', async () => {
+      const existing = { id: 8, code: 'SUB_3', name: '기존', type: ItemType.RAW_MATERIAL, materialSubType: 'COA_SA' };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.save.mockImplementation((item: any) => Promise.resolve(item));
+
+      const result = await service.update(8, { materialSubType: null });
+
+      expect(result.materialSubType).toBeNull();
+      expect(mockRuleRepository.findOne).not.toHaveBeenCalled();
+    });
+
+    it('수정 시 materialSubType을 생략하면(undefined) 기존 값이 유지된다', async () => {
+      const existing = { id: 9, code: 'SUB_4', name: '기존', type: ItemType.RAW_MATERIAL, materialSubType: 'COA_SA' };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.save.mockImplementation((item: any) => Promise.resolve(item));
+
+      const result = await service.update(9, { name: '이름만 변경' });
+
+      expect(result.materialSubType).toBe('COA_SA');
+    });
+  });
+
+  // PR-186 D: 실/테이프 후보 조회 — looksLikeThreadOrTape로 보수적으로 추려, 정확히 1개
+  // 규칙과 매칭될 때만 추천값을 함께 준다(자동 확정 아님).
+  describe('getThreadTapeCandidates (PR-186 D)', () => {
+    const rules = [{ materialSubType: 'COA_SA', displayName: '코아사' }, { materialSubType: 'DADE', displayName: '다데' }];
+
+    it('이름이 실/테이프로 보이는 자재만 후보로 추리고, 매칭 1개면 추천을 채운다', async () => {
+      mockItemRepository.find.mockResolvedValue([
+        { id: 1, code: 'M1', name: '코아사 45S', unit: 'EA', materialSubType: null, packagingReviewedAt: null },
+        { id: 2, code: 'M2', name: '일반 원단', unit: 'M', materialSubType: null, packagingReviewedAt: null },
+      ]);
+      mockRuleRepository.find.mockResolvedValue(rules);
+
+      const result = await service.getThreadTapeCandidates('false');
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ id: 1, name: '코아사 45S', suggestion: { materialSubType: 'COA_SA' } });
+    });
+
+    it('reviewed=true면 이미 검토된(종류 지정 또는 packagingReviewedAt 있는) 것만 보여준다', async () => {
+      mockItemRepository.find.mockResolvedValue([
+        { id: 1, code: 'M1', name: '코아사 45S', materialSubType: 'COA_SA', packagingReviewedAt: null },
+        { id: 2, code: 'M2', name: '다데 테이프', materialSubType: null, packagingReviewedAt: null },
+      ]);
+      mockRuleRepository.find.mockResolvedValue(rules);
+
+      const result = await service.getThreadTapeCandidates('true');
+
+      expect(result.map((r) => r.id)).toEqual([1]);
+    });
+
+    it('reviewed=all이면 검토 여부와 무관하게 실/테이프로 보이는 전부를 보여준다', async () => {
+      mockItemRepository.find.mockResolvedValue([
+        { id: 1, code: 'M1', name: '코아사 45S', materialSubType: 'COA_SA', packagingReviewedAt: null },
+        { id: 2, code: 'M2', name: '다데 테이프', materialSubType: null, packagingReviewedAt: null },
+      ]);
+      mockRuleRepository.find.mockResolvedValue(rules);
+
+      const result = await service.getThreadTapeCandidates('all');
+
+      expect(result.map((r) => r.id).sort()).toEqual([1, 2]);
+    });
+  });
+
+  // PR-186 D: 추천 확인 후 일괄 적용 — 하나라도 유효하지 않으면 전체 거절(all-or-nothing).
+  describe('classifyThreadTape (PR-186 D)', () => {
+    it('모두 유효하면 일괄 적용하고 packagingReviewedAt을 채운다', async () => {
+      mockItemRepository.find.mockResolvedValue([
+        { id: 1, code: 'M1', name: '코아사', materialSubType: null, packagingReviewedAt: null },
+        { id: 2, code: 'M2', name: '일반자재', materialSubType: null, packagingReviewedAt: null },
+      ]);
+      mockRuleRepository.find.mockResolvedValue([{ materialSubType: 'COA_SA', displayName: '코아사' }]);
+
+      const result = await service.classifyThreadTape([
+        { itemId: 1, materialSubType: 'COA_SA' },
+        { itemId: 2, materialSubType: null }, // "실/테이프 아님"으로 확정
+      ]);
+
+      expect(result).toEqual({ updated: 2 });
+      expect(mockQueryRunner.commitTransaction).toHaveBeenCalled();
+      expect(mockQueryRunnerManager.save).toHaveBeenCalledWith(expect.objectContaining({ id: 1, materialSubType: 'COA_SA' }));
+      expect(mockQueryRunnerManager.save).toHaveBeenCalledWith(expect.objectContaining({ id: 2, materialSubType: null, packagingReviewedAt: expect.any(Date) }));
+    });
+
+    it('존재하지 않는 itemId가 하나라도 있으면 전부 거절(저장 시도 없음)', async () => {
+      mockItemRepository.find.mockResolvedValue([{ id: 1, code: 'M1', name: '코아사', materialSubType: null, packagingReviewedAt: null }]);
+      mockRuleRepository.find.mockResolvedValue([{ materialSubType: 'COA_SA', displayName: '코아사' }]);
+
+      await expect(
+        service.classifyThreadTape([
+          { itemId: 1, materialSubType: 'COA_SA' },
+          { itemId: 999, materialSubType: 'COA_SA' },
+        ]),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockQueryRunnerManager.save).not.toHaveBeenCalled();
+    });
+
+    it('존재하지 않는 종류가 하나라도 있으면 전부 거절', async () => {
+      mockItemRepository.find.mockResolvedValue([{ id: 1, code: 'M1', name: '코아사', materialSubType: null, packagingReviewedAt: null }]);
+      mockRuleRepository.find.mockResolvedValue([]); // COA_SA 규칙 없음
+
+      await expect(service.classifyThreadTape([{ itemId: 1, materialSubType: 'COA_SA' }])).rejects.toThrow(BadRequestException);
+      expect(mockQueryRunnerManager.save).not.toHaveBeenCalled();
+    });
+
+    it('빈 배열이면 BadRequestException', async () => {
+      await expect(service.classifyThreadTape([])).rejects.toThrow(BadRequestException);
     });
   });
 });

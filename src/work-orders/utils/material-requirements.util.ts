@@ -1,20 +1,35 @@
 import { classifyPackagingUnit } from '../../export-shipments/utils/meter-price-conversion.util';
+import { effectiveSubType, looksLikeThreadOrTape } from '../../common/utils/packaging-subtype.util';
+
+export interface RequirementMaterialLike {
+  id: number;
+  code?: string | null;
+  name: string;
+  unit?: string | null;
+  // PR-186: 자재(Item) 단위로 지정한 실/테이프 종류와 검토 여부 — BOM 행에 종류가 없으면
+  // 이 값을 쓴다(effectiveSubType). packagingReviewedAt은 "실/테이프 아님"으로 확정한
+  // 자재를 일반 자재처럼 취급하기 위한 표시.
+  materialSubType?: string | null;
+  packagingReviewedAt?: Date | string | null;
+}
 
 export interface RequirementBomItem {
   id: number;
   category?: string | null;
   colorCode?: string | null;
   consumption: unknown;
-  material?: { id: number; code?: string | null; name: string; unit?: string | null } | null;
-  // PR-185 B-2: 실(threadType)/테이프(tapeType) 종류 — 콘/롤 환산에 쓴다. BOM 행에 값이
-  // 없으면(미지정) 추측하지 않고 환산하지 않는다.
+  material?: RequirementMaterialLike | null;
+  // PR-185 B-2: 실(threadType)/테이프(tapeType) 종류 — BOM 행에 값이 있으면 Item의
+  // materialSubType보다 우선한다(effectiveSubType).
   threadType?: string | null;
   tapeType?: string | null;
 }
 
-// PR-185 B-2: material_packaging_unit_rules(PR-175) 한 행 — materialSubType → 포장단위/단위길이.
+// PR-185 B-2 / PR-186: material_packaging_unit_rules(PR-175) 한 행 — materialSubType →
+// 포장단위/단위길이. displayName은 PR-186의 looksLikeThreadOrTape 판별에 쓴다.
 export interface PackagingUnitRuleLike {
   materialSubType: string;
+  displayName: string;
   packagingUnitLabel: string;
   unitLengthM: number;
 }
@@ -48,9 +63,11 @@ export interface MaterialRequirementRow {
   // 부족 수량 = max(0, 필요 총수량 - orderedQty)
   shortageQty: number;
   lineCount: number;
-  // PR-185 B-2: 실/테이프 자재(Item.unit이 콘/롤로 표기된 경우)만 채워진다. 종류 미지정이거나
-  // 규칙 테이블에 없으면 대신 conversionWarning만 채워진다(추측해서 환산하지 않음).
+  // PR-186: BOM 행(threadType/tapeType) 또는 자재(Item.materialSubType) 둘 중 하나로
+  // 종류가 정해지고 규칙 테이블에 그 종류가 있으면 채워진다(Item.unit과 무관, 요구사항 B).
   packaging?: PackagingConversion;
+  // 종류가 없고(미검토) 실/테이프로 보이거나, 종류는 있는데 규칙에 없거나, 단위가 콘/롤인데
+  // 종류가 없을 때(기존 PR-185 폴백) — 추측해서 환산하지 않고 경고만 준다.
   conversionWarning?: string;
 }
 
@@ -66,9 +83,11 @@ const MISSING_SUBTYPE_WARNING = '실/테이프 종류 미지정 — 선택해 �
 
 interface WorkingRow extends MaterialRequirementRow {
   colorMeters: Map<string, number>;
-  subtype: string | null | undefined; // undefined = 아직 안 봄
+  subtype: string | null | undefined; // undefined = 아직 안 봄(effectiveSubType 기준)
   subtypeMixed: boolean;
   unit: string | null;
+  materialName: string;
+  reviewed: boolean;
 }
 
 // BOM 전개: 자재별 필요 총수량 = consumption(제품 1개당) × targetQuantity. 기존 재고 차감 로직
@@ -108,6 +127,8 @@ export function calculateMaterialRequirements(
         subtype: undefined,
         subtypeMixed: false,
         unit: bi.material.unit ?? null,
+        materialName: bi.material.name,
+        reviewed: !!bi.material.packagingReviewedAt,
       };
     cur.consumptionPerUnit = round4(cur.consumptionPerUnit + perUnit);
     cur.requiredQty = round4(cur.requiredQty + perUnit * target);
@@ -121,7 +142,8 @@ export function calculateMaterialRequirements(
     const colorKey = color || '-';
     cur.colorMeters.set(colorKey, round4((cur.colorMeters.get(colorKey) ?? 0) + perUnit * target));
 
-    const subtype = bi.threadType ?? bi.tapeType ?? null;
+    // PR-186: BOM 행에 종류가 있으면 그것, 없으면 자재(Item) 단위 지정(effectiveSubType).
+    const subtype = effectiveSubType(bi, bi.material);
     if (cur.subtype === undefined) cur.subtype = subtype;
     else if (cur.subtype !== subtype) cur.subtypeMixed = true;
 
@@ -135,34 +157,41 @@ export function calculateMaterialRequirements(
     row.unlinkedOrderedQty = round4(num(opts?.unlinkedByItemId?.get(row.itemId)));
     row.shortageQty = Math.max(0, round4(row.requiredQty - row.orderedQty));
 
-    const packagingCategory = classifyPackagingUnit(row.unit);
-    if (packagingCategory) {
-      const subtype = row.subtypeMixed ? null : row.subtype;
-      const rule = subtype ? rules.find((r) => r.materialSubType === subtype) : undefined;
-      if (!subtype || !rule) {
-        // 종류 미지정이거나(subtype 없음) 종류는 있는데 규칙 테이블에 없는 경우 — 둘 다
-        // 추측해서 환산하지 않고 같은 경고만 돌려준다(요구사항 B-2).
-        row.conversionWarning = MISSING_SUBTYPE_WARNING;
-      } else {
-        const unitLengthM = Number(rule.unitLengthM);
-        const label = rule.packagingUnitLabel;
-        let requiredPackages = 0;
-        const parts: string[] = [];
-        for (const [color, meters] of row.colorMeters.entries()) {
-          const packages = Math.ceil(meters / unitLengthM);
-          requiredPackages += packages;
-          parts.push(`${color}: ${meters.toLocaleString('ko-KR')}m→${packages}${label}`);
-        }
-        const shortagePackages = Math.max(0, requiredPackages - row.orderedQty);
-        const conversionFormula =
-          row.colorMeters.size > 1
-            ? `색상별 ${parts.join(', ')} = 합계 ${requiredPackages}${label}`
-            : `${row.requiredQty.toLocaleString('ko-KR')}m ÷ ${unitLengthM}m/${label} = ${round2(row.requiredQty / unitLengthM)} → ${requiredPackages}${label}`;
-        row.packaging = { packagingUnitLabel: label, unitLengthM, requiredPackages, shortagePackages, conversionFormula };
-      }
-    }
+    const subtype = row.subtypeMixed ? null : row.subtype;
+    const rule = subtype ? rules.find((r) => r.materialSubType === subtype) : undefined;
 
-    const { colorMeters: _colorMeters, subtype: _subtype, subtypeMixed: _subtypeMixed, unit: _unit, ...clean } = row;
+    if (subtype && rule) {
+      // PR-186: 종류가 정해지고 규칙이 있으면 Item.unit과 무관하게 환산한다 — 단위 라벨은
+      // 규칙의 packagingUnitLabel(콘/롤)을 쓴다(Item.unit이 'EA'여도 상관없다).
+      const unitLengthM = Number(rule.unitLengthM);
+      const label = rule.packagingUnitLabel;
+      let requiredPackages = 0;
+      const parts: string[] = [];
+      for (const [color, meters] of row.colorMeters.entries()) {
+        const packages = Math.ceil(meters / unitLengthM);
+        requiredPackages += packages;
+        parts.push(`${color}: ${meters.toLocaleString('ko-KR')}m→${packages}${label}`);
+      }
+      const shortagePackages = Math.max(0, requiredPackages - row.orderedQty);
+      const conversionFormula =
+        row.colorMeters.size > 1
+          ? `색상별 ${parts.join(', ')} = 합계 ${requiredPackages}${label}`
+          : `${row.requiredQty.toLocaleString('ko-KR')}m ÷ ${unitLengthM}m/${label} = ${round2(row.requiredQty / unitLengthM)} → ${requiredPackages}${label}`;
+      row.packaging = { packagingUnitLabel: label, unitLengthM, requiredPackages, shortagePackages, conversionFormula };
+    } else if (subtype && !rule) {
+      // 종류는 있는데(BOM 행 또는 Item 지정) 규칙 테이블에 없음(데이터 누락) — 추측 금지.
+      row.conversionWarning = MISSING_SUBTYPE_WARNING;
+    } else if (!row.reviewed && looksLikeThreadOrTape(row.materialName, rules)) {
+      // PR-186: 종류 미지정 + 이름이 실/테이프로 보임 + 아직 검토 안 함 → 미터 수량을
+      // 제안하지 않고 경고만(Item.unit이 'EA'여도 여기서 걸린다 — 운영 데이터 실측 결과).
+      row.conversionWarning = MISSING_SUBTYPE_WARNING;
+    } else if (!row.reviewed && classifyPackagingUnit(row.unit)) {
+      // PR-185 B-2에서 쓰던 폴백 — 단위 자체가 콘/롤로 표기돼 있는데 종류가 없는 경우.
+      row.conversionWarning = MISSING_SUBTYPE_WARNING;
+    }
+    // reviewed=true(= "실/테이프 아님"으로 확정)이고 종류도 없으면 일반 자재로 둔다(아무 필드도 안 채움).
+
+    const { colorMeters: _colorMeters, subtype: _subtype, subtypeMixed: _subtypeMixed, unit: _unit, materialName: _materialName, reviewed: _reviewed, ...clean } = row;
     result.push(clean);
   }
   return result;

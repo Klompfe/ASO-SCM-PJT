@@ -22,6 +22,7 @@ import { MasterStyle } from '../styles/entities/master-style.entity';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
 import { CustomsExchangeRatesService, type ExchangeRateLookupResult } from '../customs-exchange-rates/customs-exchange-rates.service';
 import { ExchangeRateType } from '../customs-exchange-rates/entities/customs-exchange-rate.entity';
+import { effectiveSubType } from '../common/utils/packaging-subtype.util';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
   arr.reduce((total, item) => total + (Number(item[key]) || 0), 0);
@@ -186,8 +187,10 @@ export class ExportShipmentsService {
               unitPriceUsd: usd?.unitPriceUsd ?? null,
               amountUsd: usd?.amountUsd ?? null,
               priceSource: usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null,
-              // PR-182: 실/테이프 종류(있으면) — 미터단가 → 콘/롤단가 환산 후보 조회에 쓰인다.
-              materialSubType: bomItem.threadType ?? bomItem.tapeType ?? null,
+              // PR-182/186: 실/테이프 종류(있으면) — BOM 행(threadType/tapeType)이 있으면 우선, 없으면
+              // 자재(Item.materialSubType) 단위 지정을 쓴다(effectiveSubType). 미터단가 → 콘/롤단가
+              // 환산 후보 조회에 쓰인다.
+              materialSubType: effectiveSubType(bomItem, bomItem.material),
             });
             packedQty += cl.qty;
             if (cl.hasMissingLength) {
@@ -217,8 +220,10 @@ export class ExportShipmentsService {
               unitPriceUsd: usd?.unitPriceUsd ?? null,
               amountUsd: usd?.amountUsd ?? null,
               priceSource: usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null,
-              // PR-182: 실/테이프 종류(있으면) — 미터단가 → 콘/롤단가 환산 후보 조회에 쓰인다.
-              materialSubType: bomItem.threadType ?? bomItem.tapeType ?? null,
+              // PR-182/186: 실/테이프 종류(있으면) — BOM 행(threadType/tapeType)이 있으면 우선, 없으면
+              // 자재(Item.materialSubType) 단위 지정을 쓴다(effectiveSubType). 미터단가 → 콘/롤단가
+              // 환산 후보 조회에 쓰인다.
+              materialSubType: effectiveSubType(bomItem, bomItem.material),
             });
             packedQty += cl.qty;
           }
