@@ -10,6 +10,7 @@ import {
   Query,
   ParseIntPipe,
   UseInterceptors,
+  UseGuards,
   UploadedFile,
 } from '@nestjs/common';
 import {
@@ -26,6 +27,10 @@ import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { GetItemsFilterDto } from './dto/get-items-filter.dto';
 import { BulkInsertDto } from './dto/bulk-insert-items.dto';
+import { ClassifyThreadTapeDto } from './dto/classify-thread-tape.dto';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/entities/user.entity';
 
 @ApiTags('품목 관리 API (Items)')
 @ApiBearerAuth()
@@ -82,11 +87,16 @@ export class ItemsController {
     return await this.itemsService.getThreadTapeCandidates(reviewed);
   }
 
-  @ApiOperation({ summary: '실/테이프 종류 일괄 지정(전부 유효해야 전부 적용)' })
+  // PR-186-FIX: 소요량·발주 수량·INVOICE 환산에 직접 영향을 주는 확정 작업이라
+  // MANAGER/ADMIN만 허용한다(안전모드 원칙). 조회(thread-tape-candidates)는 바꾸지 않는다.
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: '실/테이프 종류 일괄 지정(전부 유효해야 전부 적용, MANAGER/ADMIN)' })
   @ApiResponse({ status: 200, description: '적용 성공' })
-  @ApiResponse({ status: 400, description: '존재하지 않는 품목 ID 또는 종류' })
+  @ApiResponse({ status: 400, description: '존재하지 않는 품목 ID/종류, 또는 잘못된 형식' })
+  @ApiResponse({ status: 403, description: 'MANAGER/ADMIN 권한 필요' })
   @Post('thread-tape-classification')
-  async classifyThreadTape(@Body() body: { assignments: { itemId: number; materialSubType: string | null }[] }) {
+  async classifyThreadTape(@Body() body: ClassifyThreadTapeDto) {
     return await this.itemsService.classifyThreadTape(body.assignments);
   }
 

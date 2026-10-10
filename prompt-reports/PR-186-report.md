@@ -78,3 +78,35 @@ PR-183~185와 같은 이유(새 컬럼이 존재하는 환경이 아직 없음)�
 1. 이 브랜치를 머지(별도 MERGE 승인 필요)한 뒤, "마스터·설정 > 실/테이프 종류 지정" 화면에서 추천 30건을 확인하고 선택 적용한다(또는 ItemsManager에서 자재 하나씩 직접 지정).
 2. 추천이 없는 24건(그리고 "사"로 끝나 후보에도 안 뜨는 자재들)은 ItemsManager에서 이름을 보고 직접 종류를 고르거나, "실/테이프 아님"으로 확정(종류 비움 + 적용)한다.
 3. `POLY_JINUIDO`처럼 자재명과 규칙 `displayName`이 안 겹쳐 추천이 안 되는 종류가 있으면, 규칙 테이블(`material_packaging_unit_rules`) 쪽 `displayName`을 실제 자재명에 맞게 다듬을지 검토한다(이번 PR에서는 규칙 테이블을 바꾸지 않았다).
+
+## 9. PR-186-FIX: 일괄 지정 API 권한·입력 검증 보강
+
+같은 브랜치(`feat/item-thread-tape-subtype`)에 커밋을 추가했다(main 병합·강제 푸시 없음). 클라우드 코드 검토에서 지적된 두 가지를 고쳤다.
+
+| 문제 | 조치 |
+|---|---|
+| `POST /items/thread-tape-classification`에 권한 제한이 없어 USER도 소요량/발주/INVOICE 환산에 직접 영향을 주는 종류 지정을 바꿀 수 있었음 | `export-shipment-defaults.controller.ts`와 같은 방식으로 `@UseGuards(RolesGuard)` + `@Roles(UserRole.MANAGER, UserRole.ADMIN)` 적용. `GET thread-tape-candidates`와 품목 CRUD는 바꾸지 않음(그대로 인증만 필요). |
+| 요청 본문이 인라인 타입이라 형식이 틀리면(itemId가 문자열, assignments가 배열이 아님 등) 400이 아니라 500이 날 수 있었음 | `ClassifyThreadTapeDto`(`src/items/dto/classify-thread-tape.dto.ts`) + `ThreadTapeClassificationAssignmentDto` 신설. `assignments`는 1~500건 배열, `itemId`는 정수, `materialSubType`은 문자열 또는 null만 허용(`class-validator`) — 형식 오류는 전역 `ValidationPipe`가 400으로 거절. |
+| 프론트: USER도 "선택 적용" 버튼을 누를 수 있어 403을 만났음 | `ThreadTapeClassificationManager.tsx`에 `getCurrentUser()`(StylesManager 등에서 쓰는 기존 패턴 재사용)로 역할 확인 → MANAGER/ADMIN이 아니면 버튼 대신 "관리자/매니저만 적용할 수 있습니다." 안내로 교체(목록 조회는 그대로 유지). |
+
+### 테스트
+- `item-thread-tape-classification-flow.e2e-spec.ts`에 7건 추가(기존 4건 유지, 총 11건): USER 토큰 403(미적용 확인 포함) 1건, USER도 후보 조회는 그대로 됨 1건, MANAGER 토큰 성공(회귀 확인) 1건, 잘못된 형식(itemId 문자열/assignments 비배열/501건 초과/materialSubType 숫자) 400 4건.
+- `ThreadTapeClassificationManagerLabels.test.tsx`에 1건 추가: 권한 확인 전(기본값, `currentUser=null`)에는 "선택 적용" 버튼이 아니라 권한 안내 문구가 보이는지 확인(이 환경은 jsdom 상호작용 시뮬레이션이 없어 렌더 직후의 동기 상태만 검증 가능 — MANAGER로 해석된 뒤의 버튼 노출은 직접 확인하지 못했고, 코드 리뷰로 로직을 검증했다).
+
+### 검증 결과(PR-186-FIX 반영 후 전체 재실행)
+
+| 항목 | 결과 |
+|---|---|
+| `npm run build` (백엔드) | 통과 |
+| backend `jest` 전체 | 61 suites / 779 tests 통과 |
+| backend e2e 전체(`--maxWorkers=2`) | 65 suites / **504 tests** 통과 (신규 7건 포함) |
+| frontend `tsc --noEmit` | 통과 |
+| frontend `npm run build` | 통과 |
+| frontend `vitest run` 전체 | 50 files / **320 tests** 통과 (신규 1건 포함) |
+
+### 하지 않은 것(명시적 지시 준수)
+- 마이그레이션 `1791800000000`은 그대로 — 추가/변경 없음.
+- `material_packaging_unit_rules` 테이블 변경 없음(`POLY_JINUIDO` 매칭 문제는 그대로 둠).
+
+### 새 SHA
+이 보고서를 포함한 커밋까지 push 완료 — 최종 SHA는 `git log --oneline -1 feat/item-thread-tape-subtype`로 확인.

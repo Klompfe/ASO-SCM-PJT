@@ -6,6 +6,7 @@ import {
   type ThreadTapeCandidate,
 } from '../api/items.service';
 import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
+import { getCurrentUser, type CurrentUser } from '../api/auth.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
 type ReviewedFilter = 'false' | 'true' | 'all';
@@ -21,6 +22,10 @@ export const ThreadTapeClassificationManager: React.FC = () => {
   const [rules, setRules] = useState<MaterialPackagingUnitRule[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // PR-186-FIX: 백엔드가 MANAGER/ADMIN만 허용하므로(소요량/발주/INVOICE 환산에 직접 영향) 화면도
+  // USER에게는 "선택 적용"을 숨겨 403을 미리 막는다 — 목록 조회(후보/추천 보기)는 그대로 둔다.
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const canApply = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
   // 품목ID → 선택한 종류('' = 미지정/실·테이프 아님). 추천이 있으면 기본값으로 미리 채워두되,
   // 사람이 체크/선택한 항목만 적용 대상이 된다(selected).
   const [draft, setDraft] = useState<Record<number, string>>({});
@@ -51,6 +56,7 @@ export const ThreadTapeClassificationManager: React.FC = () => {
 
   useEffect(() => {
     load();
+    getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null));
   }, [load]);
 
   const toggleSelected = (id: number, checked: boolean) => setSelected((s) => ({ ...s, [id]: checked }));
@@ -63,6 +69,7 @@ export const ThreadTapeClassificationManager: React.FC = () => {
   const selectedCount = Object.values(selected).filter(Boolean).length;
 
   const applySelected = async () => {
+    if (!canApply) return;
     const assignments = candidates
       .filter((c) => selected[c.id])
       .map((c) => ({ itemId: c.id, materialSubType: draft[c.id] || null }));
@@ -109,14 +116,20 @@ export const ThreadTapeClassificationManager: React.FC = () => {
         <button type="button" onClick={selectAllSuggested} className="text-sm text-blue-600 hover:underline">
           추천 있는 항목 전체 선택
         </button>
-        <button
-          type="button"
-          onClick={applySelected}
-          disabled={submitting || selectedCount === 0}
-          className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50 ml-auto"
-        >
-          선택 적용 ({selectedCount}건)
-        </button>
+        {canApply ? (
+          <button
+            type="button"
+            onClick={applySelected}
+            disabled={submitting || selectedCount === 0}
+            className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50 ml-auto"
+          >
+            선택 적용 ({selectedCount}건)
+          </button>
+        ) : (
+          <span className="text-sm text-amber-700 ml-auto" data-testid="thread-tape-apply-denied">
+            관리자/매니저만 적용할 수 있습니다.
+          </span>
+        )}
       </div>
 
       {loading ? (
