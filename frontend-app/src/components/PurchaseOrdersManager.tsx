@@ -22,8 +22,8 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
 import {
-  pickLatestOrderDefaults, resolveAutofill, suggestedQuantity, buildEditableOrderByItem, isUnitPriceRequired,
-  sumPurchaseOrderLines, suggestStyleLinkedQuantity, trackBadgeLabel, isQuantityFilled, type SupplierRef,
+  pickLatestOrderDefaults, resolveAutofill, buildEditableOrderByItem, isUnitPriceRequired,
+  sumPurchaseOrderLines, suggestStyleLinkedQuantity, suggestUnlinkedQuantity, trackBadgeLabel, isQuantityFilled, type SupplierRef,
 } from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
@@ -64,6 +64,9 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [brandOverride, setBrandOverride] = useState('');
   const [availableBrands, setAvailableBrands] = useState<string[]>([]);
   const [priceRef, setPriceRef] = useState<PriceReferenceValue>(emptyPriceRef);
+  // PR-187: 단가표 참고가 서버에서 판단한 콘/롤 단위 — 스타일 미연결 트랙처럼 item.unit이
+  // 'EA'로 남아 있어도 "수량 (콘)" 라벨을 보여줄 수 있게(수량을 자동으로 채우지는 않음).
+  const [priceRefPackagingUnitLabel, setPriceRefPackagingUnitLabel] = useState<string | null>(null);
   // PR-173: 선택된 품목이 연결된 스타일의 생산유형 — CMT면 단가를 선택 입력으로
   // 허용한다(수출선적서류 작성 시점에만 필요). BOM 미연결/조회 실패/FOB는 모두
   // 기존처럼 단가 필수로 취급한다(null을 "모름=FOB와 동일"로 안전하게 처리).
@@ -170,6 +173,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     setAutofillNote(null);
     setItemProductionType(null);
     setPriceRef(emptyPriceRef);
+    setPriceRefPackagingUnitLabel(null);
     if (opts?.quantityInput !== undefined) setQuantityInput(opts.quantityInput);
     if (!picked) {
       setOrderType(null);
@@ -207,9 +211,12 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
 
   // 스타일 연결 트랙에서 BOM 자재를 고르면: 품목 선택(기존 로직)에 더해 수량을
   // 부족분(콘/롤 환산 포함, suggestStyleLinkedQuantity)으로 미리 채운다.
-  const selectStyleMaterial = (picked: ItemRef | null) => {
+  // PR-187 C: rowOverride를 받을 수 있게 한다 — handlePickMaterial이 setStyleMaterialRows
+  // 직후 바로 호출하면 styleMaterialRows state는 다음 렌더까지 갱신되지 않아(React의
+  // 비동기 state 업데이트), 방금 고른 row를 못 찾고 수량이 비워지지 않는 버그가 있었다.
+  const selectStyleMaterial = (picked: ItemRef | null, rowOverride?: MaterialRequirementRow) => {
     if (!picked) { void selectItem(null); return; }
-    const row = styleMaterialRows.find((r) => r.itemId === picked.id);
+    const row = rowOverride ?? styleMaterialRows.find((r) => r.itemId === picked.id);
     if (!row) { void selectItem(picked); return; }
     const sugg = suggestStyleLinkedQuantity(row);
     void selectItem({ ...picked, unit: sugg.unitLabel ?? undefined }, { quantityInput: sugg.quantity != null ? String(sugg.quantity) : '' });
@@ -231,9 +238,12 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     if (styleNo) {
       setStyleSearch({ styleNo });
       setStyleMaterialRows([row]);
-      selectStyleMaterial({ id: row.itemId, name: row.itemName, code: row.itemCode });
+      selectStyleMaterial({ id: row.itemId, name: row.itemName, code: row.itemCode }, row);
     } else {
-      void selectItem({ id: row.itemId, name: row.itemName, code: row.itemCode }, { quantityInput: String(suggestedQuantity(row.shortageQty)) });
+      // PR-187 C: 스타일 미연결 경로도 같은 원칙(종류 미지정 실/테이프는 미터 수량을
+      // 추측해서 채우지 않는다)을 따른다 — 일반 자재는 기존처럼 ceil(부족)/최소 1.
+      const qty = suggestUnlinkedQuantity(row);
+      void selectItem({ id: row.itemId, name: row.itemName, code: row.itemCode }, { quantityInput: qty != null ? String(qty) : '' });
     }
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
@@ -318,6 +328,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setStyleMaterialRows([]);
       setBrandOverride('');
       setPriceRef(emptyPriceRef);
+      setPriceRefPackagingUnitLabel(null);
       setItemProductionType(null);
       setAutofilled(false);
       setAutofillNote(null);
@@ -360,8 +371,6 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       'bg-yellow-100 text-yellow-800';
     return <span className={`px-2 py-1 rounded text-xs font-medium ${style}`}>{status}</span>;
   };
-
-  const lineUnitForPriceRef = item?.unit ?? undefined;
 
   return (
     <div className="space-y-6">
@@ -461,7 +470,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             )}
           </div>
           <div className="flex flex-col">
-            <label className="text-sm text-gray-600 mb-1">수량{item?.unit && <span className="text-gray-400 font-normal"> ({item.unit})</span>}</label>
+            {/* PR-187: 단가표 참고가 서버에서 판단한 콘/롤 라벨(priceRefPackagingUnitLabel)을
+                item.unit보다 우선한다 — 스타일 미연결 트랙처럼 item.unit이 'EA'로 남아 있어도
+                종류가 지정돼 있으면 "콘/롤 기준"임을 알 수 있게(수량 자동 채움은 아님). */}
+            <label className="text-sm text-gray-600 mb-1">수량{(priceRefPackagingUnitLabel || item?.unit) && <span className="text-gray-400 font-normal"> ({priceRefPackagingUnitLabel || item?.unit})</span>}</label>
             <input
               type="number"
               min={1}
@@ -521,9 +533,9 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             itemId={item.id}
             styleNo={styleSearch?.styleNo}
             brandName={styleSearch ? undefined : (brandOverride || undefined)}
-            lineUnit={lineUnitForPriceRef}
             value={priceRef}
             onChange={setPriceRef}
+            onPackagingUnitLabel={setPriceRefPackagingUnitLabel}
           />
         )}
         {/* PR-176: 색상/사이즈별 상세 — 접었다 펼친다. 줄이 하나라도 있으면 수량은 줄 합계로 계산된다. */}

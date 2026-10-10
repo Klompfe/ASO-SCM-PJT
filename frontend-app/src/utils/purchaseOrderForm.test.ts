@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickLatestOrderDefaults, resolveAutofill, sortForShortage, suggestedQuantity, isUnitPriceRequired, suggestStyleLinkedQuantity, trackBadgeLabel, isQuantityFilled } from './purchaseOrderForm';
+import { pickLatestOrderDefaults, resolveAutofill, sortForShortage, suggestedQuantity, isUnitPriceRequired, suggestStyleLinkedQuantity, suggestUnlinkedQuantity, trackBadgeLabel, isQuantityFilled } from './purchaseOrderForm';
 import type { PurchaseOrder } from '../api/purchaseOrders.service';
 import type { MaterialRequirementRow } from './bomRequirementReport';
 
@@ -202,6 +202,47 @@ describe('suggestStyleLinkedQuantity', () => {
     expect(r.quantity).toBeNull();
     expect(r.unitLabel).toBeNull();
     expect(r.note).toBe('실/테이프 종류 미지정 — 선택해 주세요');
+  });
+});
+
+// PR-187 C: "이 자재로 발주하기"(스타일 미연결 경로)도 경고/콘·롤 행에서는 미터 수량을
+// 추측해서 채우지 않는다. 핵심 회귀 포인트: 어떤 행이든 number | null을 돌려줘(undefined
+// 없음) 호출자가 quantityInput을 매번 명시적으로 덮어쓰게 해서 이전 품목의 수량이 안 남는다.
+describe('suggestUnlinkedQuantity (PR-187 C)', () => {
+  const baseRow = (over: Partial<MaterialRequirementRow> = {}): MaterialRequirementRow => ({
+    itemId: 1, itemCode: 'M1', itemName: '자재', categories: [], colors: [],
+    consumptionPerUnit: 1, requiredQty: 100, orderedQty: 30, unlinkedOrderedQty: 0, shortageQty: 70, lineCount: 1,
+    ...over,
+  });
+
+  it('경고 행(conversionWarning)은 수량이 비어야 한다(null)', () => {
+    expect(suggestUnlinkedQuantity(baseRow({ conversionWarning: '실/테이프 종류 미지정 — 선택해 주세요' }))).toBeNull();
+  });
+
+  it('packaging이 있으면 shortagePackages를 제안하고, 0이면 비운다', () => {
+    expect(suggestUnlinkedQuantity(baseRow({
+      packaging: { packagingUnitLabel: '콘', unitLengthM: 4000, requiredPackages: 76, shortagePackages: 26, conversionFormula: 'x' },
+    }))).toBe(26);
+    expect(suggestUnlinkedQuantity(baseRow({
+      packaging: { packagingUnitLabel: '롤', unitLengthM: 50, requiredPackages: 3, shortagePackages: 0, conversionFormula: 'x' },
+    }))).toBeNull();
+  });
+
+  it('일반 자재는 기존 suggestedQuantity(ceil 또는 최소 1)와 동일하게 동작한다(이 경로의 기존 동작 유지)', () => {
+    expect(suggestUnlinkedQuantity(baseRow({ shortageQty: 70.2 }))).toBe(suggestedQuantity(70.2));
+    expect(suggestUnlinkedQuantity(baseRow({ shortageQty: 0 }))).toBe(suggestedQuantity(0));
+  });
+
+  it('어떤 행이든 undefined가 아니라 number | null을 돌려준다 — 이전 품목의 quantityInput이 남지 않는 전제', () => {
+    const rows = [
+      baseRow({ conversionWarning: '경고' }),
+      baseRow({ packaging: { packagingUnitLabel: '콘', unitLengthM: 4000, requiredPackages: 1, shortagePackages: 0, conversionFormula: 'x' } }),
+      baseRow({ shortageQty: 5 }),
+    ];
+    for (const row of rows) {
+      const result = suggestUnlinkedQuantity(row);
+      expect(result === null || typeof result === 'number').toBe(true);
+    }
   });
 });
 

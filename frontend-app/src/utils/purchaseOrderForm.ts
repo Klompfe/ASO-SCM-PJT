@@ -132,6 +132,20 @@ export function suggestStyleLinkedQuantity(row: MaterialRequirementRow): StyleQu
   };
 }
 
+// PR-187 C: "이 자재로 발주하기"(스타일 미연결 경로)의 수량 제안 — PR-185 B의
+// suggestStyleLinkedQuantity와 같은 원칙(종류 미지정 실/테이프는 미터 수량을 추측해서
+// 채우지 않는다, 콘/롤 환산이 있으면 그 부족분)을 따른다. 일반 자재(packaging/
+// conversionWarning 둘 다 없음)는 기존 suggestedQuantity(ceil 또는 최소 1)를 그대로 쓴다
+// — 이 경로의 원래 동작을 바꾸지 않기 위함. 항상 number | null을 돌려줘(undefined 없음)
+// 호출자가 quantityInput을 매번 명시적으로 설정하게 해서 이전 품목의 수량이 남지 않는다.
+export function suggestUnlinkedQuantity(row: MaterialRequirementRow): number | null {
+  if (row.packaging) {
+    return row.packaging.shortagePackages > 0 ? row.packaging.shortagePackages : null;
+  }
+  if (row.conversionWarning) return null;
+  return suggestedQuantity(row.shortageQty);
+}
+
 // PR-185 A: 목록/배지용 — 스타일 연결 여부 라벨.
 export const trackBadgeLabel = (styleNo: string | null | undefined): string => (styleNo ? styleNo : '미연결');
 

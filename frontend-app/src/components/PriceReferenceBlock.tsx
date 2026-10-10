@@ -18,13 +18,18 @@ export const PriceReferenceBlock: React.FC<{
   materialSubType?: string | null;
   value: PriceReferenceValue;
   onChange: (value: PriceReferenceValue) => void;
-}> = ({ itemId, styleNo, brandName, lineUnit, materialSubType, value, onChange }) => {
+  // PR-187: 서버가 종류(Item.materialSubType/BOM)로 판단한 콘/롤 단위 라벨을 부모에게
+  // 올려준다 — 발주 폼의 "수량 (콘)" 라벨이 스타일 미연결 트랙에서도 이 값을 따를 수 있게.
+  // 수량을 자동으로 채우지는 않는다(라벨 표시만).
+  onPackagingUnitLabel?: (label: string | null) => void;
+}> = ({ itemId, styleNo, brandName, lineUnit, materialSubType, value, onChange, onPackagingUnitLabel }) => {
   const [result, setResult] = useState<PriceReferenceResult | null>(null);
   const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     setResult(null);
     setTouched(false);
+    onPackagingUnitLabel?.(null);
     if (!itemId) return;
     let cancelled = false;
     getPriceReference({
@@ -37,6 +42,7 @@ export const PriceReferenceBlock: React.FC<{
       .then((res) => {
         if (cancelled) return;
         setResult(res);
+        onPackagingUnitLabel?.(res.packagingUnitLabel ?? null);
         if (res.suggested) {
           onChange({ usd: res.suggested.priceUsd, source: res.suggested.source, note: res.suggested.note ?? null });
         }
@@ -65,7 +71,14 @@ export const PriceReferenceBlock: React.FC<{
     <div className="border border-gray-200 rounded p-2 bg-white space-y-2" data-testid="price-reference-block">
       <div className="text-sm font-medium text-gray-700">단가표 참고(USD)</div>
       {result?.suggested && !touched && (
-        <p className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1">단가표 제안 — 확인 필요 ({result.suggested.label})</p>
+        <p className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1">
+          단가표 제안 — 확인 필요 ({result.suggested.label})
+          {result.suggested.conversionFormula && <span className="block">{result.suggested.conversionFormula}</span>}
+        </p>
+      )}
+      {/* PR-187: 종류 미지정 + 실/테이프로 보이는 자재 — 미터단가를 추측해서 채우지 않고 경고만. */}
+      {result?.warning && (
+        <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">{result.warning}</p>
       )}
       {result && result.candidates.length > 1 && (
         <ul className="text-xs space-y-1">
@@ -74,6 +87,8 @@ export const PriceReferenceBlock: React.FC<{
               <span>
                 {c.label} — ${c.priceUsd}{c.priceUsdMax != null ? `~$${c.priceUsdMax}` : ''}/{c.unit}
                 {c.source === 'BRAND_RULE' && <span className="ml-1 text-indigo-600">(브랜드 전용가)</span>}
+                {/* PR-187: 환산된 후보는 근거 식(미터단가 × 단위길이 = 콘/롤단가)을 한 줄로 보여준다. */}
+                {c.conversionFormula && <span className="block text-gray-400">{c.conversionFormula}</span>}
               </span>
               <button type="button" className="text-blue-600 border border-blue-300 rounded px-2 py-0.5 ml-2 shrink-0 hover:bg-blue-50" onClick={() => useCandidate(c)}>이 값 사용</button>
             </li>
@@ -95,6 +110,8 @@ export const PriceReferenceBlock: React.FC<{
             onChange({ usd, source: usd == null ? null : 'MANUAL', note: null });
           }}
         />
+        {/* PR-187: 환산이 적용됐으면(packagingUnitLabel) "USD/콘" 같은 단위를 입력칸 옆에 보여준다. */}
+        {result?.packagingUnitLabel && <span className="text-xs text-gray-500">USD/{result.packagingUnitLabel}</span>}
         <span className="text-xs text-gray-400">{value.source === 'MANUAL' ? '수동 입력' : value.source ? `출처: ${value.source}` : ''}</span>
       </div>
       {result?.unitMismatchWarning && <p className="text-xs text-red-600">{result.unitMismatchWarning}</p>}

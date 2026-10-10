@@ -142,13 +142,22 @@ export interface PriceReferenceCandidate {
   conversion?: PriceReferenceConversion;
   brandRuleId?: number;
   midoPriceItemId?: number;
+  // PR-187: 미터단가가 콘/롤단가로 환산됐으면(종류가 확정되고 규칙이 1개로 정해질 때) 그
+  // 근거 식이 담긴다 — 있으면 이 후보의 priceUsd/unit은 이미 콘/롤 기준으로 바뀐 값이다.
+  conversionFormula?: string;
+  convertedFrom?: { priceUsd: number; unit: string; unitLengthM: number };
 }
 export interface PriceReferenceResult {
   candidates: PriceReferenceCandidate[];
   suggested: PriceReferenceCandidate | null;
   unitMismatchWarning?: string;
+  // PR-187: 종류 미지정인데 이름이 실/테이프로 보이는 자재 — 미터단가를 그대로 쓰도록
+  // 유도하지 않기 위한 경고(이때는 unitMismatchWarning을 함께 받지 않는다).
+  warning?: string;
   brand: string | null;
   krw?: { rate: number; validFrom: string; validTo: string; rateType: 'EXPORT'; approxUnitPriceKrw: number };
+  // PR-187: 환산이 적용됐을 때 콘/롤 단위 라벨 — "USD/콘" 같은 단위 표시에 쓴다.
+  packagingUnitLabel?: string;
 }
 export const getPriceReference = (params: { itemId: number; styleNo?: string; brandName?: string; lineUnit?: string; materialSubType?: string }): Promise<PriceReferenceResult> =>
   apiClient.get('/purchase-orders/price-reference', { params });

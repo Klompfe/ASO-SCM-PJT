@@ -16,6 +16,7 @@ import { User, UserRole } from '../src/users/entities/user.entity';
 import { MaterialPackagingUnitRule } from '../src/material-packaging-unit-rules/entities/material-packaging-unit-rule.entity';
 import { BrandPriceRule } from '../src/brand-price-rules/entities/brand-price-rule.entity';
 import { BrandPrefixRule } from '../src/brand-prefix-rules/entities/brand-prefix-rule.entity';
+import { MidoPriceItem } from '../src/mido-price-table/entities/mido-price-item.entity';
 
 // PR-185: 발주 ↔ 스타일 선택적 연결(두 트랙) + 소요량 기반 수량(콘/롤 환산 포함) +
 // 단가표(USD) 참고단가 + INVOICE 연계 + lines/quantity 단독 변경 가드.
@@ -233,6 +234,59 @@ describe('발주 스타일 연결·소요량·단가표 참고단가 (PR-185)', 
 
     it('없는 품목이면 404', async () => {
       await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId: 999999 })).expect(404);
+    });
+  });
+
+  // PR-187: 운영에서 발견된 문제 — 실/테이프 자재는 Item.unit이 'EA'라 PR-185/186 반영
+  // 직후에는 미터단가가 그대로 채워졌다(콘/롤 환산 미적용). 종류(Item.materialSubType 또는
+  // BOM threadType)가 있으면 Item.unit과 무관하게 콘/롤당 단가로 환산돼야 한다.
+  describe('C-2. 미터→콘 단가 환산 (PR-187)', () => {
+    beforeAll(async () => {
+      await dataSource.getRepository(MidoPriceItem).save([
+        { itemName: '실(THREAD)', priceUsdMin: 0.00012, priceUsdMax: 0.00012, unit: 'M' },
+      ]);
+    });
+
+    it('Item.unit=EA인 실 자재도 Item.materialSubType을 지정하면 콘당 단가로 환산돼 suggested된다', async () => {
+      const item = await auth(request(http()).post('/items')).send({
+        code: `PPC-CONV-${tag}`, name: `PPC오바사 60S THREAD ${tag}`, type: 'RAW_MATERIAL', unit: 'EA',
+      }).expect(201);
+      await auth(request(http()).patch(`/items/${item.body.data.id}`)).send({ materialSubType: 'OBA_SA_SKU_I_SA' }).expect(200);
+
+      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId: item.body.data.id })).expect(200);
+
+      expect(res.body.data.candidates[0]).toMatchObject({
+        priceUsd: 0.48, unit: '콘', conversionFormula: '0.00012/m × 4000m = 0.48/콘',
+        convertedFrom: { priceUsd: 0.00012, unit: 'M', unitLengthM: 4000 },
+      });
+      expect(res.body.data.suggested).toMatchObject({ priceUsd: 0.48, unit: '콘' });
+      expect(res.body.data.unitMismatchWarning).toBeUndefined();
+      expect(res.body.data.packagingUnitLabel).toBe('콘');
+    });
+
+    it('종류 미지정 + 이름이 실로 보이면(검토 안 됨) 단가가 제안되지 않고 전용 경고가 뜬다', async () => {
+      const item = await auth(request(http()).post('/items')).send({
+        code: `PPC-UNSET-${tag}`, name: `PPC오바사 미지정 THREAD ${tag}`, type: 'RAW_MATERIAL', unit: 'EA',
+      }).expect(201);
+
+      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId: item.body.data.id })).expect(200);
+
+      expect(res.body.data.suggested).toBeNull();
+      expect(res.body.data.warning).toBe('실/테이프 종류 미지정 — 선택해 주세요');
+      expect(res.body.data.unitMismatchWarning).toBeUndefined();
+    });
+
+    it('BOM 행에 threadType이 있으면 Item.materialSubType보다 우선해서 환산한다', async () => {
+      const { itemId } = await setupStyleWithMaterial({
+        styleNo: `PPC-BOM-${tag}`, itemName: `PPC코아사 45S THREAD ${tag}`, consumption: 1, threadType: 'COA_SA',
+      });
+      await auth(request(http()).patch(`/items/${itemId}`)).send({ unit: 'EA', materialSubType: 'OBA_SA_SKU_I_SA' }).expect(200);
+      await dataSource.getRepository(MidoPriceItem).save([{ itemName: '코아사(THREAD)', priceUsdMin: 0.0002, priceUsdMax: 0.0002, unit: 'M' }]);
+
+      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId, styleNo: `PPC-BOM-${tag}` })).expect(200);
+
+      const converted = res.body.data.candidates.find((c: any) => c.label.includes('코아사'));
+      expect(converted).toMatchObject({ unit: '콘', conversionFormula: expect.stringContaining('2500m') });
     });
   });
 
