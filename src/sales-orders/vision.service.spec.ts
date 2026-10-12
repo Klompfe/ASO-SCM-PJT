@@ -70,7 +70,7 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
     expect(outcome.results).toEqual([
       {
         ...fakeParsedResult[0],
-        overview: { ...fakeParsedResult[0].overview, targetRddSuspicious: false, handwrittenCmtPriceCandidate: null, handwrittenCmtPriceMemo: null, cmtPrice: null },
+        overview: { ...fakeParsedResult[0].overview, targetRddYearAdjusted: false, targetRddOriginal: null, targetRddSuspicious: false, handwrittenCmtPriceCandidate: null, handwrittenCmtPriceMemo: null, cmtPrice: null },
       },
     ]);
     expect(outcome.usage).toEqual({ pageCount: 1, promptTokens: 100, outputTokens: 200 });
@@ -126,6 +126,32 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
     });
     const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
     expect(outcome.results[0].overview.targetRddSuspicious).toBe(false);
+  });
+
+  // PR-190 실사례: MB74BLM107 — 작성일 2026-07-01인데 납기가 연도 없이 "2/17"로 적혀
+  // 있어 AI가 작성일과 같은 2026년을 붙여 2026-02-17(작성일보다 이전)로 인식했다.
+  // targetRddSuspicious 계산 전에 연도 보정이 먼저 적용돼야 한다.
+  it('납기에 연도가 없어 작성일보다 이전으로 인식되면 다음 해로 보정하고 targetRddYearAdjusted:true, targetRddSuspicious:false로 내려온다', async () => {
+    const service = await buildServiceWithFakeResponse({
+      styleNo: 'MB74BLM107', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null,
+      targetRdd: '2026-02-17', documentDate: '2026-07-01',
+    });
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].overview.targetRdd).toBe('2027-02-17');
+    expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(true);
+    expect(outcome.results[0].overview.targetRddOriginal).toBe('2026-02-17');
+    expect(outcome.results[0].overview.targetRddSuspicious).toBe(false);
+  });
+
+  it('보정이 일어나지 않으면 targetRddYearAdjusted:false, targetRddOriginal:null이다(기존 미래 날짜 케이스)', async () => {
+    const future = new Date(Date.now() + 1000 * 60 * 60 * 24 * 200).toISOString().slice(0, 10);
+    const service = await buildServiceWithFakeResponse({
+      styleNo: 'S', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null,
+      targetRdd: future, documentDate: '2026-01-01',
+    });
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
+    expect(outcome.results[0].overview.targetRddOriginal).toBeNull();
   });
 });
 

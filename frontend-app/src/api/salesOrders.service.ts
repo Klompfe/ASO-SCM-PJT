@@ -19,6 +19,10 @@ export interface AiOverview {
   // "납기가 작성일/오늘보다 이르거나 같아 의심스러운지" 플래그.
   documentDate: string | null;
   targetRddSuspicious?: boolean;
+  // PR-190: 서버가 계산해 내려주는 값 — 납기에 연도가 없어 작성일보다 이른 날짜로
+  // 인식됐을 때 다음 해로 자동 보정했는지와, 보정했다면 원래 인식값(화면 안내용).
+  targetRddYearAdjusted?: boolean;
+  targetRddOriginal?: string | null;
   // PR-168: 미도 전용 — 작지 상단 수기 CMT단가. candidate는 AI 후보(읽기전용 참고용,
   // 미도가 아니면 항상 null), cmtPrice는 사람이 확인/수정한 최종값(이것만 저장된다).
   handwrittenCmtPriceCandidate?: number | null;

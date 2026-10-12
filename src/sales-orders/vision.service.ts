@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import { AiSalesOrderResultDto } from './dto/ai-analysis.dto';
 import { isSuspiciousTargetRdd } from './utils/target-rdd-validation.util';
+import { rolloverTargetRddYear } from './utils/target-rdd-year-rollover.util';
 import { isMidoBuyer } from './utils/mido-buyer.util';
 
 export interface AiAnalysisUsage {
@@ -96,7 +97,7 @@ const PROMPT = `이 문서는 의류 제조업체의 "작업지시서"입니다.
 
 documentDate와 targetRdd는 문서 안의 서로 다른 위치에 있는 서로 다른 값이며 절대 혼동하지 마세요:
 - documentDate: 문서 상단에 적힌 이 작업지시서의 작성일(YYYY-MM-DD로 변환).
-- targetRdd: 계획DELI 항목의 하위 라벨 "납기"에 적힌 날짜(YYYY-MM-DD로 변환). 연도가 안 보이면 documentDate의 연도만 보충하고, 월/일 자체를 documentDate 값으로 대체하지 마세요. documentDate와 targetRdd는 서로 다른 필드로 각각 독립적으로 인식하세요 — "납기"에 적힌 날짜를 못 찾았다고 해서 작성일을 납기 대신 넣지 마세요.
+- targetRdd: 계획DELI 항목의 하위 라벨 "납기"에 적힌 날짜(YYYY-MM-DD로 변환). documentDate와 targetRdd는 서로 다른 필드로 각각 독립적으로 인식하세요 — "납기"에 적힌 날짜를 못 찾았다고 해서 작성일을 납기 대신 넣지 마세요. 납기는 항상 작성일 이후입니다. 연도가 안 보이면(예: "2/17") documentDate 이후 가장 가까운 해당 월/일로 변환하세요 — documentDate와 같은 연도를 붙였을 때 작성일보다 이전이 되면(예: 작성일 2026-07-01, 납기 "2/17" → 2026-02-17은 작성일 이전이라 틀림) 다음 해로 변환하세요(2026-07-01 기준 "2/17" → 2027-02-17). 월/일이 documentDate보다 늦으면 같은 연도를 쓰세요(2026-07-01 기준 "12/30" → 2026-12-30). 절대 작성일보다 이전 날짜로 만들지 마세요.
 
 handwrittenCmtPriceCandidate / handwrittenCmtPriceMemo: 바이어(buyer)가 "미도"로 명확히 인식된 문서에서만 채우세요. 문서 상단에 인쇄된 표 글자와 구분되는, 손으로 비교적 큰 글씨로 적힌 숫자가 있으면 추출하세요. "기본금액 + 230 = 7,500"처럼 계산식 형태면 candidate에는 식의 마지막 합계 숫자만, memo에는 식 전체를 보이는 그대로(원문 표기) 옮기세요(식이 없으면 memo에도 숫자만). 바이어가 미도가 아니거나, 바이어를 못 읽었거나, 그런 수기 숫자가 없거나, 여러 후보가 있어 어느 것인지 확신할 수 없으면 둘 다 반드시 null로 두고 절대 추측하지 마세요.
 
@@ -204,6 +205,15 @@ export class VisionService {
   private applyTargetRddValidation(results: AiSalesOrderResultDto[]): void {
     const today = new Date().toISOString().slice(0, 10);
     for (const result of results) {
+      // PR-190: 의심 여부를 계산하기 전에 연도 보정부터 적용한다 — 납기에 연도가 없어
+      // AI가 작성일 연도를 붙인 탓에 작성일보다 이른 날짜가 됐다면(실사례:
+      // MB74BLM107, 작성일 2026-07-01/납기 2026-02-17) 다음 해로 결정적으로 보정한다
+      // (납기==작성일인 경우는 보정 대상에서 제외 — PR-158의 혼동 패턴이라 의심 경고만 유지).
+      const rollover = rolloverTargetRddYear(result.overview.targetRdd, result.overview.documentDate);
+      result.overview.targetRdd = rollover.targetRdd;
+      result.overview.targetRddYearAdjusted = rollover.adjusted;
+      result.overview.targetRddOriginal = rollover.adjusted ? rollover.original : null;
+
       result.overview.targetRddSuspicious = isSuspiciousTargetRdd(
         result.overview.targetRdd,
         result.overview.documentDate,

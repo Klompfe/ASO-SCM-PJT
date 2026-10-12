@@ -366,6 +366,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           value={result.overview.targetRdd ?? ''}
                           onChange={(e) => updateOverviewField(index, 'targetRdd', e.target.value || null)}
                         />
+                        {/* PR-190: 자동 확정이 아니라 초안 보정임을 알리는 안내 — 빨간 경고와는
+                            다른 색(파란/회색)으로 구분한다. 사용자가 납기를 직접 고치면 사라진다
+                            (updateOverviewField가 targetRddYearAdjusted를 함께 지운다). */}
+                        {result.overview.targetRddYearAdjusted && (
+                          <span className="text-xs text-blue-600 mt-0.5" data-testid={`target-rdd-year-adjusted-${index}`}>
+                            ℹ 작성일({result.overview.documentDate}) 이후 날짜로 연도를 자동 보정했습니다(원래 인식값: {result.overview.targetRddOriginal}) — 확인해주세요
+                          </span>
+                        )}
                         {result.overview.targetRddSuspicious && (
                           <span className="text-xs text-red-600 mt-0.5" data-testid={`target-rdd-warning-${index}`}>
                             ⚠ 납기가 문서 작성일보다 빠르거나 과거 날짜입니다 — 확인해주세요
