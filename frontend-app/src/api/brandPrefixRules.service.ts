@@ -6,6 +6,10 @@ export interface BrandPrefixRule {
   isNumericStart: boolean;
   brandName: string;
   note?: string | null;
+  // PR-188: 'MIDO'면 이 브랜드에 미도 단가표 참고단가 후보를 보여준다.
+  priceTableCode?: string | null;
+  // PR-188: 이 브랜드의 수출서류 원단(FABRIC) 라인 단위 기본값(예: M) — Item.unit보다 우선.
+  fabricLineUnit?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -15,6 +19,8 @@ export interface CreateBrandPrefixRule {
   isNumericStart?: boolean;
   brandName: string;
   note?: string;
+  priceTableCode?: string | null;
+  fabricLineUnit?: string | null;
 }
 
 export type UpdateBrandPrefixRule = Partial<CreateBrandPrefixRule>;

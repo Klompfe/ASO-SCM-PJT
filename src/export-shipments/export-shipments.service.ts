@@ -23,6 +23,7 @@ import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rule
 import { CustomsExchangeRatesService, type ExchangeRateLookupResult } from '../customs-exchange-rates/customs-exchange-rates.service';
 import { ExchangeRateType } from '../customs-exchange-rates/entities/customs-exchange-rate.entity';
 import { effectiveSubType } from '../common/utils/packaging-subtype.util';
+import { classifyBrand } from '../common/utils/brand-classifier.util';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
   arr.reduce((total, item) => total + (Number(item[key]) || 0), 0);
@@ -124,6 +125,11 @@ export class ExportShipmentsService {
     // 생성 시점에 한 번 계산해서 응답으로만 내려주는 값).
     const warnings: string[] = [];
 
+    // PR-188 F: 빈폴/에잇세컨즈 겉감(원단) 라인은 수출서류 단위를 미터(M)로 쓴다(제시님
+    // 확인 — 포장내역의 롤 길이 칸에 이미 미터 값이 들어 있어 숫자 변환 없이 표기만
+    // 바꾼다). 브랜드별 규칙 목록을 발주마다 다시 조회하지 않도록 한 번만 가져온다.
+    const brandPrefixRules = await this.brandPrefixRulesService.findAll();
+
     for (const purchaseOrderId of purchaseOrderIds) {
       const po = await this.purchaseOrderRepository.findOne({
         where: { id: purchaseOrderId },
@@ -151,6 +157,10 @@ export class ExportShipmentsService {
         .filter((v) => v != null && String(v).trim() !== '')
         .join(' ');
       const itemUnit = bomItem.material?.unit?.trim();
+      // PR-188 F: 원단(FABRIC) 라인에만 적용 — 부자재/실/테이프 라인은 그대로 둔다.
+      // 규칙이 없는 브랜드(대부분)는 기존처럼 itemUnit || 'YD'를 그대로 쓴다.
+      const brand = classifyBrand(styleNo, brandPrefixRules);
+      const fabricLineUnit = brand ? brandPrefixRules.find((r) => r.brandName === brand)?.fabricLineUnit : undefined;
 
       const receipts = await this.packingReceiptRepository.find({
         where: { purchaseOrderId },
@@ -178,7 +188,9 @@ export class ExportShipmentsService {
               hsCode: bomItem.hsCode ?? null,
               color: cl.color,
               qty: cl.qty,
-              unit: itemUnit || 'YD',
+              // PR-188 F: 빈폴/에잇세컨즈 등 fabricLineUnit이 지정된 브랜드는 Item.unit보다
+              // 그 값을 우선한다(숫자는 그대로, 단위 표기만 바뀐다).
+              unit: fabricLineUnit || itemUnit || 'YD',
               netWeight: cl.netWeight,
               grossWeight: cl.grossWeight,
               packageCount: cl.packageCount,

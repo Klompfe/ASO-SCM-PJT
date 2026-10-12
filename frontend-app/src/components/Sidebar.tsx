@@ -20,7 +20,8 @@ export type TabId =
   | 'customsExchangeRates'
   | 'materialCategories'
   | 'brandPriceRules'
-  | 'threadTapeClassification';
+  | 'threadTapeClassification'
+  | 'midoPriceTable';
 
 interface NavItem {
   id: TabId;
@@ -91,6 +92,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'materialCategories', label: '품목군 관리' },
       // PR-185: 브랜드 전용가(미도 단가표보다 우선하는 고정가) 마스터.
       { id: 'brandPriceRules', label: '브랜드 전용가' },
+      // PR-188: 미도 단가표 등록/수정 + CSV 일괄 등록.
+      { id: 'midoPriceTable', label: '미도 단가표' },
       { id: 'exportShipmentDefaults', label: '선적서류 기본정보', adminOnly: true },
       // PR-140: 목록 화면 상태값(작업지시 Filter by Status 등) 마스터 테이블 관리.
       { id: 'statusCodes', label: '상태코드 관리', adminOnly: true },
@@ -151,6 +154,12 @@ const ICONS: Record<TabId, React.ReactNode> = {
     <svg {...ICON_PROPS}>
       <circle cx="12" cy="12" r="3" />
       <path d="M12 2v5M12 17v5M3 12h5M16 12h5" />
+    </svg>
+  ),
+  midoPriceTable: (
+    <svg {...ICON_PROPS}>
+      <rect x="3" y="4" width="18" height="16" rx="1.5" />
+      <path d="M3 9h18M8 4v16" />
     </svg>
   ),
   dashboard: (

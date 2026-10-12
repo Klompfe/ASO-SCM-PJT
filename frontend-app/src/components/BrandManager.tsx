@@ -10,7 +10,7 @@ import {
 } from '../api/brandPrefixRules.service';
 import { getErrorMessage } from '../utils/errorMessage';
 
-const emptyForm: CreateBrandPrefixRule = { prefix: '', isNumericStart: false, brandName: '', note: '' };
+const emptyForm: CreateBrandPrefixRule = { prefix: '', isNumericStart: false, brandName: '', note: '', priceTableCode: null, fabricLineUnit: '' };
 
 // PR-111: 스타일번호 접두사 → 브랜드 매핑 마스터 관리 화면. 접두사 체계가 앞으로도
 // 늘거나 바뀔 수 있어 하드코딩 대신 여기서 추가/수정한다.
@@ -57,6 +57,8 @@ export const BrandManager: React.FC = () => {
         isNumericStart: form.isNumericStart,
         ...(form.isNumericStart ? {} : { prefix: form.prefix }),
         ...(form.note ? { note: form.note } : {}),
+        priceTableCode: form.priceTableCode || null,
+        fabricLineUnit: form.fabricLineUnit || null,
       });
       toast.success('브랜드 규칙이 등록되었습니다.');
       setForm(emptyForm);
@@ -75,6 +77,8 @@ export const BrandManager: React.FC = () => {
       isNumericStart: rule.isNumericStart,
       brandName: rule.brandName,
       note: rule.note ?? '',
+      priceTableCode: rule.priceTableCode ?? null,
+      fabricLineUnit: rule.fabricLineUnit ?? '',
     });
   };
   const cancelEdit = () => setEditingId(null);
@@ -86,6 +90,8 @@ export const BrandManager: React.FC = () => {
         isNumericStart: editDraft.isNumericStart,
         ...(editDraft.isNumericStart ? {} : { prefix: editDraft.prefix }),
         note: editDraft.note || undefined,
+        priceTableCode: editDraft.priceTableCode || null,
+        fabricLineUnit: editDraft.fabricLineUnit || null,
       });
       toast.success('수정되었습니다.');
       setEditingId(null);
@@ -155,6 +161,28 @@ export const BrandManager: React.FC = () => {
             onChange={(e) => setForm({ ...form, note: e.target.value })}
           />
         </div>
+        {/* PR-188: 단가표 적용 여부(미도) — 미센스/반에크/루미에반처럼 미도 단가표를 참고단가로 쓰는 브랜드만 MIDO로 지정. */}
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">단가표</label>
+          <select
+            className="border border-gray-300 rounded px-3 py-2"
+            value={form.priceTableCode ?? ''}
+            onChange={(e) => setForm({ ...form, priceTableCode: e.target.value || null })}
+          >
+            <option value="">없음</option>
+            <option value="MIDO">미도</option>
+          </select>
+        </div>
+        {/* PR-188: 수출서류 원단 라인 단위 기본값 — 빈폴/에잇세컨즈는 'M', 비워두면 Item.unit/YD(기존 동작). */}
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1">수출서류 원단 단위</label>
+          <input
+            className="border border-gray-300 rounded px-3 py-2 w-24"
+            placeholder="예: M"
+            value={form.fabricLineUnit ?? ''}
+            onChange={(e) => setForm({ ...form, fabricLineUnit: e.target.value })}
+          />
+        </div>
         <button
           type="submit"
           disabled={submitting}
@@ -176,6 +204,8 @@ export const BrandManager: React.FC = () => {
                 <th className="px-4 py-2 text-left">숫자시작</th>
                 <th className="px-4 py-2 text-left">브랜드명</th>
                 <th className="px-4 py-2 text-left">비고</th>
+                <th className="px-4 py-2 text-left">단가표</th>
+                <th className="px-4 py-2 text-left">원단 단위</th>
                 <th className="px-4 py-2 text-left">Action</th>
               </tr>
             </thead>
@@ -214,6 +244,25 @@ export const BrandManager: React.FC = () => {
                           onChange={(e) => setEditDraft({ ...editDraft, note: e.target.value })}
                         />
                       </td>
+                      <td className="px-4 py-2">
+                        <select
+                          className="border rounded px-2 py-1"
+                          aria-label="단가표 변경"
+                          value={editDraft.priceTableCode ?? ''}
+                          onChange={(e) => setEditDraft({ ...editDraft, priceTableCode: e.target.value || null })}
+                        >
+                          <option value="">없음</option>
+                          <option value="MIDO">미도</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          className="border rounded px-2 py-1 w-20"
+                          placeholder="예: M"
+                          value={editDraft.fabricLineUnit ?? ''}
+                          onChange={(e) => setEditDraft({ ...editDraft, fabricLineUnit: e.target.value })}
+                        />
+                      </td>
                       <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                         <button className="text-blue-600" onClick={() => saveEdit(rule.id)}>저장</button>
                         <button className="text-gray-500" onClick={cancelEdit}>취소</button>
@@ -225,6 +274,8 @@ export const BrandManager: React.FC = () => {
                       <td className="px-4 py-2">{rule.isNumericStart ? '예' : '-'}</td>
                       <td className="px-4 py-2 font-medium">{rule.brandName}</td>
                       <td className="px-4 py-2 text-gray-500">{rule.note ?? '-'}</td>
+                      <td className="px-4 py-2 text-gray-500">{rule.priceTableCode === 'MIDO' ? '미도' : '-'}</td>
+                      <td className="px-4 py-2 text-gray-500">{rule.fabricLineUnit ?? '-'}</td>
                       <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                         <button className="text-blue-600" onClick={() => startEdit(rule)}>수정</button>
                         <button className="text-red-600" onClick={() => handleDelete(rule.id)}>삭제</button>
@@ -235,7 +286,7 @@ export const BrandManager: React.FC = () => {
               ))}
               {rules.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-gray-400">등록된 브랜드 규칙이 없습니다.</td>
+                  <td colSpan={7} className="px-4 py-6 text-center text-gray-400">등록된 브랜드 규칙이 없습니다.</td>
                 </tr>
               )}
             </tbody>

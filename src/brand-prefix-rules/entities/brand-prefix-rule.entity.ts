@@ -27,6 +27,18 @@ export class BrandPrefixRule {
   @Column({ type: 'text', nullable: true })
   note?: string | null;
 
+  // PR-188: 이 브랜드가 미도 단가표(mido_price_items)를 참고단가로 쓰는지 — 'MIDO'면
+  // 적용 대상, null이면 미적용(단가표 후보를 아예 보여주지 않는다). 뮤트 전용가
+  // (brand_price_rules)와는 별개 체계라 이 값과 무관하게 계속 동작한다.
+  @Column({ nullable: true })
+  priceTableCode?: string | null;
+
+  // PR-188: 이 브랜드의 수출서류(INVOICE) 원단(FABRIC) 라인 단위 기본값 — 지정돼
+  // 있으면 자재마스터 Item.unit보다 우선한다(빈폴/에잇세컨즈는 'M'). null이면 기존
+  // 동작 그대로(Item.unit 우선, 없으면 'YD').
+  @Column({ nullable: true })
+  fabricLineUnit?: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

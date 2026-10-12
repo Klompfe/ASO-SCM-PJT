@@ -33,4 +33,17 @@ export class CreateBrandPrefixRuleDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  // PR-188: 'MIDO'면 이 브랜드에 미도 단가표 참고단가 후보를 보여준다. 비우면(null)
+  // 단가표 후보를 아예 보여주지 않는다(미적용).
+  @ApiPropertyOptional({ description: "단가표 적용 코드('MIDO' 또는 비움)", example: 'MIDO' })
+  @IsOptional()
+  @IsString()
+  priceTableCode?: string | null;
+
+  // PR-188: 이 브랜드의 수출서류 원단(FABRIC) 라인 단위 기본값 — Item.unit보다 우선.
+  @ApiPropertyOptional({ description: '수출서류 원단 라인 단위 기본값(예: M)', example: 'M' })
+  @IsOptional()
+  @IsString()
+  fabricLineUnit?: string | null;
 }

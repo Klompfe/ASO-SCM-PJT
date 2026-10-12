@@ -24,6 +24,7 @@ import { InventoryReport } from './components/InventoryReport';
 import { BrandManager } from './components/BrandManager';
 import { MaterialPackagingUnitRulesManager } from './components/MaterialPackagingUnitRulesManager';
 import { ThreadTapeClassificationManager } from './components/ThreadTapeClassificationManager';
+import { MidoPriceTableManager } from './components/MidoPriceTableManager';
 import { CustomsExchangeRatesManager } from './components/CustomsExchangeRatesManager';
 import { WeeklyExchangeRatePopup, WeeklyExchangeRateBanner } from './components/WeeklyExchangeRatePopup';
 import { MaterialCategoriesManager } from './components/MaterialCategoriesManager';
@@ -325,6 +326,7 @@ function App() {
         case 'brands': return <BrandManager />;
         case 'materialPackagingUnitRules': return <MaterialPackagingUnitRulesManager />;
         case 'threadTapeClassification': return <ThreadTapeClassificationManager />;
+        case 'midoPriceTable': return <MidoPriceTableManager />;
         case 'customsExchangeRates': return <CustomsExchangeRatesManager />;
         case 'materialCategories': return <MaterialCategoriesManager />;
         case 'brandPriceRules': return <BrandPriceRulesManager />;

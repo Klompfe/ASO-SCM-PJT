@@ -60,6 +60,8 @@ export class BrandPrefixRulesService {
       numericPattern: dto.isNumericStart ? dto.numericPattern ?? null : null,
       brandName: dto.brandName,
       note: dto.note ?? null,
+      priceTableCode: dto.priceTableCode ?? null,
+      fabricLineUnit: dto.fabricLineUnit ?? null,
     });
     return this.repository.save(rule);
   }
@@ -88,6 +90,8 @@ export class BrandPrefixRulesService {
     rule.numericPattern = nextIsNumericStart ? nextNumericPattern ?? null : null;
     if (dto.brandName !== undefined) rule.brandName = dto.brandName;
     if (dto.note !== undefined) rule.note = dto.note;
+    if (dto.priceTableCode !== undefined) rule.priceTableCode = dto.priceTableCode;
+    if (dto.fabricLineUnit !== undefined) rule.fabricLineUnit = dto.fabricLineUnit;
 
     return this.repository.save(rule);
   }

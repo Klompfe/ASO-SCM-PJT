@@ -39,7 +39,12 @@ describe('PriceReferenceService', () => {
     };
     brandPriceRulesService = { findActive: jest.fn().mockResolvedValue([]) };
     midoPriceTableService = { findCandidates: jest.fn().mockResolvedValue([]) };
-    brandPrefixRulesService = { findAll: jest.fn().mockResolvedValue([]) };
+    // PR-188: 기본값으로 "MB" 접두사 스타일/브랜드명 "미센스"를 미도 단가표 적용 대상으로
+    // 둔다 — styleNo 없이 brandName만 보내는 기존 테스트들이 미도 브랜드로 해석되게 하는
+    // 공용 설정(개별 테스트가 필요하면 로컬로 다시 mockResolvedValue 한다).
+    brandPrefixRulesService = { findAll: jest.fn().mockResolvedValue([
+      { prefix: 'MB', isNumericStart: false, numericPattern: null, brandName: '미센스', priceTableCode: 'MIDO' },
+    ]) };
     customsExchangeRatesService = { lookup: jest.fn().mockResolvedValue({ found: false, previous: null }) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -61,8 +66,11 @@ describe('PriceReferenceService', () => {
   });
 
   it('styleNo가 있으면 뮤트 패턴(26FOT08 등)으로 브랜드를 판정하고, 브랜드 전용가가 미도 단가표보다 앞에 온다', async () => {
+    // PR-188: 이 테스트는 "두 후보가 같이 있을 때의 순서/결합" 자체를 검증하는 것이 목적이라
+    // 뮤트를 임시로 미도 대상으로도 표시해 둔다(실제 운영 설정은 PR-188-report.md 참고 —
+    // 뮤트는 brand_price_rules라는 별도 체계라 priceTableCode를 받지 않는다).
     brandPrefixRulesService.findAll.mockResolvedValue([
-      { prefix: null, isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트' },
+      { prefix: null, isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트', priceTableCode: 'MIDO' },
     ]);
     brandPriceRulesService.findActive.mockResolvedValue([
       { id: 1, brandName: '뮤트', categoryKeyword: '겉감', priceUsd: 1.0, unit: 'YD', note: '뮤트 전용가', isActive: true },
@@ -79,7 +87,7 @@ describe('PriceReferenceService', () => {
 
   it('뮤트지만 그 품목구분에 전용가 규칙이 없으면 미도 단가표만 후보로 나온다', async () => {
     brandPrefixRulesService.findAll.mockResolvedValue([
-      { prefix: null, isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트' },
+      { prefix: null, isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트', priceTableCode: 'MIDO' },
     ]);
     brandPriceRulesService.findActive.mockResolvedValue([
       { id: 1, brandName: '뮤트', categoryKeyword: '행어', priceUsd: 0.001, unit: 'EA', isActive: true }, // 겉감이 아니라 행어 — 안 걸림
@@ -92,20 +100,24 @@ describe('PriceReferenceService', () => {
     expect(result.candidates[0].source).toBe('MIDO_TABLE');
   });
 
-  it('브랜드가 없으면(styleNo도 brandName도 없음) 브랜드 전용가 없이 미도 단가표만', async () => {
+  // PR-188: 브랜드를 모르면(styleNo도 brandName도 없음) 미도 단가표 후보 자체를 만들지
+  // 않는다(제시님 결정) — 추측해서 보여주지 않고 안내만.
+  it('브랜드가 없으면(styleNo도 brandName도 없음) 미도 단가표 후보를 만들지 않고 안내(note)만 준다', async () => {
     midoPriceTableService.findCandidates.mockResolvedValue([
       { id: 10, itemName: '겉감(폴리)', priceUsdMin: 2.5, priceUsdMax: 2.5, unit: 'YD', note: null },
     ]);
     const result = await service.getPriceReference({ itemId: 1 } as any);
     expect(result.brand).toBeNull();
-    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates).toHaveLength(0);
+    expect(result.note).toBe('브랜드를 선택하면 단가표 후보가 표시됩니다');
+    expect(midoPriceTableService.findCandidates).not.toHaveBeenCalled();
   });
 
   it('후보가 정확히 1개이고 범위값이 아니면 suggested를 채운다', async () => {
     midoPriceTableService.findCandidates.mockResolvedValue([
       { id: 10, itemName: '겉감(폴리)', priceUsdMin: 2.5, priceUsdMax: 2.5, unit: 'YD', note: null },
     ]);
-    const result = await service.getPriceReference({ itemId: 1 } as any);
+    const result = await service.getPriceReference({ itemId: 1, brandName: '미센스' } as any);
     expect(result.suggested).toMatchObject({ priceUsd: 2.5 });
   });
 
@@ -114,7 +126,7 @@ describe('PriceReferenceService', () => {
       { id: 10, itemName: 'A', priceUsdMin: 2.5, priceUsdMax: 2.5, unit: 'YD' },
       { id: 11, itemName: 'B', priceUsdMin: 3, priceUsdMax: 3, unit: 'YD' },
     ]);
-    const result = await service.getPriceReference({ itemId: 1 } as any);
+    const result = await service.getPriceReference({ itemId: 1, brandName: '미센스' } as any);
     expect(result.suggested).toBeNull();
   });
 
@@ -122,7 +134,7 @@ describe('PriceReferenceService', () => {
     midoPriceTableService.findCandidates.mockResolvedValue([
       { id: 10, itemName: 'A', priceUsdMin: 2, priceUsdMax: 3, unit: 'YD' },
     ]);
-    const result = await service.getPriceReference({ itemId: 1 } as any);
+    const result = await service.getPriceReference({ itemId: 1, brandName: '미센스' } as any);
     expect(result.suggested).toBeNull();
     expect(result.candidates[0].priceUsdMax).toBe(3);
   });
@@ -134,7 +146,7 @@ describe('PriceReferenceService', () => {
         conversion: { determined: false, options: [], warning: '실/테이프 종류 미지정 — 선택해 주세요' },
       },
     ]);
-    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'CONE' } as any);
+    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'CONE', brandName: '미센스' } as any);
     expect(result.suggested).toBeNull();
   });
 
@@ -142,7 +154,7 @@ describe('PriceReferenceService', () => {
     midoPriceTableService.findCandidates.mockResolvedValue([
       { id: 10, itemName: 'A', priceUsdMin: 1, priceUsdMax: 1, unit: 'EA' },
     ]);
-    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'YD' } as any);
+    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'YD', brandName: '미센스' } as any);
     expect(result.unitMismatchWarning).toContain('YD');
     expect(result.unitMismatchWarning).toContain('EA');
   });
@@ -154,7 +166,7 @@ describe('PriceReferenceService', () => {
         conversion: { determined: true, options: [{ materialSubType: 'COA_SA', displayName: '코아사', packagingUnitLabel: '콘', unitLengthM: 2500, unitPriceUsd: 0.25, formula: 'x' }] },
       },
     ]);
-    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'CONE', materialSubType: 'COA_SA' } as any);
+    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'CONE', materialSubType: 'COA_SA', brandName: '미센스' } as any);
     expect(result.unitMismatchWarning).toBeUndefined();
   });
 
@@ -163,7 +175,7 @@ describe('PriceReferenceService', () => {
       { id: 10, itemName: 'A', priceUsdMin: 1, priceUsdMax: 1, unit: 'YD' },
     ]);
     customsExchangeRatesService.lookup.mockResolvedValue({ found: true, rate: 1343, validFrom: '2026-10-05', validTo: '2026-10-11' });
-    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'YD' } as any);
+    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'YD', brandName: '미센스' } as any);
     expect(result.krw).toEqual({ rate: 1343, validFrom: '2026-10-05', validTo: '2026-10-11', rateType: 'EXPORT', approxUnitPriceKrw: 1343 });
   });
 
@@ -171,7 +183,7 @@ describe('PriceReferenceService', () => {
     midoPriceTableService.findCandidates.mockResolvedValue([
       { id: 10, itemName: 'A', priceUsdMin: 1, priceUsdMax: 1, unit: 'YD' },
     ]);
-    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'YD' } as any);
+    const result = await service.getPriceReference({ itemId: 1, lineUnit: 'YD', brandName: '미센스' } as any);
     expect(result.krw).toBeUndefined();
   });
 
@@ -180,7 +192,7 @@ describe('PriceReferenceService', () => {
       { id: 10, itemName: 'A', priceUsdMin: 1, priceUsdMax: 1, unit: 'YD' },
       { id: 11, itemName: 'B', priceUsdMin: 2, priceUsdMax: 2, unit: 'YD' },
     ]);
-    const result = await service.getPriceReference({ itemId: 1 } as any);
+    const result = await service.getPriceReference({ itemId: 1, brandName: '미센스' } as any);
     expect(result.suggested).toBeNull();
     expect(result.krw).toBeUndefined();
     expect(customsExchangeRatesService.lookup).not.toHaveBeenCalled();
@@ -208,7 +220,7 @@ describe('PriceReferenceService', () => {
       ]);
       customsExchangeRatesService.lookup.mockResolvedValue({ found: true, rate: 1375.14, validFrom: '2026-10-09', validTo: '2026-10-15' });
 
-      const result = await service.getPriceReference({ itemId: 1 } as any);
+      const result = await service.getPriceReference({ itemId: 1, brandName: '미센스' } as any);
 
       expect(midoPriceTableService.findCandidates).toHaveBeenCalledWith('오바사 60S/3H THREAD', { lineUnit: '콘', materialSubType: 'OBA_SA_SKU_I_SA' });
       expect(result.candidates[0]).toMatchObject({
@@ -231,7 +243,7 @@ describe('PriceReferenceService', () => {
         { id: 4, itemName: '실(THREAD)', priceUsdMin: 0.00012, priceUsdMax: 0.00012, unit: 'M' },
       ]);
 
-      const result = await service.getPriceReference({ itemId: 2 } as any);
+      const result = await service.getPriceReference({ itemId: 2, brandName: '미센스' } as any);
 
       expect(midoPriceTableService.findCandidates).toHaveBeenCalledWith('오바사 60S/3H THREAD', { lineUnit: 'EA', materialSubType: undefined });
       expect(result.suggested).toBeNull();
@@ -246,7 +258,7 @@ describe('PriceReferenceService', () => {
         { id: 4, itemName: '실(THREAD)', priceUsdMin: 0.00012, priceUsdMax: 0.00012, unit: 'M' },
       ]);
 
-      const result = await service.getPriceReference({ itemId: 2 } as any);
+      const result = await service.getPriceReference({ itemId: 2, brandName: '미센스' } as any);
 
       expect(result.warning).toBeUndefined();
     });
@@ -261,7 +273,7 @@ describe('PriceReferenceService', () => {
         },
       ]);
 
-      const result = await service.getPriceReference({ itemId: 3 } as any);
+      const result = await service.getPriceReference({ itemId: 3, brandName: '미센스' } as any);
 
       expect(midoPriceTableService.findCandidates).toHaveBeenCalledWith('다데 테이프', { lineUnit: '롤', materialSubType: 'DADE' });
       expect(result.candidates[0]).toMatchObject({ priceUsd: 0.04, unit: '롤' });
@@ -281,7 +293,7 @@ describe('PriceReferenceService', () => {
         },
       ]);
 
-      const result = await service.getPriceReference({ itemId: 1 } as any);
+      const result = await service.getPriceReference({ itemId: 1, brandName: '미센스' } as any);
 
       expect(result.candidates[0]).toMatchObject({ priceUsd: 0.4, priceUsdMax: 0.48 });
       expect(result.suggested).toBeNull();
@@ -294,7 +306,7 @@ describe('PriceReferenceService', () => {
         { id: 7, itemName: '라벨', priceUsdMin: 0.05, priceUsdMax: 0.05, unit: 'EA' },
       ]);
 
-      const result = await service.getPriceReference({ itemId: 6 } as any);
+      const result = await service.getPriceReference({ itemId: 6, brandName: '미센스' } as any);
 
       expect(midoPriceTableService.findCandidates).toHaveBeenCalledWith('메인 라벨', { lineUnit: 'EA', materialSubType: undefined });
       expect(result.suggested).toMatchObject({ priceUsd: 0.05 });
@@ -353,7 +365,7 @@ describe('PriceReferenceService', () => {
       ruleRepo.find.mockResolvedValue([obaSaRule]);
       midoPriceTableService.findCandidates.mockResolvedValue([]);
 
-      await service.getPriceReference({ itemId: 1, lineUnit: 'CONE', materialSubType: 'OBA_SA_SKU_I_SA' } as any);
+      await service.getPriceReference({ itemId: 1, lineUnit: 'CONE', materialSubType: 'OBA_SA_SKU_I_SA', brandName: '미센스' } as any);
 
       expect(midoPriceTableService.findCandidates).toHaveBeenCalledWith('오바사', { lineUnit: 'CONE', materialSubType: 'OBA_SA_SKU_I_SA' });
     });
@@ -363,9 +375,59 @@ describe('PriceReferenceService', () => {
       ruleRepo.find.mockResolvedValue([]); // POLY_JINUIDO 규칙 없음
       midoPriceTableService.findCandidates.mockResolvedValue([]);
 
-      await service.getPriceReference({ itemId: 1 } as any);
+      await service.getPriceReference({ itemId: 1, brandName: '미센스' } as any);
 
       expect(midoPriceTableService.findCandidates).toHaveBeenCalledWith('지누이도', { lineUnit: 'EA', materialSubType: 'POLY_JINUIDO' });
+    });
+  });
+
+  // PR-188: 미도 브랜드 게이팅 — 미도컴퍼니 소유 브랜드(미센스/반에크/루미에반)에만 미도
+  // 단가표 후보를 보여준다.
+  describe('미도 브랜드 게이팅 (PR-188)', () => {
+    it('미도 브랜드(priceTableCode=MIDO)면 미도 단가표 후보가 보이고 note가 없다', async () => {
+      midoPriceTableService.findCandidates.mockResolvedValue([
+        { id: 10, itemName: '겉감(폴리)', priceUsdMin: 2.5, priceUsdMax: 2.5, unit: 'YD', note: null },
+      ]);
+      const result = await service.getPriceReference({ itemId: 1, brandName: '미센스' } as any);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0].source).toBe('MIDO_TABLE');
+      expect(result.note).toBeUndefined();
+    });
+
+    it('브랜드는 판정됐지만 미도 브랜드가 아니면(priceTableCode 없음) 미도 후보 없이 note만 준다', async () => {
+      brandPrefixRulesService.findAll.mockResolvedValue([
+        { prefix: 'VK', isNumericStart: false, numericPattern: null, brandName: '마뗑킴' }, // priceTableCode 없음
+      ]);
+      midoPriceTableService.findCandidates.mockResolvedValue([
+        { id: 10, itemName: '겉감(폴리)', priceUsdMin: 2.5, priceUsdMax: 2.5, unit: 'YD', note: null },
+      ]);
+      const result = await service.getPriceReference({ itemId: 1, styleNo: 'VK1001' } as any);
+      expect(result.brand).toBe('마뗑킴');
+      expect(result.candidates).toHaveLength(0);
+      expect(result.note).toBe('이 브랜드는 미도 단가표 적용 대상이 아닙니다');
+      expect(midoPriceTableService.findCandidates).not.toHaveBeenCalled();
+    });
+
+    it('미도가 아닌 브랜드라도 그 브랜드의 BRAND_RULE(전용가)은 그대로 보여준다(뮤트 유지)', async () => {
+      brandPrefixRulesService.findAll.mockResolvedValue([
+        { prefix: null, isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트' }, // priceTableCode 없음(별도 체계)
+      ]);
+      brandPriceRulesService.findActive.mockResolvedValue([
+        { id: 1, brandName: '뮤트', categoryKeyword: '겉감', priceUsd: 1.0, unit: 'YD', note: '뮤트 전용가', isActive: true },
+      ]);
+      const result = await service.getPriceReference({ itemId: 1, styleNo: '26FOT08' } as any);
+      expect(result.candidates).toEqual([expect.objectContaining({ source: 'BRAND_RULE', priceUsd: 1.0 })]);
+      expect(result.note).toBe('이 브랜드는 미도 단가표 적용 대상이 아닙니다');
+    });
+
+    it('미도가 아닌 브랜드에서는 종류 미지정 실/테이프 경고(warning)를 내지 않는다(미도 브랜드에서만 의미)', async () => {
+      itemRepo.findOne.mockResolvedValue({ id: 2, name: '오바사 60S/3H THREAD', unit: 'EA', materialSubType: null, packagingReviewedAt: null });
+      brandPrefixRulesService.findAll.mockResolvedValue([
+        { prefix: 'VK', isNumericStart: false, numericPattern: null, brandName: '마뗑킴' },
+      ]);
+      const result = await service.getPriceReference({ itemId: 2, styleNo: 'VK1001' } as any);
+      expect(result.warning).toBeUndefined();
+      expect(result.note).toBe('이 브랜드는 미도 단가표 적용 대상이 아닙니다');
     });
   });
 });

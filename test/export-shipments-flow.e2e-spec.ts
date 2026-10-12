@@ -13,6 +13,7 @@ import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
 import { User, UserRole } from '../src/users/entities/user.entity';
+import { BrandPrefixRule } from '../src/brand-prefix-rules/entities/brand-prefix-rule.entity';
 
 describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-075)', () => {
   let app: INestApplication;
@@ -696,6 +697,131 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
       // 나머지 필드는 여전히 기본값에서 채워져야 한다.
       expect(res.body.data.shipperInfo).toBe('TAE IL TRADING CO.,LTD');
       expect(res.body.data.portOfLoading).toBe('INCHEON, KOREA');
+    });
+  });
+
+  // PR-188 F: 빈폴/에잇세컨즈 겉감(원단) 라인은 수출서류 단위를 미터(M)로 쓴다(제시님
+  // 확인 — 포장내역의 롤 길이 칸에 이미 미터 값이 들어 있어 숫자는 그대로 두고 단위
+  // 표기만 바꾼다). brand_prefix_rules.fabricLineUnit이 있을 때만 Item.unit보다 우선한다.
+  describe('F. 브랜드별 원단 라인 단위 기본값 (PR-188)', () => {
+    beforeAll(async () => {
+      await dataSource.getRepository(BrandPrefixRule).save([
+        { prefix: 'BF', isNumericStart: false, numericPattern: null, brandName: '빈폴', fabricLineUnit: 'M' },
+        { prefix: null, isNumericStart: true, numericPattern: '^\\d{2}8S', brandName: '에잇세컨즈', fabricLineUnit: 'M' },
+        { prefix: 'MS', isNumericStart: false, numericPattern: null, brandName: '미센스' }, // fabricLineUnit 없음(비교용)
+      ]);
+    });
+
+    it('빈폴(BF) 스타일의 원단 라인은 단위가 M이고 수량(야드 합계) 값은 그대로다', async () => {
+      const styleNo = `BF${Date.now()}FABRIC`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `빈폴 원단 ${Date.now()}`,
+        englishName: 'WOOL FABRIC',
+        styleNo,
+        spec: '58"',
+        composition: 'WOOL 100%',
+        hsCode: '5111.11',
+        category: 'FABRIC',
+        rollLengthsYd: [150, 143],
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.lines[0].unit).toBe('M');
+      expect(Number(res.body.data.lines[0].qty)).toBe(293); // 150+143, 환산 없이 그대로
+    });
+
+    it('에잇세컨즈(숫자+8S 패턴) 스타일의 원단 라인도 단위가 M이다', async () => {
+      const styleNo = `268SOT01-${Date.now()}`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `에잇세컨즈 원단 ${Date.now()}`,
+        englishName: 'COTTON FABRIC',
+        styleNo,
+        spec: '58"',
+        composition: 'COTTON 100%',
+        hsCode: '5208.11',
+        category: 'FABRIC',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.lines[0].unit).toBe('M');
+    });
+
+    it('fabricLineUnit이 없는 브랜드(미센스)는 기존처럼 Item.unit(또는 YD)을 그대로 쓴다(회귀 없음)', async () => {
+      const styleNo = `MS${Date.now()}FABRIC`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `미센스 원단 ${Date.now()}`,
+        englishName: 'POLY FABRIC',
+        styleNo,
+        spec: '58"',
+        composition: 'POLYESTER 100%',
+        hsCode: '5407.61',
+        category: 'FABRIC',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.lines[0].unit).toBe('YD');
+    });
+
+    it('빈폴이어도 TRIM(부자재) 라인은 영향받지 않는다(기존 EA/Item.unit 그대로)', async () => {
+      const styleNo = `BF${Date.now()}TRIM`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `빈폴 부자재 ${Date.now()}`,
+        englishName: 'ELASTIC',
+        styleNo,
+        spec: '38MM',
+        composition: 'NYLON 100%',
+        hsCode: '5604.10',
+        category: 'TRIM',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.lines[0].unit).toBe('EA');
+    });
+
+    it('브랜드를 분류할 수 없는 스타일은 기존 동작 그대로다(YD 폴백)', async () => {
+      const styleNo = `UNCLASSIFIED-${Date.now()}`;
+      const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
+        itemName: `무브랜드 원단 ${Date.now()}`,
+        englishName: 'UNKNOWN FABRIC',
+        styleNo,
+        spec: '58"',
+        composition: 'POLYESTER 100%',
+        hsCode: '5407.61',
+        category: 'FABRIC',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/export-shipments/generate')
+        .query({ purchaseOrderIds: String(purchaseOrderId) })
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.data.lines[0].unit).toBe('YD');
     });
   });
 });

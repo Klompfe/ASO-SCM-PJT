@@ -28,6 +28,8 @@ export interface MidoPriceItem {
   note?: string | null;
   // PR-182: lineUnit이 콘/롤이고 이 후보 단위가 M일 때만 채워진다.
   conversion?: MeterPriceConversionInfo;
+  // PR-188: 삭제 대신 사용 중지/재사용 토글.
+  isActive: boolean;
 }
 
 // PR-157: 자재명 부분일치로 후보를 찾는다(자동 확정 없음 — 담당자가 직접 골라 연결).
@@ -41,3 +43,48 @@ export const findMidoPriceCandidates = (
   apiClient.get('/mido-price-table/candidates', {
     params: { materialName, lineUnit: opts?.lineUnit, materialSubType: opts?.materialSubType ?? undefined },
   });
+
+// PR-188: 관리 화면 — 등록/수정(MANAGER/ADMIN)·사용중지(삭제 API 없음, isActive 토글)·
+// CSV 일괄 등록(미리보기 → 선택 적용, all-or-nothing).
+export const getMidoPriceItems = (includeInactive = false): Promise<MidoPriceItem[]> =>
+  apiClient.get('/mido-price-table', { params: { includeInactive: includeInactive ? 'true' : undefined } });
+
+export interface CreateMidoPriceItem {
+  itemName: string;
+  priceUsdMin: number;
+  priceUsdMax: number;
+  unit: string;
+  note?: string;
+}
+export type UpdateMidoPriceItem = Partial<CreateMidoPriceItem> & { isActive?: boolean };
+
+export const createMidoPriceItem = (data: CreateMidoPriceItem): Promise<MidoPriceItem> =>
+  apiClient.post('/mido-price-table', data);
+export const updateMidoPriceItem = (id: number, data: UpdateMidoPriceItem): Promise<MidoPriceItem> =>
+  apiClient.patch(`/mido-price-table/${id}`, data);
+
+export interface MidoPriceImportPreviewRow {
+  line: number;
+  status: 'NEW' | 'CHANGED' | 'SAME' | 'ERROR';
+  before?: { priceUsdMin: number; priceUsdMax: number; unit: string; note: string | null };
+  after: { itemName: string; priceUsdMin: number | null; priceUsdMax: number | null; unit: string; note: string | null };
+  errors?: string[];
+}
+export interface MidoPriceImportPreviewResult {
+  rows: MidoPriceImportPreviewRow[];
+  summary: { new: number; changed: number; same: number; error: number; total: number };
+}
+export const previewMidoPriceImport = (csv: string): Promise<MidoPriceImportPreviewResult> =>
+  apiClient.post('/mido-price-table/import/preview', { csv });
+
+export interface MidoPriceImportApplyRow {
+  line: number;
+  itemName: string;
+  priceUsdMin: number;
+  priceUsdMax: number;
+  unit: string;
+  note?: string | null;
+  status: 'NEW' | 'CHANGED';
+}
+export const applyMidoPriceImport = (rows: MidoPriceImportApplyRow[]): Promise<{ created: number; updated: number }> =>
+  apiClient.post('/mido-price-table/import/apply', { rows });

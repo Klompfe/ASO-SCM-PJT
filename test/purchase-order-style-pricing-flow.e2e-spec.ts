@@ -51,9 +51,12 @@ describe('발주 스타일 연결·소요량·단가표 참고단가 (PR-185)', 
     await dataSource.getRepository(BrandPriceRule).save([
       { brandName: '뮤트', categoryKeyword: '겉감', priceUsd: 1.0, unit: 'YD', note: '뮤트 전용가', isActive: true },
     ]);
-    // 뮤트 브랜드 판정 규칙(실제 운영 데이터 패턴 — 26FOT08 등).
+    // 뮤트 브랜드 판정 규칙(실제 운영 데이터 패턴 — 26FOT08 등). priceTableCode는 없음(뮤트는
+    // brand_price_rules라는 별도 체계라 미도 단가표 대상이 아니다 — PR-188).
+    // PPC- 접두사는 이 테스트 파일의 미도 단가표 환산(C-2) 테스트용 — 미도 브랜드로 등록해 둔다.
     await dataSource.getRepository(BrandPrefixRule).save([
       { prefix: null, isNumericStart: true, numericPattern: '^\\d{2}[FS]', brandName: '뮤트' },
+      { prefix: 'PPC', isNumericStart: false, numericPattern: null, brandName: 'PPC테스트브랜드', priceTableCode: 'MIDO' },
     ]);
   });
 
@@ -253,7 +256,7 @@ describe('발주 스타일 연결·소요량·단가표 참고단가 (PR-185)', 
       }).expect(201);
       await auth(request(http()).patch(`/items/${item.body.data.id}`)).send({ materialSubType: 'OBA_SA_SKU_I_SA' }).expect(200);
 
-      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId: item.body.data.id })).expect(200);
+      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId: item.body.data.id, brandName: 'PPC테스트브랜드' })).expect(200);
 
       expect(res.body.data.candidates[0]).toMatchObject({
         priceUsd: 0.48, unit: '콘', conversionFormula: '0.00012/m × 4000m = 0.48/콘',
@@ -269,7 +272,7 @@ describe('발주 스타일 연결·소요량·단가표 참고단가 (PR-185)', 
         code: `PPC-UNSET-${tag}`, name: `PPC오바사 미지정 THREAD ${tag}`, type: 'RAW_MATERIAL', unit: 'EA',
       }).expect(201);
 
-      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId: item.body.data.id })).expect(200);
+      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId: item.body.data.id, brandName: 'PPC테스트브랜드' })).expect(200);
 
       expect(res.body.data.suggested).toBeNull();
       expect(res.body.data.warning).toBe('실/테이프 종류 미지정 — 선택해 주세요');
@@ -287,6 +290,33 @@ describe('발주 스타일 연결·소요량·단가표 참고단가 (PR-185)', 
 
       const converted = res.body.data.candidates.find((c: any) => c.label.includes('코아사'));
       expect(converted).toMatchObject({ unit: '콘', conversionFormula: expect.stringContaining('2500m') });
+    });
+  });
+
+  // PR-188: 미도컴퍼니 소유 브랜드(미센스/반에크/루미에반)에만 미도 단가표 후보를 보여준다.
+  describe('C-3. 미도 브랜드 게이팅 (PR-188)', () => {
+    beforeAll(async () => {
+      await dataSource.getRepository(BrandPrefixRule).save([
+        { prefix: 'MB', isNumericStart: false, numericPattern: null, brandName: '미센스', priceTableCode: 'MIDO' },
+        { prefix: 'MK', isNumericStart: false, numericPattern: null, brandName: '마뗑킴' }, // priceTableCode 없음(미도 아님)
+      ]);
+      await dataSource.getRepository(MidoPriceItem).save([{ itemName: '게이팅테스트겉감', priceUsdMin: 1, priceUsdMax: 1, unit: 'YD' }]);
+    });
+
+    it('MB(미센스) 스타일은 미도 단가표 후보가 보인다', async () => {
+      const { itemId } = await setupStyleWithMaterial({ styleNo: `MB${tag}GATE1`, itemName: `게이팅테스트겉감 ${tag}`, consumption: 1, unit: 'YD' });
+      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId, styleNo: `MB${tag}GATE1` })).expect(200);
+      expect(res.body.data.brand).toBe('미센스');
+      expect(res.body.data.candidates.some((c: any) => c.source === 'MIDO_TABLE')).toBe(true);
+      expect(res.body.data.note).toBeUndefined();
+    });
+
+    it('MK(마뗑킴) 스타일은 미도 단가표 후보가 없고 안내만 뜬다', async () => {
+      const { itemId } = await setupStyleWithMaterial({ styleNo: `MK${tag}GATE1`, itemName: `게이팅테스트겉감2 ${tag}`, consumption: 1, unit: 'YD' });
+      const res = await auth(request(http()).get('/purchase-orders/price-reference').query({ itemId, styleNo: `MK${tag}GATE1` })).expect(200);
+      expect(res.body.data.brand).toBe('마뗑킴');
+      expect(res.body.data.candidates).toHaveLength(0);
+      expect(res.body.data.note).toBe('이 브랜드는 미도 단가표 적용 대상이 아닙니다');
     });
   });
 

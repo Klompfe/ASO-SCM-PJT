@@ -158,6 +158,8 @@ export interface PriceReferenceResult {
   krw?: { rate: number; validFrom: string; validTo: string; rateType: 'EXPORT'; approxUnitPriceKrw: number };
   // PR-187: 환산이 적용됐을 때 콘/롤 단위 라벨 — "USD/콘" 같은 단위 표시에 쓴다.
   packagingUnitLabel?: string;
+  // PR-188: 미도 단가표 후보를 왜 못 보여주는지(브랜드 미상/미도 브랜드 아님) 안내.
+  note?: string;
 }
 export const getPriceReference = (params: { itemId: number; styleNo?: string; brandName?: string; lineUnit?: string; materialSubType?: string }): Promise<PriceReferenceResult> =>
   apiClient.get('/purchase-orders/price-reference', { params });

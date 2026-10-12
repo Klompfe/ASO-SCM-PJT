@@ -80,6 +80,11 @@ export const PriceReferenceBlock: React.FC<{
       {result?.warning && (
         <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">{result.warning}</p>
       )}
+      {/* PR-188: 미도 브랜드가 아니거나 브랜드를 모르면 단가표 후보를 아예 안 보여주고 안내만
+          — 입력칸은 그대로 열려 있어 수동 입력은 가능하다. */}
+      {result?.note && (
+        <p className="text-xs text-gray-500 bg-gray-50 rounded px-2 py-1">{result.note}</p>
+      )}
       {result && result.candidates.length > 1 && (
         <ul className="text-xs space-y-1">
           {result.candidates.map((c, i) => (

@@ -29,6 +29,12 @@ export class MidoPriceItem {
   @Column({ nullable: true })
   note?: string | null;
 
+  // PR-188: 삭제 API는 만들지 않는다(실수 방지) — 잘못 라벨링된 행이 있어도 이 값을
+  // false로 바꿔 "사용 중지"하면 된다(사람이 직접 토글, 자동 중지 없음). 후보 검색
+  // (findCandidates)/INVOICE 조회는 true인 행만 쓴다. 관리 화면(findAll)은 전체를 본다.
+  @Column({ default: true })
+  isActive: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 
