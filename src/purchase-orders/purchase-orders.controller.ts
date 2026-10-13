@@ -17,6 +17,7 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { BulkCreatePurchaseOrdersDto } from './dto/bulk-create-purchase-orders.dto';
+import { CombinedPurchaseOrderDocumentDto } from './dto/combined-purchase-order-document.dto';
 import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto';
 import { GetPriceReferenceDto } from './dto/get-price-reference.dto';
 import { PurchaseOrder } from './entities/purchase-order.entity';
@@ -66,6 +67,14 @@ export class PurchaseOrdersController {
   async document(@Param('id', ParseIntPipe) id: number) {
     const { filename, buffer } = await this.documentService.generate(id);
     return { filename, base64: buffer.toString('base64') };
+  }
+
+  // PR-194: 다품번 일괄발주 — 여러 발주를 업체별로 묶은 발주서(업체당 1개)를 만든다.
+  @Post('documents/combined')
+  @ApiOperation({ summary: '여러 발주를 업체별로 묶은 합본 발주서 생성 — 업체마다 base64 파일 1개씩 반환' })
+  async combinedDocument(@Body() dto: CombinedPurchaseOrderDocumentDto) {
+    const results = await this.documentService.generateCombined(dto.poIds);
+    return results.map((r) => ({ supplierId: r.supplierId, supplierName: r.supplierName, filename: r.filename, base64: r.buffer.toString('base64') }));
   }
 
   // PR-173: 고정 경로라 ':id'보다 먼저 선언해야 한다(안 그러면 ':id'가 "material-context"를

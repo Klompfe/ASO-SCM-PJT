@@ -37,6 +37,22 @@ export class WorkOrdersController {
     return this.woService.getStyleRequirements(styleNo, quantity ? Number(quantity) : undefined);
   }
 
+  // PR-194: 다품번 일괄발주 1단계 — 여러 스타일의 소요량을 한 번에 조회한다. ':id'보다
+  // 먼저 선언해야 한다(style-requirements/by-style과 동일한 이유).
+  @Get('multi-style-requirements')
+  @ApiOperation({ summary: '여러 스타일의 소요량을 한 번에 조회 — 다품번 일괄발주 화면용(최대 30개, 쉼표 구분)' })
+  @ApiQuery({ name: 'styleNos', required: true, example: 'MB62SLM103Z,MB63SLM104Z' })
+  getMultiStyleRequirements(@Query('styleNos') styleNos: string) {
+    const list = (styleNos ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (list.length === 0) {
+      throw new BadRequestException('styleNos는 필수입니다.');
+    }
+    if (list.length > 30) {
+      throw new BadRequestException('스타일은 최대 30개까지 한 번에 조회할 수 있습니다.');
+    }
+    return this.woService.getMultiStyleRequirements(list);
+  }
+
   // PR-159: ':id'보다 먼저 선언해야 "by-style"이 id로 해석되지 않는다(style-requirements와 동일한 이유).
   @Get('by-style')
   @ApiOperation({ summary: '작업지시를 스타일번호 단위로 집계 — 2단계(스타일 목록→세부) 화면 1단계용. findAll()과 같은 필터' })

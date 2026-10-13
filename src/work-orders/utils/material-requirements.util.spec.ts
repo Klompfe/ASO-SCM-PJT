@@ -243,5 +243,33 @@ describe('BOM 소요량 계산 (PR-120)', () => {
       expect(row.packaging).toBeUndefined();
       expect(row.conversionWarning).toBeUndefined();
     });
+
+    // PR-194: 다품번 일괄발주 품목군 묶음 1순위 키 — Item.category(MaterialCategory).
+    it('Item.category(MaterialCategory)가 있으면 itemCategoryName에 그대로 담긴다', () => {
+      const materialWithCategory = { ...mat(10, '원단A'), category: { name: '원단류' } };
+      const [row] = calculateMaterialRequirements(1, [bi(1, materialWithCategory, 1)], new Map());
+      expect(row.itemCategoryName).toBe('원단류');
+    });
+
+    it('Item.category가 없으면 itemCategoryName은 null(화면이 BOM 구분으로 폴백)', () => {
+      const [row] = calculateMaterialRequirements(1, [bi(1, mat(10, '원단A'), 1)], new Map());
+      expect(row.itemCategoryName).toBeNull();
+    });
+
+    it('재시도 종류 코드(materialSubType)가 결과 행에 그대로 노출된다(섞이지 않으면)', () => {
+      const coaRule = { materialSubType: 'COA_SA', displayName: '코아사', packagingUnitLabel: '콘', unitLengthM: 2500 };
+      const threadBi = { id: 1, material: matSub(10, '코아사', 'COA_SA', { unit: 'EA' }), consumption: 1, category: '실', colorCode: 'BK' };
+      const [row] = calculateMaterialRequirements(1, [threadBi], new Map(), { packagingRules: [coaRule] });
+      expect(row.materialSubType).toBe('COA_SA');
+    });
+
+    it('같은 자재의 BOM 행마다 종류가 다르면(subtypeMixed) materialSubType은 null이다', () => {
+      const rows = [
+        { id: 1, material: matSub(10, '혼합자재', 'COA_SA', { unit: 'EA' }), consumption: 1, category: '실', colorCode: 'BK', threadType: 'COA_SA' },
+        { id: 2, material: matSub(10, '혼합자재', 'COA_SA', { unit: 'EA' }), consumption: 1, category: '실', colorCode: 'WH', threadType: 'POLY_JINUIDO' },
+      ];
+      const [row] = calculateMaterialRequirements(1, rows, new Map());
+      expect(row.materialSubType).toBeNull();
+    });
   });
 });

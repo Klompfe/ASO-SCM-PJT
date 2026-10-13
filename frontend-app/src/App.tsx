@@ -9,6 +9,7 @@ import { SuppliersManager } from './components/SuppliersManager';
 import { BuyersManager } from './components/BuyersManager';
 import { UsersManager } from './components/UsersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
+import { MultiStyleBulkOrder } from './components/MultiStyleBulkOrder';
 import { ProductionContractsManager } from './components/ProductionContractsManager';
 import { PurchaseOrderLedgerReport } from './components/PurchaseOrderLedgerReport';
 import { PackingReceiptSummaryReport } from './components/PackingReceiptSummaryReport';
@@ -144,7 +145,7 @@ function App() {
   const [itemsSubTab, setItemsSubTab] = useState<'items' | 'bomDuplicates'>('items');
   const [workOrdersSubTab, setWorkOrdersSubTab] = useState<'list' | 'requirements'>('list');
   const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import' | 'exportPerformance'>('export');
-  const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing'>('list');
+  const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing' | 'multiStyleBulkOrder'>('list');
 
   const handleOrderItem = (itemId: number) => {
     setPoPrefillItemId(itemId);
@@ -306,6 +307,10 @@ function App() {
                 className={`px-3 py-2 text-sm font-medium ${purchaseOrdersSubTab === 'packing' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                 onClick={() => setPurchaseOrdersSubTab('packing')}
               >포장내역 집계</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${purchaseOrdersSubTab === 'multiStyleBulkOrder' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setPurchaseOrdersSubTab('multiStyleBulkOrder')}
+              >다품번 일괄발주</button>
             </div>
             {purchaseOrdersSubTab === 'list' ? (
               <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />
@@ -313,6 +318,8 @@ function App() {
               <PurchaseOrderLedgerReport />
             ) : purchaseOrdersSubTab === 'packing' ? (
               <PackingReceiptSummaryReport />
+            ) : purchaseOrdersSubTab === 'multiStyleBulkOrder' ? (
+              <MultiStyleBulkOrder />
             ) : (
               <ProductionContractsManager />
             )}

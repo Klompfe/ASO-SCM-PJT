@@ -11,6 +11,9 @@ export interface RequirementMaterialLike {
   // 자재를 일반 자재처럼 취급하기 위한 표시.
   materialSubType?: string | null;
   packagingReviewedAt?: Date | string | null;
+  // PR-194: 다품번 일괄발주 화면의 품목군 묶음 1순위 키(Item.category — MaterialCategory,
+  // PR-183 선택 입력). 없으면 화면이 BOM 구분(categories[0])으로 폴백한다.
+  category?: { name: string } | null;
 }
 
 export interface RequirementBomItem {
@@ -63,6 +66,13 @@ export interface MaterialRequirementRow {
   // 부족 수량 = max(0, 필요 총수량 - orderedQty)
   shortageQty: number;
   lineCount: number;
+  // PR-194: 실/테이프 종류 코드(COA_SA/DADE 등) — BOM 행에 여러 색상/규격이 섞여 있어도
+  // 종류 자체가 일관되면(subtypeMixed=false) 채워진다. 다품번 일괄발주 화면에서 품목군
+  // 아래 종류 라벨을 보여주는 용도(materialSubTypeLabel과 함께 사용) — 환산 로직 자체는
+  // 그대로이고 이 필드는 결과를 그대로 노출만 한다.
+  materialSubType?: string | null;
+  // PR-194: 품목군 묶음 1순위 키(Item.category.name) — 없으면 화면이 categories[0]로 폴백.
+  itemCategoryName?: string | null;
   // PR-186: BOM 행(threadType/tapeType) 또는 자재(Item.materialSubType) 둘 중 하나로
   // 종류가 정해지고 규칙 테이블에 그 종류가 있으면 채워진다(Item.unit과 무관, 요구사항 B).
   packaging?: PackagingConversion;
@@ -115,6 +125,7 @@ export function calculateMaterialRequirements(
         itemId: bi.material.id,
         itemCode: bi.material.code ?? '',
         itemName: bi.material.name,
+        itemCategoryName: bi.material.category?.name ?? null,
         categories: [],
         colors: [],
         consumptionPerUnit: 0,
@@ -158,6 +169,7 @@ export function calculateMaterialRequirements(
     row.shortageQty = Math.max(0, round4(row.requiredQty - row.orderedQty));
 
     const subtype = row.subtypeMixed ? null : row.subtype;
+    row.materialSubType = subtype ?? null;
     const rule = subtype ? rules.find((r) => r.materialSubType === subtype) : undefined;
 
     if (subtype && rule) {

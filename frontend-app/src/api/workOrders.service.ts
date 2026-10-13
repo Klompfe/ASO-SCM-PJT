@@ -66,3 +66,16 @@ export interface StyleRequirements extends Omit<MaterialRequirements, 'workOrder
 }
 export const getStyleRequirements = (styleNo: string, quantity?: number): Promise<StyleRequirements> =>
   apiClient.get('/work-orders/style-requirements', { params: { styleNo, ...(quantity ? { quantity } : {}) } });
+
+// PR-194: 다품번 일괄발주 1단계 — 여러 스타일의 소요량을 한 번에 조회(최대 30개). 한
+// 스타일이 없거나 BOM이 없어도 그 스타일만 error가 달려 돌아오고 나머지는 정상이다.
+export interface MultiStyleRequirementResult {
+  styleNo: string;
+  styleName: string | null;
+  totalQty: number;
+  targetRdd: string | null;
+  rows: import('../utils/bomRequirementReport').MaterialRequirementRow[];
+  error?: string;
+}
+export const getMultiStyleRequirements = (styleNos: string[]): Promise<MultiStyleRequirementResult[]> =>
+  apiClient.get('/work-orders/multi-style-requirements', { params: { styleNos: styleNos.join(',') } });

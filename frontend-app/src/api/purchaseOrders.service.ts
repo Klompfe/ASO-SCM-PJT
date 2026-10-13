@@ -106,6 +106,17 @@ export const createPurchaseOrdersBulk = (
 export const getPurchaseOrderDocument = (id: number): Promise<{ filename: string; base64: string }> =>
   apiClient.get(`/purchase-orders/${id}/document`);
 
+// PR-194: 다품번 일괄발주 — 여러 발주를 업체별로 묶은 발주서(업체당 파일 1개)를 만든다.
+// 발주 목록 화면에서도 같은 호출을 재사용해 나중에 다시 받을 수 있다.
+export interface CombinedPurchaseOrderDocument {
+  supplierId: number;
+  supplierName: string;
+  filename: string;
+  base64: string;
+}
+export const getCombinedPurchaseOrderDocuments = (poIds: number[]): Promise<CombinedPurchaseOrderDocument[]> =>
+  apiClient.post('/purchase-orders/documents/combined', { poIds });
+
 // PR-180: 품목의 발주 구분 제안 — 이 품목을 쓰는 활성 BOM 스타일의 계약방식 기준. 확신할 수 없으면 orderType이 null이다.
 export interface OrderTypeSuggestion {
   orderType: 'FIRM' | 'PROVISIONAL' | null;

@@ -14,9 +14,13 @@ export interface MaterialRequirementRow {
   itemId: number;
   itemCode: string;
   itemName: string;
+  // PR-194: 다품번 일괄발주 품목군 묶음 1순위 키(Item.category.name) — 없으면 categories[0]로 폴백.
+  itemCategoryName?: string | null;
   categories: string[];
   colors: string[];
   consumptionPerUnit: number;
+  // PR-194: 실/테이프 종류 코드(COA_SA/DADE 등) — 품목군 아래 종류 라벨 표시용(materialSubTypeLabel과 함께 사용).
+  materialSubType?: string | null;
   requiredQty: number;
   // PR-185 B: 같은 스타일에 연결된 발주 수량 합(기존엔 그 자재의 전체 발주 합계였다).
   orderedQty: number;

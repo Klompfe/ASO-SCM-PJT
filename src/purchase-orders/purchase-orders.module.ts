@@ -20,6 +20,7 @@ import { BrandPriceRulesModule } from '../brand-price-rules/brand-price-rules.mo
 import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules.module';
 import { CustomsExchangeRatesModule } from '../customs-exchange-rates/customs-exchange-rates.module';
 import { PriceReferenceService } from './price-reference.service';
+import { MaterialPackagingUnitRulesModule } from '../material-packaging-unit-rules/material-packaging-unit-rules.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { PriceReferenceService } from './price-reference.service';
     BrandPriceRulesModule,
     BrandPrefixRulesModule,
     CustomsExchangeRatesModule,
+    MaterialPackagingUnitRulesModule,
   ],
   controllers: [PurchaseOrdersController, PackingReceiptsController, PackingReceiptsReportController],
   providers: [PurchaseOrdersService, PackingReceiptsService, PurchaseOrderDocumentService, PriceReferenceService],

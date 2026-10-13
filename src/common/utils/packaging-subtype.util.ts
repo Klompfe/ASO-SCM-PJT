@@ -22,6 +22,15 @@ export interface PackagingRuleNameLike {
   displayName: string;
 }
 
+// PR-194: 종류 코드(COA_SA/DADE 등)를 규칙 테이블의 displayName으로 바꾼다 — 다품번
+// 일괄발주 화면에서 품목군 아래 "종류" 한 줄을 보여줄 때 쓴다. 규칙에 없는 코드가
+// 와도(데이터 누락) 추측하지 않고 코드 자체를 그대로 보여준다(화면에서 이상함을
+// 눈치챌 수 있게 — 조용히 숨기지 않음).
+export function materialSubTypeLabel(materialSubType: string | null | undefined, rules: PackagingRuleNameLike[]): string | null {
+  if (!materialSubType) return null;
+  return rules.find((r) => r.materialSubType === materialSubType)?.displayName ?? materialSubType;
+}
+
 // 규칙의 displayName은 "오바사·스쿠이사"처럼 여러 종류를 한데 묶어 표기하기도 한다(실제
 // 운영 자재명은 "오바사"만 단독으로 쓰여 있는 경우가 대부분이라, 묶음 표기 그대로
 // substring 비교하면 전혀 안 걸린다) — 가운뎃점(·)/슬래시(/) 기준으로 쪼갠 각 토큰도
