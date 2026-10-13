@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { GatewayTimeoutException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import { VisionService } from './vision.service';
 
 // PR-096: GEMINI_API_KEY 미설정 시 목업 데이터를 반환하는 현재 동작 자체는 유지하되,
@@ -215,5 +216,170 @@ describe('VisionService.analyzeSalesOrder — 미도 전용 수기 CMT단가 후
     });
     const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
     expect(outcome.results[0].overview.handwrittenCmtPriceMemo).toBeNull();
+  });
+});
+
+// PR-192: Gemini 503 과부하 실측(Render 로그, 2026-10-13) 대응 — 재시도 강화, 모델
+// 폴백, 타임아웃/잘림 전용 에러, 로그에 작지 내용이 안 남는지까지 검증한다.
+describe('VisionService.analyzeSalesOrder — 503 재시도/폴백/타임아웃 (PR-192)', () => {
+  const configValues: Record<string, string | undefined> = {
+    GEMINI_API_KEY: 'fake-key',
+    GEMINI_MODEL: undefined,
+    GEMINI_FALLBACK_MODEL: undefined,
+  };
+
+  const buildService = async (): Promise<any> => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        VisionService,
+        { provide: ConfigService, useValue: { get: jest.fn((key: string) => configValues[key]) } },
+      ],
+    }).compile();
+    return module.get(VisionService);
+  };
+
+  const fakeParsedResult = [
+    { overview: { styleNo: 'S', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null, targetRdd: null, documentDate: null }, bomItems: [], sizeSpecs: [], workNotes: null },
+  ];
+  const successResponse = () => ({
+    response: {
+      candidates: [{ finishReason: 'STOP' }],
+      text: () => JSON.stringify(fakeParsedResult),
+      usageMetadata: { promptTokenCount: 10, totalTokenCount: 20 },
+    },
+  });
+  const fetchError503 = () => Object.assign(new Error('[503 Service Unavailable] This model is currently experiencing high demand'), { status: 503 });
+
+  beforeEach(() => {
+    configValues.GEMINI_MODEL = undefined;
+    configValues.GEMINI_FALLBACK_MODEL = undefined;
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('503이 몇 번 발생해도 중간에 성공하면 정상 결과를 반환한다(재시도 대기 실제 소요)', async () => {
+    const service = await buildService();
+    const generateContent = jest.fn()
+      .mockRejectedValueOnce(fetchError503())
+      .mockResolvedValueOnce(successResponse());
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent })) };
+
+    const promise = service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    await jest.advanceTimersByTimeAsync(5000); // 첫 재시도 대기(5000ms)
+    const outcome = await promise;
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(outcome.isMock).toBe(false);
+    expect(outcome.results[0].overview.styleNo).toBe('S');
+    expect(outcome.modelUsed).toBe('gemini-3.6-flash');
+    expect(outcome.fallbackUsed).toBe(false);
+  });
+
+  it('503이 4번 연속(최대 시도) 발생하고 폴백 모델이 없으면 503 혼잡 메시지로 실패한다', async () => {
+    const service = await buildService();
+    const generateContent = jest.fn().mockRejectedValue(fetchError503());
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent })) };
+
+    const promise = service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any).catch((e: Error) => e);
+    // 3번의 재시도 대기(5000+15000+30000=50000ms)를 모두 흘려보낸다
+    await jest.advanceTimersByTimeAsync(5000);
+    await jest.advanceTimersByTimeAsync(15000);
+    await jest.advanceTimersByTimeAsync(30000);
+    const err = await promise;
+
+    expect(generateContent).toHaveBeenCalledTimes(4);
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect((err as ServiceUnavailableException).message).toContain('AI 서버가 일시적으로 혼잡합니다');
+  });
+
+  it('전체 경과시간이 240초를 넘기면 다음 대기를 기다리지 않고 즉시 재시도를 중단한다', async () => {
+    const service = await buildService();
+    let callCount = 0;
+    const generateContent = jest.fn().mockImplementation(() => {
+      callCount++;
+      // 2번째 시도까지는 실제로 과거 시각을 흐르게 해 "경과시간"이 240초에 거의 다다르도록 만든다.
+      if (callCount === 2) {
+        jest.advanceTimersByTime(235_000);
+      }
+      return Promise.reject(fetchError503());
+    });
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent })) };
+
+    const promise = service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any).catch((e: Error) => e);
+    await jest.advanceTimersByTimeAsync(5000); // 1번째 재시도 대기만 소진
+    const err = await promise;
+
+    // 2번째 시도 이후 경과시간(235s) + 다음 대기(15s) > 240s 한도라 3번째 시도 없이 중단된다.
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('GEMINI_FALLBACK_MODEL이 설정되어 있으면 기본 모델 재시도 소진 후 폴백 모델로 1회 더 시도해 성공할 수 있다', async () => {
+    configValues.GEMINI_MODEL = 'gemini-primary';
+    configValues.GEMINI_FALLBACK_MODEL = 'gemini-fallback';
+    const service = await buildService();
+    const primaryGenerateContent = jest.fn().mockRejectedValue(fetchError503());
+    const fallbackGenerateContent = jest.fn().mockResolvedValue(successResponse());
+    const getGenerativeModel = jest.fn((params: { model: string }) =>
+      params.model === 'gemini-fallback' ? { generateContent: fallbackGenerateContent } : { generateContent: primaryGenerateContent },
+    );
+    (service as any).genAI = { getGenerativeModel };
+
+    const promise = service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    await jest.advanceTimersByTimeAsync(5000);
+    await jest.advanceTimersByTimeAsync(15000);
+    await jest.advanceTimersByTimeAsync(30000);
+    const outcome = await promise;
+
+    expect(primaryGenerateContent).toHaveBeenCalledTimes(4);
+    expect(fallbackGenerateContent).toHaveBeenCalledTimes(1);
+    expect(outcome.modelUsed).toBe('gemini-fallback');
+    expect(outcome.fallbackUsed).toBe(true);
+    expect(outcome.results[0].overview.styleNo).toBe('S');
+  });
+
+  it('타임아웃(abort)으로 실패하면 재시도 없이 즉시 504 타임아웃 메시지로 실패한다', async () => {
+    const service = await buildService();
+    const abortError = Object.assign(new Error('Request aborted when fetching https://...: The user aborted a request.'), { name: 'AbortError' });
+    const generateContent = jest.fn().mockRejectedValue(abortError);
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent })) };
+
+    await expect(
+      service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any),
+    ).rejects.toThrow(GatewayTimeoutException);
+    expect(generateContent).toHaveBeenCalledTimes(1); // 재시도하지 않는다
+  });
+
+  it('finishReason이 STOP이 아니고 응답이 잘려 JSON 파싱에 실패하면 422로 실패한다', async () => {
+    const service = await buildService();
+    const generateContent = jest.fn().mockResolvedValue({
+      response: {
+        candidates: [{ finishReason: 'MAX_TOKENS' }],
+        text: () => '{"overview": { 이 JSON은 잘렸습니다',
+        usageMetadata: { promptTokenCount: 10, totalTokenCount: 20 },
+      },
+    });
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent })) };
+
+    await expect(
+      service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('로거에 파일 내용(base64)이 찍히지 않는다', async () => {
+    const service = await buildService();
+    const logSpy = jest.spyOn((service as any).logger, 'log');
+    const generateContent = jest.fn().mockResolvedValue(successResponse());
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent })) };
+
+    const base64Content = Buffer.from('이것은 작업지시서 내용입니다').toString('base64');
+    await service.analyzeSalesOrder({ buffer: Buffer.from('이것은 작업지시서 내용입니다'), mimetype: 'image/png', originalname: 'order.png' } as any);
+
+    const loggedText = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(loggedText).not.toContain(base64Content);
+    expect(loggedText).toMatch(/file=order\.png/);
   });
 });
