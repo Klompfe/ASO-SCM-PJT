@@ -48,6 +48,8 @@ Render Postgres, Railway Postgres, Neon 등 관리형 Postgres 인스턴스를 �
 | `JWT_SECRET` | JWT 서명 키 (강력한 랜덤 값, 반드시 시크릿으로 관리) | — |
 | `JWT_EXPIRES_IN` | JWT 만료 시간 | `1h` |
 | `GEMINI_API_KEY` | 작업지시서 AI 분석용 Gemini API 키 (미설정 시 목업 데이터로 동작) | — |
+| `GEMINI_MODEL` | 작업지시서 AI 분석 기본 모델명 (미설정 시 `gemini-3.6-flash`) | `gemini-3.6-flash` |
+| `GEMINI_FALLBACK_MODEL` | **PR-192**: 기본 모델이 503/429로 재시도(최대 4회)를 전부 소진했을 때 1회 더 시도할 폴백 모델명 (미설정 시 폴백 없이 바로 503 실패). **설정된 경우** 기본 모델 단계는 전체 240초 예산 중 40%(약 96초)까지만 쓰고 곧바로 폴백으로 전환하며, 폴백 단계가 남은 예산(약 144초)을 쓴다 — 기본 모델에 240초를 다 쓰면 폴백이 성공해도 프런트의 270초 제한을 넘겨버리기 때문(PR-192 보완). **미설정이면** 기본 모델이 240초 예산을 그대로 다 쓴다 | 미설정(폴백 없음) |
 | `CORS_ORIGIN` | 허용할 프론트엔드 origin (콤마로 여러 개 구분 가능). `*`이면 모든 origin 허용(와일드카드로 올바르게 처리됨, PR-061에서 배열로 잘못 처리되던 버그 수정). 미설정 시 로컬 개발용 localhost 주소만 허용됨 | `https://scm-frontend.onrender.com` |
 
 > ⚠️ **TODO (배포 확정 전 반드시 처리)**: 지금은 Cloudflare Pages 프론트엔드 도메인이 아직

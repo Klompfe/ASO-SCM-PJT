@@ -61,11 +61,14 @@ export interface AiSalesOrderResult {
   workNotes: string | null;
 }
 
+// PR-192: 백엔드가 240초 한도로 재시도·폴백을 끝내므로, 그보다 약간 긴 270초로 맞춰
+// 둔다(전역 axiosInstance 기본값에는 timeout이 없다 — 다른 API는 건드리지 않음).
 export const uploadSalesOrderImage = (file: File): Promise<any> => {
   const formData = new FormData();
   formData.append('file', file);
   return apiClient.post('/sales-orders/upload-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 270_000,
   });
 };
 export const commitSalesOrderAnalysis = (result: AiSalesOrderResult): Promise<any> =>

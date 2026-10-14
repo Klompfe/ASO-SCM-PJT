@@ -1,6 +1,13 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  GatewayTimeoutException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  ServiceUnavailableException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import { GoogleGenerativeAI, GoogleGenerativeAIAbortError, SchemaType } from '@google/generative-ai';
 import { AiSalesOrderResultDto } from './dto/ai-analysis.dto';
 import { isSuspiciousTargetRdd } from './utils/target-rdd-validation.util';
 import { isMidoBuyer } from './utils/mido-buyer.util';
@@ -19,6 +26,11 @@ export interface AiAnalysisOutcome {
   // 간접 추론했는데, 이 우회 신호에 프론트가 의존하다 보니 화면에 목업 여부가 전혀
   // 드러나지 않는 사고로 이어졌다 — 그래서 명시적인 boolean 하나로 통일한다.
   isMock: boolean;
+  // PR-192: 기본 모델이 503/429로 재시도를 전부 소진했을 때 GEMINI_FALLBACK_MODEL로
+  // 전환해 1회 더 시도한 경우를 화면에 알리기 위한 필드 — modelUsed는 실제로 결과를
+  // 만들어낸 모델명(목업이면 null), fallbackUsed는 폴백 모델로 처리됐는지.
+  modelUsed: string | null;
+  fallbackUsed: boolean;
 }
 
 const RESPONSE_SCHEMA = {
@@ -110,6 +122,22 @@ materialSubTypeCandidate: 실(THREAD)이나 테이프류 자재 행에서만, �
 
 읽을 수 없거나 문서에 없는 값은 null로 두고, 절대 지어내지 마세요.`;
 
+const DEFAULT_MODEL = 'gemini-3.6-flash';
+// PR-192 실측(Render 로그, 2026-10-13): gemini-3.6-flash가 503 과부하 상태일 때 2번째
+// 재시도만으로도 응답까지 약 49초가 걸렸고, 20분 뒤 재시도도 똑같이 503으로 실패했다 —
+// 일시 스파이크가 아니라 길게 이어지는 용량 부족이라 재시도 간격을 늘리고 전체 시간을
+// 240초로 제한한 뒤, 그래도 안 되면 폴백 모델로 넘긴다(환경변수 미설정 시 폴백 없음).
+const TOTAL_BUDGET_MS = 240_000;
+const RETRY_DELAYS_MS = [5000, 15000, 30000];
+// PR-192 보완: GEMINI_FALLBACK_MODEL이 설정된 경우 기본 모델 단계는 전체 예산의 40%
+// (약 96초)까지만 쓰고 폴백으로 넘어간다 — 503이 약 50초 만에 돌아오는 실측 기준으로,
+// 기본 모델에서 재시도를 다 쓰면 이미 150~200초가 지나 있어 폴백이 시작해도 프런트의
+// 270초 제한을 넘겨버리는 문제(검토에서 발견)를 막기 위함이다.
+const PRIMARY_STAGE_BUDGET_MS = 96_000;
+// 이 시간 미만으로 예산이 남으면 새 시도를 시작하지 않고 바로 재시도 소진으로 처리한다
+// (시도 도중 타임아웃이 나버리면 재시도/폴백 판단 자체가 불가능해지므로).
+const MIN_ATTEMPT_TIMEOUT_MS = 10_000;
+
 @Injectable()
 export class VisionService {
   private readonly logger = new Logger(VisionService.name);
@@ -130,70 +158,176 @@ export class VisionService {
         results: this.mockResult(),
         usage: { pageCount: 0, promptTokens: 0, outputTokens: 0 },
         isMock: true,
+        modelUsed: null,
+        fallbackUsed: false,
       };
     }
 
-    const model = this.genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
+    const fileSizeKb = file.buffer ? Math.round(file.buffer.length / 1024) : 0;
+    this.logger.log(`작업지시서 분석 시작 — file=${file.originalname ?? '(unknown)'}, mimetype=${file.mimetype}, size=${fileSizeKb}KB`);
+
+    const startedAt = Date.now();
+    const primaryModel = this.configService.get<string>('GEMINI_MODEL') || DEFAULT_MODEL;
+    const fallbackModel = this.configService.get<string>('GEMINI_FALLBACK_MODEL') || null;
+    const parts = [
+      { inlineData: { data: file.buffer.toString('base64'), mimeType: file.mimetype } },
+      { text: PROMPT },
+    ];
+
+    let modelUsed = primaryModel;
+    let fallbackUsed = false;
+    let result: Awaited<ReturnType<ReturnType<GoogleGenerativeAI['getGenerativeModel']>['generateContent']>>;
+
+    // 폴백 모델이 설정돼 있으면 기본 모델 단계는 전체 예산의 40%(96초)까지만 쓰고,
+    // 폴백이 없으면 기존처럼 전체 240초를 기본 모델에 그대로 쓴다.
+    const primaryDeadlineAt = fallbackModel ? startedAt + PRIMARY_STAGE_BUDGET_MS : startedAt + TOTAL_BUDGET_MS;
+
+    try {
+      try {
+        result = await this.generateWithRetry(this.buildModel(primaryModel), parts, startedAt, primaryDeadlineAt, primaryModel);
+      } catch (err) {
+        if (!fallbackModel || !(err as any).retriesExhausted) {
+          throw err;
+        }
+        const elapsedMs = Date.now() - startedAt;
+        this.logger.warn(`기본 모델 단계 마감(${PRIMARY_STAGE_BUDGET_MS / 1000}초) — 폴백으로 전환 (경과 ${elapsedMs}ms)`);
+        // 폴백 단계는 전체 240초 예산 중 남은 시간을 그대로 쓴다(기본 모델 단계에서 쓴 시간 제외).
+        result = await this.generateWithRetry(this.buildModel(fallbackModel), parts, startedAt, startedAt + TOTAL_BUDGET_MS, fallbackModel);
+        modelUsed = fallbackModel;
+        fallbackUsed = true;
+        this.logger.log(`폴백 모델로 처리: ${fallbackModel}`);
+      }
+    } catch (err) {
+      const elapsedMs = Date.now() - startedAt;
+      if (this.isTimeoutError(err)) {
+        this.logger.error(`작업지시서 AI 분석 타임아웃(경과 ${elapsedMs}ms): ${(err as Error).message}`);
+        throw new GatewayTimeoutException(
+          'AI 분석이 너무 오래 걸려 중단했습니다. 페이지 수를 줄여(예: 5페이지 이하로 나눠) 다시 올려 주세요.',
+        );
+      }
+      if ((err as any).retriesExhausted) {
+        this.logger.error(`작업지시서 AI 분석 실패 — 재시도 소진(경과 ${elapsedMs}ms): ${(err as Error).message}`);
+        throw new ServiceUnavailableException(
+          'AI 서버가 일시적으로 혼잡합니다. 1~2분 뒤 다시 시도해 주세요. (파일 문제가 아닙니다)',
+        );
+      }
+      this.logger.error(`작업지시서 AI 분석 실패(경과 ${elapsedMs}ms): ${(err as Error).message}`);
+      throw new InternalServerErrorException('작업지시서 AI 분석에 실패했습니다.');
+    }
+
+    const finishReason = result.response.candidates?.[0]?.finishReason;
+    if (finishReason && finishReason !== 'STOP') {
+      this.logger.warn(`Gemini 응답이 정상 종료되지 않음(finishReason=${finishReason}) - 응답이 잘렸을 수 있습니다.`);
+    }
+
+    let parsed: AiSalesOrderResultDto[];
+    try {
+      const text = result.response.text();
+      parsed = JSON.parse(text) as AiSalesOrderResultDto[];
+    } catch (err) {
+      const elapsedMs = Date.now() - startedAt;
+      if (finishReason && finishReason !== 'STOP') {
+        this.logger.error(`작업지시서 AI 분석 실패 — 응답이 잘림(finishReason=${finishReason}, 경과 ${elapsedMs}ms)`);
+        throw new UnprocessableEntityException('분석 결과가 너무 길어 중간에 잘렸습니다. 페이지를 나눠 다시 올려 주세요.');
+      }
+      this.logger.error(`작업지시서 AI 분석 실패 — 응답 파싱 오류(경과 ${elapsedMs}ms): ${(err as Error).message}`);
+      throw new InternalServerErrorException('작업지시서 AI 분석에 실패했습니다.');
+    }
+
+    this.applyTargetRddValidation(parsed);
+    this.applyMidoCmtPriceGuard(parsed);
+
+    // 페이지 수 = 결과 배열 길이(스타일 1개 = 페이지 1개)로 근사한다 — 실측 검증 완료
+    // (6페이지 파일→6건, 16페이지 파일→16건 정확히 일치, PR-055 참고).
+    // outputTokens = totalTokenCount - promptTokenCount로 계산한다: SDK 타입 정의에
+    // thoughtsTokenCount가 아직 없지만(실제 API 응답에는 존재) 이 뺄셈이 candidates+
+    // thoughts를 정확히 포함한다는 걸 실측으로 확인했고, Google이 과금 대상 출력 항목을
+    // 추가해도 계속 정확하다.
+    const usageMetadata = result.response.usageMetadata;
+    const promptTokens = usageMetadata?.promptTokenCount ?? 0;
+    const totalTokens = usageMetadata?.totalTokenCount ?? 0;
+    const usage: AiAnalysisUsage = {
+      pageCount: parsed.length,
+      promptTokens,
+      outputTokens: Math.max(0, totalTokens - promptTokens),
+    };
+    const elapsedMs = Date.now() - startedAt;
+    this.logger.log(
+      `작업지시서 분석 완료 — 경과 ${elapsedMs}ms, finishReason=${finishReason ?? 'STOP'}, promptTokens=${promptTokens}, outputTokens=${usage.outputTokens}, 결과=${parsed.length}건, model=${modelUsed}${fallbackUsed ? '(fallback)' : ''}`,
+    );
+    return { results: parsed, usage, isMock: false, modelUsed, fallbackUsed };
+  }
+
+  private buildModel(modelName: string) {
+    // PR-192 보완: 시도별 타임아웃은 여기서 고정하지 않고 generateWithRetry가 매 시도마다
+    // 남은 예산을 generateContent(parts, { timeout })로 직접 넘긴다 — 모델 생성 시
+    // 고정값을 주면(이전 버전의 버그) 시도마다 전체 240초가 다시 적용돼 "전체 예산 공유"가
+    // 지켜지지 않는다.
+    return this.genAI!.getGenerativeModel({
+      model: modelName,
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: RESPONSE_SCHEMA as any,
         maxOutputTokens: 65536,
       },
     });
+  }
 
-    try {
-      const result = await this.generateWithRetry(model, [
-        { inlineData: { data: file.buffer.toString('base64'), mimeType: file.mimetype } },
-        { text: PROMPT },
-      ]);
-      const finishReason = result.response.candidates?.[0]?.finishReason;
-      if (finishReason && finishReason !== 'STOP') {
-        this.logger.warn(`Gemini 응답이 정상 종료되지 않음(finishReason=${finishReason}) - 응답이 잘렸을 수 있습니다.`);
-      }
-      const text = result.response.text();
-      const parsed = JSON.parse(text) as AiSalesOrderResultDto[];
-      this.applyTargetRddValidation(parsed);
-      this.applyMidoCmtPriceGuard(parsed);
-
-      // 페이지 수 = 결과 배열 길이(스타일 1개 = 페이지 1개)로 근사한다 — 실측 검증 완료
-      // (6페이지 파일→6건, 16페이지 파일→16건 정확히 일치, PR-055 참고).
-      // outputTokens = totalTokenCount - promptTokenCount로 계산한다: SDK 타입 정의에
-      // thoughtsTokenCount가 아직 없지만(실제 API 응답에는 존재) 이 뺄셈이 candidates+
-      // thoughts를 정확히 포함한다는 걸 실측으로 확인했고, Google이 과금 대상 출력 항목을
-      // 추가해도 계속 정확하다.
-      const usageMetadata = result.response.usageMetadata;
-      const promptTokens = usageMetadata?.promptTokenCount ?? 0;
-      const totalTokens = usageMetadata?.totalTokenCount ?? 0;
-      const usage: AiAnalysisUsage = {
-        pageCount: parsed.length,
-        promptTokens,
-        outputTokens: Math.max(0, totalTokens - promptTokens),
-      };
-      return { results: parsed, usage, isMock: false };
-    } catch (err) {
-      this.logger.error(`Gemini 작업지시서 분석 실패: ${(err as Error).message}`);
-      throw new InternalServerErrorException('작업지시서 AI 분석에 실패했습니다.');
-    }
+  private isTimeoutError(err: unknown): boolean {
+    if (err instanceof GoogleGenerativeAIAbortError) return true;
+    const name = (err as any)?.name;
+    const message = (err as Error)?.message || '';
+    return name === 'AbortError' || /abort(ed)?|timeout/i.test(message);
   }
 
   // Gemini가 일시적으로 과부하(503)이거나 rate limit(429)에 걸리는 경우가 실제로 발생한다
-  // (PR-055 실측 확인) — 과금되는 유료 기능이 일시적 오류로 그냥 실패하지 않도록 짧게
-  // 재시도한다. 그 외 에러(404 모델명 오류, 400 잘못된 요청 등)는 재시도해도 소용없으므로
-  // 즉시 던진다.
-  private async generateWithRetry(model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>, parts: any[]) {
-    const delaysMs = [2000, 5000];
+  // (PR-055/PR-192 실측 확인) — 과금되는 유료 기능이 일시적 오류로 그냥 실패하지 않도록
+  // 재시도한다. 그 외 에러(404 모델명 오류, 400 잘못된 요청, 타임아웃)는 재시도해도
+  // 소용없으므로 즉시 던진다. deadlineAt(이 단계가 끝나야 하는 절대 시각)을 넘기지 않도록
+  // 매 시도마다 "남은 예산"을 계산해 그 시도의 generateContent timeout으로 그대로 넘기고
+  // (PR-192 보완 — 이전에는 시도마다 전체 240초가 고정으로 다시 적용돼 "전체 예산 공유"가
+  // 지켜지지 않았다), 다음 대기까지 포함해 deadlineAt을 넘으면 더 기다리지 않고 바로
+  // 실패 처리한다(retriesExhausted 플래그로 상위에 알림).
+  private async generateWithRetry(
+    model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+    parts: any[],
+    startedAt: number,
+    deadlineAt: number,
+    modelLabel: string,
+  ) {
     for (let attempt = 0; ; attempt++) {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs < MIN_ATTEMPT_TIMEOUT_MS) {
+        const elapsedMs = Date.now() - startedAt;
+        this.logger.warn(`[${modelLabel}] 이 단계에 남은 예산(${remainingMs}ms)이 부족해 재시도 중단(경과 ${elapsedMs}ms)`);
+        throw Object.assign(new Error(`[${modelLabel}] 남은 예산 부족으로 재시도 중단`), { retriesExhausted: true });
+      }
       try {
-        return await model.generateContent(parts);
+        return await model.generateContent(parts, { timeout: remainingMs });
       } catch (err) {
-        const message = (err as Error).message || '';
-        const isTransient = /\[(503|429)/.test(message);
-        if (!isTransient || attempt >= delaysMs.length) {
+        if (this.isTimeoutError(err)) {
           throw err;
         }
-        this.logger.warn(`Gemini 일시적 오류(${attempt + 1}번째 재시도 대기 중): ${message}`);
-        await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+        const message = (err as Error).message || '';
+        const status = (err as any)?.status;
+        const isTransient = status === 503 || status === 429 || /\[(503|429)/.test(message);
+        const elapsedMs = Date.now() - startedAt;
+        if (!isTransient) {
+          throw err;
+        }
+        if (attempt >= RETRY_DELAYS_MS.length) {
+          this.logger.warn(`[${modelLabel}] 재시도(${attempt}회) 소진(경과 ${elapsedMs}ms): ${message}`);
+          throw Object.assign(err as Error, { retriesExhausted: true });
+        }
+        const delay = RETRY_DELAYS_MS[attempt];
+        if (Date.now() + delay > deadlineAt) {
+          this.logger.warn(
+            `[${modelLabel}] 다음 대기(${delay}ms)를 포함하면 이 단계의 시간 예산을 넘어 재시도 중단(경과 ${elapsedMs}ms)`,
+          );
+          throw Object.assign(err as Error, { retriesExhausted: true });
+        }
+        this.logger.warn(`[${modelLabel}] Gemini 일시적 오류(${attempt + 1}번째 재시도, ${delay}ms 대기, 경과 ${elapsedMs}ms): ${message}`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
