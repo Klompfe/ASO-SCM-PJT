@@ -41,13 +41,19 @@ describe('OrderProcessStagesService — BOM 선택 규칙 (PR-123)', () => {
     items: materialIds.map((m) => ({ material: { id: m } })),
   });
 
-  // itemId → 그 자재의 PO 상태들
-  const build = (boms: any[], pos: Record<number, string[]> = {}, styles: any[] = [{ styleNo: 'S1', overview: { buyer: 'B' } }], exportedStyles: string[] = [], packedPurchaseOrderIds: number[] = []) => {
+  // itemId → 그 자재의 PO 상태들. PR-196: 각 항목은 상태 문자열(= 기존처럼 styleNo 없는
+  // 미연결 발주) 또는 { status, styleNo }(연결 발주 또는 명시적으로 미연결) 둘 다 쓸 수 있다.
+  type PoFixture = string | { status: string; styleNo?: string | null };
+  const build = (boms: any[], pos: Record<number, PoFixture[]> = {}, styles: any[] = [{ styleNo: 'S1', overview: { buyer: 'B' } }], exportedStyles: string[] = [], packedPurchaseOrderIds: number[] = []) => {
     const bomRepo = { find: jest.fn().mockResolvedValue(boms) };
     const poRepo = {
       find: jest.fn().mockImplementation((opts?: any) => {
         let nextId = 1000; // PR-179: 포장내역 매칭용 PO id (테스트마다 결정적으로 부여)
-        const all = Object.entries(pos).flatMap(([itemId, statuses]) => statuses.map((status) => ({ id: nextId++, itemId: Number(itemId), status })));
+        const all = Object.entries(pos).flatMap(([itemId, entries]) => entries.map((e) => {
+          const status = typeof e === 'string' ? e : e.status;
+          const styleNo = typeof e === 'string' ? null : (e.styleNo ?? null);
+          return { id: nextId++, itemId: Number(itemId), status, styleNo };
+        }));
         return Promise.resolve(opts?.where?.itemId !== undefined ? all.filter((p) => p.itemId === opts.where.itemId) : all);
       }),
     };
@@ -83,13 +89,16 @@ describe('OrderProcessStagesService — BOM 선택 규칙 (PR-123)', () => {
       expect(await build([bom(5, 'S1', [1], false), bom(6, 'S1', [2, 3], false)], pos).service.getMaterialReadiness('S1')).toEqual({ totalMaterials: 2, readyMaterials: 0 });
     });
 
-    it('BOM이 없거나 항목이 없으면 0/0, 스타일의 BOM을 한 번의 쿼리로 가져온다', async () => {
+    it('BOM이 없거나 항목이 없으면 0/0, BOM 조회는 "이 스타일" 1번 + "전체(스타일 귀속 판단용)" 1번, 자재 개수와 무관하게 고정이다', async () => {
       const none = build([], pos);
       expect(await none.service.getMaterialReadiness('S1')).toEqual({ totalMaterials: 0, readyMaterials: 0 });
       const { service, bomRepo } = build([bom(5, 'S1', [1], true), bom(6, 'S1', [2], false)], pos);
       await service.getMaterialReadiness('S1');
-      expect(bomRepo.find).toHaveBeenCalledTimes(1);
+      // PR-196: 스타일 귀속 판단(AUTO/AMBIGUOUS)을 위해 전체 BOM을 한 번 더 조회한다 — 자재
+      // 개수가 늘어도 이 2번(스타일별 1 + 전체 1)에서 늘지 않는다(N+1 금지).
+      expect(bomRepo.find).toHaveBeenCalledTimes(2);
       expect(bomRepo.find).toHaveBeenCalledWith({ where: { style: { styleNo: 'S1' } }, relations: ['items', 'items.material'] });
+      expect(bomRepo.find).toHaveBeenCalledWith({ relations: ['items', 'items.material', 'style'] });
       expect(await build([bom(5, 'S1', [], true)], pos).service.getMaterialReadiness('S1')).toEqual({ totalMaterials: 0, readyMaterials: 0 });
     });
   });
@@ -133,6 +142,71 @@ describe('OrderProcessStagesService — BOM 선택 규칙 (PR-123)', () => {
       const orphan = { id: 1, isActive: true, style: null, items: [{ material: { id: 1 } }] };
       const rows = await build([orphan, bom(2, 'S1', [1], true)], pos).service.getProcurementStatusReport();
       expect(rows.find((r) => r.styleNo === 'S1')!.materialReadiness).toEqual({ ready: 1, total: 1 });
+    });
+  });
+
+  // PR-196: 발주를 품목(itemId)만으로 묶으면 다른 스타일이 쓴 같은 자재의 발주까지
+  // "입고완료"로 섞여 버리는 버그의 회귀 테스트 — po-style-attribution.util로 스타일
+  // 귀속을 가린 뒤에만 센다.
+  describe('스타일별 귀속 (PR-196 회귀 테스트)', () => {
+    const twoStyleBoms = [bom(1, 'A', [1], true), bom(2, 'B', [1], true)]; // 스타일 A·B가 같은 자재 1을 쓴다
+    const styles = [{ styleNo: 'A', overview: { buyer: 'BA' } }, { styleNo: 'B', overview: { buyer: 'BB' } }];
+
+    it('자재 X의 발주가 styleNo=A로 연결되면 A는 발주완료/입고대기, B는 미발주다(이번 버그의 회귀 테스트)', async () => {
+      const pos = { 1: [{ status: 'PENDING', styleNo: 'A' }] };
+      const { service } = build(twoStyleBoms, pos as any, styles);
+      expect(await service.getMaterialReadiness('A')).toEqual({ totalMaterials: 1, readyMaterials: 0 });
+      expect(await service.getMaterialReadiness('B')).toEqual({ totalMaterials: 1, readyMaterials: 0 });
+      const rows = await service.getProcurementStatusReport();
+      const by = Object.fromEntries(rows.map((r) => [r.styleNo, r]));
+      expect(by.A).toMatchObject({ poCreated: true, overallStatus: '입고대기' });
+      expect(by.B).toMatchObject({ poCreated: false, overallStatus: '미발주' }); // B는 발주 자체가 없는 것으로 본다
+    });
+
+    it('A의 연결 발주를 RECEIVED로 바꿔도 B의 readyMaterials는 0이다(B 몫으로 새지 않음)', async () => {
+      const pos = { 1: [{ status: 'RECEIVED', styleNo: 'A' }] };
+      const { service } = build(twoStyleBoms, pos as any, styles);
+      expect(await service.getMaterialReadiness('A')).toEqual({ totalMaterials: 1, readyMaterials: 1 });
+      expect(await service.getMaterialReadiness('B')).toEqual({ totalMaterials: 1, readyMaterials: 0 });
+    });
+
+    it('미연결 발주 + 자재 X를 쓰는 스타일이 A 하나뿐이면 A 몫으로 자동 귀속되고 autoAttributedPoCount=1이다', async () => {
+      const onlyA = [bom(1, 'A', [1], true)];
+      const pos = { 1: ['RECEIVED'] }; // styleNo 없음(미연결)
+      const { service } = build(onlyA, pos, [{ styleNo: 'A', overview: null }]);
+      expect(await service.getMaterialReadiness('A')).toEqual({ totalMaterials: 1, readyMaterials: 1 });
+      const rows = await service.getProcurementStatusReport();
+      expect(rows.find((r) => r.styleNo === 'A')).toMatchObject({ poCreated: true, autoAttributedPoCount: 1, unlinkedPoCount: 0 });
+    });
+
+    it('미연결 발주 + 자재 X를 A·B 둘 다 쓰면 둘 다 미발주이고, 둘 다 unlinkedPoCount=1이다(추측 금지)', async () => {
+      const pos = { 1: ['RECEIVED'] }; // styleNo 없음, A·B 둘 다 자재 1을 씀(twoStyleBoms)
+      const { service } = build(twoStyleBoms, pos, styles);
+      expect(await service.getMaterialReadiness('A')).toEqual({ totalMaterials: 1, readyMaterials: 0 });
+      expect(await service.getMaterialReadiness('B')).toEqual({ totalMaterials: 1, readyMaterials: 0 });
+      const rows = await service.getProcurementStatusReport();
+      const by = Object.fromEntries(rows.map((r) => [r.styleNo, r]));
+      expect(by.A).toMatchObject({ poCreated: false, unlinkedPoCount: 1, autoAttributedPoCount: 0 });
+      expect(by.B).toMatchObject({ poCreated: false, unlinkedPoCount: 1, autoAttributedPoCount: 0 });
+    });
+
+    it('취소된 발주만 있으면 미발주, 취소+입고가 섞이면 입고된 발주만 센다', async () => {
+      const onlyA = [bom(1, 'A', [1], true)];
+      const cancelledOnly = { 1: [{ status: 'CANCELLED', styleNo: 'A' }] };
+      expect(await build(onlyA, cancelledOnly as any, [{ styleNo: 'A', overview: null }]).service.getMaterialReadiness('A')).toEqual({ totalMaterials: 1, readyMaterials: 0 });
+
+      const mixed = { 1: [{ status: 'CANCELLED', styleNo: 'A' }, { status: 'RECEIVED', styleNo: 'A' }] };
+      expect(await build(onlyA, mixed as any, [{ styleNo: 'A', overview: null }]).service.getMaterialReadiness('A')).toEqual({ totalMaterials: 1, readyMaterials: 1 });
+    });
+
+    it('포장내역대기 발주 선택이 다른 스타일 발주로 새지 않는다', async () => {
+      // A의 입고 발주(id 1000)는 포장내역 없음 → A는 포장내역대기. B는 자재 발주 자체가 없어 미발주.
+      const pos = { 1: [{ status: 'RECEIVED', styleNo: 'A' }] };
+      const { service } = build(twoStyleBoms, pos as any, styles);
+      const rows = await service.getProcurementStatusReport();
+      const by = Object.fromEntries(rows.map((r) => [r.styleNo, r]));
+      expect(by.A).toMatchObject({ packingPendingPurchaseOrderId: 1000, overallStatus: '포장내역대기' });
+      expect(by.B).toMatchObject({ packingPendingPurchaseOrderId: null, overallStatus: '미발주' });
     });
   });
 

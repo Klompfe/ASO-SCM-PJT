@@ -161,3 +161,23 @@ export interface PriceReferenceResult {
 }
 export const getPriceReference = (params: { itemId: number; styleNo?: string; brandName?: string; lineUnit?: string; materialSubType?: string }): Promise<PriceReferenceResult> =>
   apiClient.get('/purchase-orders/price-reference', { params });
+
+// PR-196: "미연결 발주 정리" 화면 — 스타일 미연결(취소 제외) 발주와 후보 스타일/귀속 종류.
+export interface UnlinkedPurchaseOrderRow {
+  poId: number;
+  itemId: number;
+  itemCode: string | null;
+  itemName: string | null;
+  quantity: number;
+  status: string;
+  supplierName: string | null;
+  createdAt: string;
+  candidateStyles: { styleNo: string; styleName: string | null }[];
+  attribution: 'AUTO' | 'AMBIGUOUS' | 'ORPHAN';
+}
+export const getUnlinkedPurchaseOrders = (): Promise<UnlinkedPurchaseOrderRow[]> =>
+  apiClient.get('/purchase-orders/unlinked');
+export const linkPurchaseOrderStyle = (id: number, styleNo: string): Promise<any> =>
+  apiClient.patch(`/purchase-orders/${id}/style-link`, { styleNo });
+export const linkPurchaseOrderStyleBulk = (links: { poId: number; styleNo: string }[]): Promise<any> =>
+  apiClient.post('/purchase-orders/style-link/bulk', { links });
