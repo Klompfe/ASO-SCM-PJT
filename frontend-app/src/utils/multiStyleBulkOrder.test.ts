@@ -7,6 +7,7 @@ import {
   groupMultiStyleRequirements,
   resolveGroupBulkSupplierId,
   exceedsBulkCreateLimit,
+  mergePrefillStyleNos,
   UNCATEGORIZED_LABEL,
   type MultiStyleRequirementResult,
 } from './multiStyleBulkOrder';
@@ -130,5 +131,31 @@ describe('exceedsBulkCreateLimit (PR-194)', () => {
   });
   it('100건 초과면 true', () => {
     expect(exceedsBulkCreateLimit(101)).toBe(true);
+  });
+});
+
+describe('mergePrefillStyleNos (PR-194 보완) — 점검표→다품번 일괄발주 navigation이 styleNos를 보존한다', () => {
+  const minimal = (styleNo: string) => ({ styleNo, extra: 'placeholder' });
+
+  it('기존에 없던 스타일번호는 styleNo만 채운 최소 형태로 뒤에 덧붙인다', () => {
+    const result = mergePrefillStyleNos([{ styleNo: 'A', extra: 'x' }], ['B', 'C'], minimal);
+    expect(result.map((s) => s.styleNo)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('이미 선택된 스타일은 중복 추가하지 않는다', () => {
+    const result = mergePrefillStyleNos([{ styleNo: 'A', extra: 'x' }], ['A'], minimal);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({ styleNo: 'A', extra: 'x' });
+  });
+
+  it('덧붙일 게 없으면 원래 배열을 그대로(참조까지) 돌려준다', () => {
+    const current = [{ styleNo: 'A', extra: 'x' }];
+    expect(mergePrefillStyleNos(current, [], minimal)).toBe(current);
+    expect(mergePrefillStyleNos(current, ['A'], minimal)).toBe(current);
+  });
+
+  it('여러 스타일을 한 번에 선택해 넘겨도 전부 보존된다', () => {
+    const result = mergePrefillStyleNos([], ['A', 'B', 'C'], minimal);
+    expect(result.map((s) => s.styleNo)).toEqual(['A', 'B', 'C']);
   });
 });

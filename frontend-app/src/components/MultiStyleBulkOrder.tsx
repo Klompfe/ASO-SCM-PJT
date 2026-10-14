@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { SearchSelectField } from './SearchSelectField';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
@@ -16,6 +16,7 @@ import {
   resolveGroupBulkSupplierId,
   exceedsBulkCreateLimit,
   BULK_CREATE_LIMIT_MESSAGE,
+  mergePrefillStyleNos,
   type MultiStyleRequirementResult,
   type MultiStyleBulkCategoryGroup,
 } from '../utils/multiStyleBulkOrder';
@@ -36,10 +37,18 @@ interface RowDraft {
 
 const rowKey = (styleNo: string, itemId: number) => `${styleNo}\u0000${itemId}`;
 
+interface MultiStyleBulkOrderProps {
+  // PR-194 보완: 발주·입고·출고 현황에서 체크한 스타일번호를 미리 채워 넣는다
+  // (poPrefillItemId/onPrefillConsumed와 동일한 consume-once 패턴). overview 등 나머지
+  // 필드는 이 화면에서 선택 표시·목록 구성에만 쓰이므로 styleNo만 있어도 된다.
+  prefillStyleNos?: string[] | null;
+  onStyleNosPrefillConsumed?: () => void;
+}
+
 // PR-194: 여러 스타일을 골라 같은 품목군을 업체별로 묶어 한 번에 발주하고, 업체에는
 // 업체별 발주서 1장으로 보낸다. 발주 1건=품목1×스타일1 구조(스타일별 부족분·입고 추적)는
 // 그대로 두고, 이 화면은 "여러 스타일을 한 번에 다루는 입력/확인 UI + 업체별 서류"만 더한다.
-export const MultiStyleBulkOrder: React.FC = () => {
+export const MultiStyleBulkOrder: React.FC<MultiStyleBulkOrderProps> = ({ prefillStyleNos, onStyleNosPrefillConsumed }) => {
   const [selectedStyles, setSelectedStyles] = useState<StyleOption[]>([]);
   const [stylePick, setStylePick] = useState<StyleOption | null>(null);
   const [loadingRequirements, setLoadingRequirements] = useState(false);
@@ -67,6 +76,15 @@ export const MultiStyleBulkOrder: React.FC = () => {
   };
 
   const removeStyle = (styleNo: string) => setSelectedStyles((prev) => prev.filter((s) => s.styleNo !== styleNo));
+
+  // PR-194 보완: 점검표에서 넘어온 스타일번호를 한 번만 선택 목록에 채운다. overview는
+  // 아직 몰라도 되므로(목록 구성·발주 요청은 styleNo만 사용) 최소 형태로 채워 넣는다.
+  useEffect(() => {
+    if (!prefillStyleNos || prefillStyleNos.length === 0) return;
+    setSelectedStyles((prev) => mergePrefillStyleNos(prev, prefillStyleNos, (styleNo) => ({ styleNo } as StyleOption)));
+    onStyleNosPrefillConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillStyleNos]);
 
   const loadRequirements = async () => {
     if (selectedStyles.length === 0) { toast.error('스타일을 1개 이상 골라 주세요.'); return; }

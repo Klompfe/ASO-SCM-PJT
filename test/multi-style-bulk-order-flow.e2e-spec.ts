@@ -160,6 +160,26 @@ describe('다품번 일괄발주 (PR-194)', () => {
     });
   });
 
+  describe('PR-196 회귀: 같은 자재를 쓰는 스타일 중 하나만 발주해도 다른 스타일 부족분은 그대로다', () => {
+    it('같은 자재를 쓰는 두 스타일 중 하나만 이 화면으로 발주하면, 점검표에서 그 스타일만 발주 처리로 보이고 나머지는 미발주로 남는다', async () => {
+      const styleD = await mkStyle('MSB-STYLE-D', 10, '2026-10-01');
+      const styleE = await mkStyle('MSB-STYLE-E', 10, '2026-10-01');
+      await mkBomWithFabric(styleD, 1);
+      await mkBomWithFabric(styleE, 1);
+
+      // D만 이 화면의 발주 플로우(styleNo 명시된 /purchase-orders/bulk)로 발주한다.
+      await post('/purchase-orders/bulk').send({
+        orders: [{ supplierId, itemId: fabricItemId, quantity: 10, unitPrice: 2, styleNo: 'MSB-STYLE-D' }],
+      }).expect(201);
+
+      const report = await get('/order-process-stages/procurement-status').expect(200);
+      const rowD = report.body.data.find((r: any) => r.styleNo === 'MSB-STYLE-D');
+      const rowE = report.body.data.find((r: any) => r.styleNo === 'MSB-STYLE-E');
+      expect(rowD.poCreated).toBe(true);
+      expect(rowE.poCreated).toBe(false);
+    });
+  });
+
   describe('업체가 2곳이면 합본 발주서도 2개', () => {
     it('서로 다른 업체로 발주하면 업체별로 파일이 따로 나온다', async () => {
       const supplier2 = (await post('/suppliers').send({ name: 'MSB공급2' }).expect(201)).body.data.id;

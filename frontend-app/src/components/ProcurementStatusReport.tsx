@@ -5,6 +5,8 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { PrintableReport } from './PrintableReport';
 import type { ExcelColumn } from '../utils/excelExport';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
+import { filterProcurementStatusRows, extractDistinctBrands, toggleStyleSelection, MULTI_STYLE_SELECTION_MAX } from '../utils/procurementStatusFilters';
+import { YEAR_OPTIONS, currentYear, type Season } from '../utils/season';
 
 // PR-089: 종합상태별 색상 뱃지 — 회색=미발주, 노랑=입고대기, 파랑=출고대기, 초록=완료.
 const STATUS_BADGE_STYLES: Record<string, string> = {
@@ -23,13 +25,22 @@ interface ProcurementStatusReportProps {
   onGoToPurchaseOrders?: (styleNo: string) => void;
   // PR-196: "미연결 발주 N건" 배지를 누르면 정리 화면으로 이동.
   onGoToUnlinkedPurchaseOrders?: () => void;
+  // PR-194 보완: 체크한 스타일들을 들고 다품번 일괄발주 화면으로 이동.
+  onGoToMultiStyleBulkOrder?: (styleNos: string[]) => void;
 }
 
-export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = ({ onGoToPurchaseOrders, onGoToUnlinkedPurchaseOrders }) => {
+export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = ({ onGoToPurchaseOrders, onGoToUnlinkedPurchaseOrders, onGoToMultiStyleBulkOrder }) => {
   const [packingFor, setPackingFor] = useState<{ purchaseOrderId: number; styleNo: string } | null>(null);
   const [rows, setRows] = useState<ProcurementStatusRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('');
+  // PR-194 보완: 시즌/브랜드/상태 필터 + 다품번 일괄발주용 스타일 선택.
+  const [brandFilter, setBrandFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [seasonYear, setSeasonYear] = useState<number | null>(null);
+  const [seasonValue, setSeasonValue] = useState<Season | ''>('');
+  const [includeNoDeliveryDate, setIncludeNoDeliveryDate] = useState(false);
+  const [selectedStyleNos, setSelectedStyleNos] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,15 +59,29 @@ export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = (
     load();
   }, [load]);
 
-  const filteredRows = useMemo(() => {
-    const keyword = filter.trim().toLowerCase();
-    if (!keyword) return rows;
-    return rows.filter(
-      (r) =>
-        r.styleNo.toLowerCase().includes(keyword) ||
-        (r.buyer ?? '').toLowerCase().includes(keyword),
-    );
-  }, [rows, filter]);
+  const brandOptions = useMemo(() => extractDistinctBrands(rows), [rows]);
+
+  const filteredRows = useMemo(
+    () =>
+      filterProcurementStatusRows(rows, {
+        keyword: filter,
+        brand: brandFilter || null,
+        status: statusFilter || null,
+        season: seasonYear != null && seasonValue ? { year: seasonYear, season: seasonValue } : null,
+        includeNoDeliveryDate,
+      }),
+    [rows, filter, brandFilter, statusFilter, seasonYear, seasonValue, includeNoDeliveryDate],
+  );
+
+  const toggleRowSelection = useCallback((styleNo: string) => {
+    setSelectedStyleNos((prev) => {
+      const result = toggleStyleSelection(prev, styleNo);
+      if (result.blockedAtMax) {
+        toast.error(`다품번 일괄발주는 한 번에 최대 ${MULTI_STYLE_SELECTION_MAX}개까지 선택할 수 있습니다.`);
+      }
+      return result.next;
+    });
+  }, []);
 
   if (loading) {
     return <div className="p-4 text-gray-500">불러오는 중...</div>;
@@ -79,8 +104,8 @@ export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = (
       rows={filteredRows}
       fileName="발주_입고_출고_현황"
     >
-      <div className="flex justify-end items-center mb-3 print:hidden">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap justify-between items-center gap-2 mb-3 print:hidden">
+        <div className="flex flex-wrap items-center gap-2">
           <input
             type="text"
             placeholder="브랜드·고객사 또는 스타일번호 검색"
@@ -88,8 +113,65 @@ export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = (
             onChange={(e) => setFilter(e.target.value)}
             className="border rounded px-2 py-1 text-sm"
           />
+          <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)} className="border rounded px-2 py-1 text-sm">
+            <option value="">전체 브랜드</option>
+            {brandOptions.map((b) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border rounded px-2 py-1 text-sm">
+            <option value="">전체 상태</option>
+            {Object.keys(STATUS_BADGE_STYLES).map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+          <select
+            value={seasonYear ?? ''}
+            onChange={(e) => setSeasonYear(e.target.value ? Number(e.target.value) : null)}
+            className="border rounded px-2 py-1 text-sm"
+          >
+            <option value="">연도</option>
+            {YEAR_OPTIONS.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          <select
+            value={seasonValue}
+            onChange={(e) => {
+              const v = e.target.value as Season | '';
+              setSeasonValue(v);
+              if (v && seasonYear == null) setSeasonYear(currentYear);
+            }}
+            className="border rounded px-2 py-1 text-sm"
+          >
+            <option value="">전체 시즌</option>
+            <option value="SS">SS</option>
+            <option value="FW">FW</option>
+          </select>
+          {seasonValue && (
+            <label className="flex items-center gap-1 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={includeNoDeliveryDate}
+                onChange={(e) => setIncludeNoDeliveryDate(e.target.checked)}
+              />
+              납기 미정 포함
+            </label>
+          )}
           <button onClick={load} className="text-sm text-blue-600 hover:underline">새로고침</button>
         </div>
+        {onGoToMultiStyleBulkOrder && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">
+              {selectedStyleNos.size}개 선택{selectedStyleNos.size >= MULTI_STYLE_SELECTION_MAX ? ` (최대 ${MULTI_STYLE_SELECTION_MAX}개)` : ''}
+            </span>
+            <button
+              className="text-sm bg-blue-600 text-white px-3 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={selectedStyleNos.size === 0}
+              onClick={() => onGoToMultiStyleBulkOrder(Array.from(selectedStyleNos))}
+            >선택 스타일 다품번 일괄발주</button>
+          </div>
+        )}
       </div>
       {filteredRows.length === 0 ? (
         <p className="text-sm text-gray-500">해당하는 오더가 없습니다.</p>
@@ -98,6 +180,7 @@ export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = (
           <table className="border-collapse text-sm">
             <thead>
               <tr className="bg-gray-100 text-left">
+                {onGoToMultiStyleBulkOrder && <th className="p-2 print:hidden"></th>}
                 <th className="p-2">Style No</th>
                 <th className="p-2">브랜드·고객사</th>
                 <th className="p-2">발주상태</th>
@@ -110,6 +193,15 @@ export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = (
             <tbody>
               {filteredRows.map((r) => (
                 <tr key={r.styleNo} className="border-t hover:bg-gray-50">
+                  {onGoToMultiStyleBulkOrder && (
+                    <td className="p-2 print:hidden">
+                      <input
+                        type="checkbox"
+                        checked={selectedStyleNos.has(r.styleNo)}
+                        onChange={() => toggleRowSelection(r.styleNo)}
+                      />
+                    </td>
+                  )}
                   <td className="p-2 font-medium">{r.styleNo}</td>
                   <td className="p-2">{r.buyer ?? '-'}</td>
                   <td className="p-2">{r.poCreated ? '발주완료' : '미발주'}</td>

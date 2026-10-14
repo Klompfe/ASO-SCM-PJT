@@ -129,3 +129,16 @@ export const BULK_CREATE_LIMIT_MESSAGE = `한 번에 최대 ${BULK_CREATE_MAX}�
 export function exceedsBulkCreateLimit(count: number): boolean {
   return count > BULK_CREATE_MAX;
 }
+
+// PR-194 보완: 발주·입고·출고 현황에서 체크한 스타일번호를 선택 목록에 한 번만 채워
+// 넣는다 — 이미 골라 둔 스타일은 중복 추가하지 않고, 새 스타일은 overview 없이
+// styleNo만 있는 최소 형태로 뒤에 덧붙인다(목록 구성·발주 요청은 styleNo만 사용).
+export function mergePrefillStyleNos<T extends { styleNo: string }>(
+  current: T[],
+  prefillStyleNos: string[],
+  makeMinimal: (styleNo: string) => T,
+): T[] {
+  const existing = new Set(current.map((s) => s.styleNo));
+  const additions = prefillStyleNos.filter((styleNo) => !existing.has(styleNo)).map(makeMinimal);
+  return additions.length > 0 ? [...current, ...additions] : current;
+}

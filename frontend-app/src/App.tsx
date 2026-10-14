@@ -127,6 +127,14 @@ function App() {
     setPurchaseOrdersSubTab('unlinked');
     setActiveTab('purchaseOrders');
   };
+  // PR-194 보완: 발주·입고·출고 현황에서 체크한 스타일들을 다품번 일괄발주 화면에
+  // 미리 채워 넘긴다 — poPrefillStyleNo와 동일한 consume-once 패턴.
+  const [multiStylePrefillStyleNos, setMultiStylePrefillStyleNos] = useState<string[] | null>(null);
+  const handleGoToMultiStyleBulkOrder = (styleNos: string[]) => {
+    setMultiStylePrefillStyleNos(styleNos);
+    setPurchaseOrdersSubTab('multiStyleBulkOrder');
+    setActiveTab('purchaseOrders');
+  };
 
   // PR-067: 오더관리 탭 하위에 "오더 목록"/"진행현황 요약" 두 서브탭을 둔다.
   // 진행현황 요약에서 행을 클릭하면 오더 목록 서브탭으로 전환하며 해당 styleNo의
@@ -275,7 +283,11 @@ function App() {
             ) : orderManagementSubTab === 'summary' ? (
               <OrderProgressSummary onSelectStyle={handleSelectStyleFromSummary} />
             ) : (
-              <ProcurementStatusReport onGoToPurchaseOrders={handleGoToPurchaseOrdersForStyle} onGoToUnlinkedPurchaseOrders={handleGoToUnlinkedPurchaseOrders} />
+              <ProcurementStatusReport
+                onGoToPurchaseOrders={handleGoToPurchaseOrdersForStyle}
+                onGoToUnlinkedPurchaseOrders={handleGoToUnlinkedPurchaseOrders}
+                onGoToMultiStyleBulkOrder={handleGoToMultiStyleBulkOrder}
+              />
             )}
           </div>
         );
@@ -341,7 +353,10 @@ function App() {
             ) : purchaseOrdersSubTab === 'packing' ? (
               <PackingReceiptSummaryReport />
             ) : purchaseOrdersSubTab === 'multiStyleBulkOrder' ? (
-              <MultiStyleBulkOrder />
+              <MultiStyleBulkOrder
+                prefillStyleNos={multiStylePrefillStyleNos}
+                onStyleNosPrefillConsumed={() => setMultiStylePrefillStyleNos(null)}
+              />
             ) : purchaseOrdersSubTab === 'unlinked' ? (
               <UnlinkedPurchaseOrders />
             ) : (
