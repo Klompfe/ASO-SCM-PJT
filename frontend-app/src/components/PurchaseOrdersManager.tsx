@@ -42,9 +42,13 @@ const emptyPriceRef: PriceReferenceValue = { usd: null, source: null, note: null
 interface PurchaseOrdersManagerProps {
   prefillItemId?: number | null;
   onPrefillConsumed?: () => void;
+  // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"로 넘어온 경우 — 그 스타일의
+  // 부족분 표를 바로 열고(기존 styleSearch 경로 재사용) 발주 목록도 그 스타일로 필터한다.
+  prefillStyleNo?: string | null;
+  onStylePrefillConsumed?: () => void;
 }
 
-export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ prefillItemId, onPrefillConsumed }) => {
+export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ prefillItemId, onPrefillConsumed, prefillStyleNo, onStylePrefillConsumed }) => {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +90,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [filterItem, setFilterItem] = useState<ItemRef | null>(null);
   // PR-185 A: 목록 트랙 필터 — 전체 / 스타일 연결 / 스타일 미연결.
   const [listTrack, setListTrack] = useState<'ALL' | 'STYLE' | 'ITEM_ONLY'>('ALL');
+  // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"로 넘어오면 그 스타일로 목록을 거른다.
+  const [filterStyleNo, setFilterStyleNo] = useState<string | null>(null);
   // PR-183: "이 품목군 취급 업체만 보기" — 기본 켜짐. 품목에 품목군이 있을 때만 보이고, 켜면 폼의 공급업체 검색을 그 품목군 업체로 거른다(자동 선택은 하지 않음).
   const [byItemCategory, setByItemCategory] = useState(true);
   // PR-074: 포장내역은 발주 하위 흐름이라 별도 탭이 아니라 발주 행에서 모달로 연다.
@@ -110,6 +116,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         supplierId: filterSupplier?.id || undefined,
         itemId: filterItem?.id || undefined,
         track: listTrack === 'ALL' ? undefined : listTrack,
+        styleNo: filterStyleNo || undefined,
       });
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setPurchaseOrders(data);
@@ -119,7 +126,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     } finally {
       setLoading(false);
     }
-  }, [filterSupplier, filterItem, listTrack]);
+  }, [filterSupplier, filterItem, listTrack, filterStyleNo]);
 
   formValuesRef.current = { supplier, unitPrice: newPo.unitPrice ?? 0, autofilled };
 
@@ -275,6 +282,18 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillItemId, onPrefillConsumed]);
+
+  // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"로 넘어온 경우 — 그 스타일을
+  // styleSearch에 넣어 기존 경로(getStyleRequirements → StyleShortagePanel)를 그대로
+  // 태우고, 발주 목록도 그 스타일로 필터한다.
+  useEffect(() => {
+    if (prefillStyleNo) {
+      setStyleSearch({ styleNo: prefillStyleNo });
+      setFilterStyleNo(prefillStyleNo);
+      onStylePrefillConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillStyleNo, onStylePrefillConsumed]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

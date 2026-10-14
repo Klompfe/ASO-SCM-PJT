@@ -623,7 +623,7 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .expect(403);
     });
 
-    it('MANAGER가 PUT으로 기본값을 설정하면 저장되고 조회 시 그대로 반환되어야 한다', async () => {
+    it('MANAGER가 PUT으로 기본값을 설정하면 저장되고 조회 시 그대로 반환되어야 한다(carrier는 보내도 저장되지 않는다, PR-193)', async () => {
       const putRes = await request(app.getHttpServer())
         .put('/export-shipment-defaults')
         .set('Authorization', `Bearer ${managerToken}`)
@@ -632,6 +632,8 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
           consigneeInfo: 'TAE IL VN COMPANY LIMITED',
           portOfLoading: 'INCHEON, KOREA',
           finalDestination: 'HAIPHONG, VIETNAM',
+          // PR-193: carrier는 선적 건마다 바뀌는 값이라 더 이상 기본값으로 저장하지
+          // 않는다 — 구버전 화면이 여전히 이 필드를 보내도 400 없이 조용히 무시되는지 확인.
           carrier: 'DONGJIN CONTINENTAL / 0217W',
         })
         .expect(200);
@@ -641,10 +643,10 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .get('/export-shipment-defaults')
         .set('Authorization', `Bearer ${userToken}`)
         .expect(200);
-      expect(getRes.body.data.carrier).toBe('DONGJIN CONTINENTAL / 0217W');
+      expect(getRes.body.data.carrier).toBeNull();
     });
 
-    it('기본값 설정 후 generate()를 호출하면 헤더 필드가 자동으로 채워져야 한다', async () => {
+    it('기본값 설정 후 generate()를 호출하면 헤더 필드가 자동으로 채워지지만 carrier는 채워지지 않는다(PR-193)', async () => {
       const styleNo = `EXPORT-E2E-DEFAULTS-FILLED-${Date.now()}`;
       const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
         itemName: `E2E Defaults Filled Material ${Date.now()}`,
@@ -667,12 +669,14 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
       expect(res.body.data.consigneeInfo).toBe('TAE IL VN COMPANY LIMITED');
       expect(res.body.data.portOfLoading).toBe('INCHEON, KOREA');
       expect(res.body.data.finalDestination).toBe('HAIPHONG, VIETNAM');
-      expect(res.body.data.carrier).toBe('DONGJIN CONTINENTAL / 0217W');
+      // PR-193: carrier는 저장된 기본값이 있어도(이 describe 블록의 이전 테스트가
+      // PUT으로 보냈지만 저장되지 않았다) generate()가 가져다 채우지 않는다.
+      expect(res.body.data.carrier).toBeNull();
       // sheetNo는 기본값 대상이 아니라 매번 넘긴 값 그대로여야 한다.
       expect(res.body.data.sheetNo).toBe('TY-DEFAULTS-TEST');
     });
 
-    it('generate() 호출 시 헤더 값을 함께 넘기면 기본값 대신 그 값으로 덮어써야 한다', async () => {
+    it('generate() 호출 시 헤더 값을 함께 넘기면 기본값 대신 그 값으로 덮어써야 한다(carrier는 건별 입력만 반영, PR-193)', async () => {
       const styleNo = `EXPORT-E2E-DEFAULTS-OVERRIDE-${Date.now()}`;
       const purchaseOrderId = await setupPurchaseOrderWithBomAndPackingReceipt({
         itemName: `E2E Defaults Override Material ${Date.now()}`,
@@ -691,7 +695,8 @@ describe('수출선적서류(ExportShipment) 자동생성 회귀 테스트 (PR-0
         .send({ carrier: 'SPECIAL CARRIER / EXCEPTION-0001' })
         .expect(201);
 
-      // 명시적으로 넘긴 carrier는 기본값을 덮어써야 한다.
+      // 건별로 직접 넘긴 carrier는 그대로 반영된다(기본값에서 가져오는 게 아니라
+      // dto 값 자체를 쓰는 것이므로 "덮어쓴다"는 표현보다 "건별 입력"이 정확하다).
       expect(res.body.data.carrier).toBe('SPECIAL CARRIER / EXCEPTION-0001');
       // 나머지 필드는 여전히 기본값에서 채워져야 한다.
       expect(res.body.data.shipperInfo).toBe('TAE IL TRADING CO.,LTD');
