@@ -1,7 +1,8 @@
-import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { BomsService } from './boms.service';
 import { UpdateBomItemDto } from './dto/update-bom-item.dto';
+import { SwapBomItemMaterialDto } from './dto/swap-bom-item-material.dto';
 import { SetActiveBomDto } from './dto/set-active-bom.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -43,11 +44,29 @@ export class BomsController {
   }
 
   @Patch('items/:id')
+  @ApiOperation({ summary: '자재명세 항목 인라인 수정 — 혼용율/HS코드/실·테이프 종류/요척/규격/색상/구분' })
   async updateItem(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateBomItemDto,
   ) {
     return await this.bomsService.updateItem(id, dto);
+  }
+
+  // PR-197: 저장된 BOM 행 삭제 — 이 스타일 BOM에서만 빠진다(자재 마스터/발주는 유지).
+  @Delete('items/:id')
+  @ApiOperation({ summary: '자재명세 항목 삭제 — 자재 마스터와 기존 발주는 그대로 둠' })
+  async deleteItem(@Param('id', ParseIntPipe) id: number) {
+    return await this.bomsService.deleteItem(id);
+  }
+
+  // PR-197: 이 BOM 행이 가리키는 자재를 이미 있는 다른 자재로 바꾼다(새 자재는 만들지 않음).
+  @Patch('items/:id/material')
+  @ApiOperation({ summary: '자재명세 항목의 자재를 이미 등록된 다른 자재로 교체(이름 오인식 교정용)' })
+  async swapMaterial(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SwapBomItemMaterialDto,
+  ) {
+    return await this.bomsService.swapMaterial(id, dto);
   }
 
   // PR-099: "라벨류 기본 세트 추가" — 이미 있는 항목은 건너뛰고 없는 것만 추가한다.

@@ -9,6 +9,14 @@ import {
   resolveSubTypeValue,
   prefillHandwrittenCmtDraft,
 } from '../utils/salesOrderOverviewEdit';
+import {
+  updateBomItemField as updateBomItemFieldPure,
+  buildCommitResult,
+  hasBlankMaterialName,
+  computeBomRowBadges,
+  normalizeMaterialName,
+} from '../utils/salesOrderBomReview';
+import { getAllItems } from '../api/items.service';
 
 interface Props {
   isOpen: boolean;
@@ -39,6 +47,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   const [usageSummary, setUsageSummary] = useState<AiUsageSummary | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(0);
+  // PR-197: 자재명세 행을 저장 전에 사람이 정리할 수 있게 한다 — 제외 체크(결과 인덱스
+  // → 제외된 bomItems 인덱스 집합)와 "수정됨" 표시(같은 모양의 맵). bomItems 자체(또는
+  // 커밋 페이로드)에 플래그를 넣지 않고 컴포넌트에서만 들고 있다가 저장 직전에만
+  // 적용한다(buildCommitResult) — 되돌리기(체크 해제)가 항상 가능하게 하기 위함.
+  const [excludedBomIndexes, setExcludedBomIndexes] = useState<Map<number, Set<number>>>(new Map());
+  const [editedBomIndexes, setEditedBomIndexes] = useState<Map<number, Set<number>>>(new Map());
+  // PR-197: "자재 마스터에 없는 새 이름" 배지 — 정규화(공백/대소문자 무시)한 기존 자재명 집합.
+  const [existingMaterialNames, setExistingMaterialNames] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!isOpen) return;
@@ -82,7 +98,13 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       setLastChargeKrw(charge);
       setIsMock(mock);
       setSavedIndexes(new Set());
+      setExcludedBomIndexes(new Map());
+      setEditedBomIndexes(new Map());
       setStep(2);
+      // PR-197: "자재 마스터에 없는 새 이름" 배지용 — 전체 자재명을 한 번 불러와 정규화해 둔다.
+      getAllItems({})
+        .then((items) => setExistingMaterialNames(new Set(items.map((it) => normalizeMaterialName(it.name)))))
+        .catch(() => setExistingMaterialNames(new Set()));
       if (mock) {
         toast.error('⚠️ 목업 데이터입니다 — 실제 AI 분석이 아닙니다. 관리자에게 GEMINI_API_KEY 설정을 요청하세요.', { duration: 10000 });
       } else if (charge > 0) {
@@ -107,12 +129,41 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setResults((prev) => updateOverviewFieldPure(prev, index, field, value));
   };
 
+  // PR-197: 체크하면 저장 요청에서 빠진다(되돌릴 수 있음 — 체크 해제로 복원).
+  const toggleExcludeBomItem = (index: number, bomIndex: number) => {
+    setExcludedBomIndexes((prev) => {
+      const next = new Map(prev);
+      const set = new Set(next.get(index) ?? []);
+      if (set.has(bomIndex)) set.delete(bomIndex); else set.add(bomIndex);
+      next.set(index, set);
+      return next;
+    });
+  };
+
+  const updateBomItemField = <K extends keyof AiSalesOrderResult['bomItems'][number]>(
+    index: number,
+    bomIndex: number,
+    field: K,
+    value: AiSalesOrderResult['bomItems'][number][K],
+  ) => {
+    setResults((prev) => updateBomItemFieldPure(prev, index, bomIndex, field, value));
+    setEditedBomIndexes((prev) => {
+      const next = new Map(prev);
+      next.set(index, new Set(next.get(index) ?? []).add(bomIndex));
+      return next;
+    });
+  };
+
   const handleSave = async (index: number) => {
     if (isMock) {
       toast.error('목업 데이터는 저장할 수 없습니다.');
       return;
     }
-    const result = results[index];
+    const result = buildCommitResult(results[index], excludedBomIndexes.get(index) ?? new Set());
+    if (hasBlankMaterialName(result.bomItems)) {
+      toast.error('자재명이 빈 행이 있습니다 — 자재명을 채우거나 그 행을 제외해 주세요.');
+      return;
+    }
     setSavingIndex(index);
     try {
       await commitSalesOrderAnalysis(result);
@@ -148,8 +199,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     let successCount = 0;
     const failures: { label: string; reason: string }[] = [];
 
-    for (const { result, index } of targets) {
+    for (const { result: rawResult, index } of targets) {
+      const result = buildCommitResult(rawResult, excludedBomIndexes.get(index) ?? new Set());
       const label = result.overview.styleNo ?? `#${index + 1}`;
+      if (hasBlankMaterialName(result.bomItems)) {
+        failures.push({ label, reason: '자재명이 빈 행이 있습니다 — 자재명을 채우거나 그 행을 제외해 주세요.' });
+        setBulkProgress((p) => p + 1);
+        continue;
+      }
       try {
         await commitSalesOrderAnalysis(result);
         setSavedIndexes((prev) => new Set(prev).add(index));
@@ -191,6 +248,8 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setSavedIndexes(new Set());
     setLastChargeKrw(null);
     setIsMock(false);
+    setExcludedBomIndexes(new Map());
+    setEditedBomIndexes(new Map());
     onClose();
   };
 
@@ -407,57 +466,125 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                   </div>
 
                   <div>
-                    <h5 className="text-sm font-semibold text-gray-700 mb-1">2) 자재명세 ({result.bomItems.length}건)</h5>
-                    <div className="overflow-x-auto max-h-48 overflow-y-auto">
-                      <table className="border text-sm">
-                        <thead className="bg-gray-100"><tr><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">비고</th><th className="border p-1">실/테이프 종류</th></tr></thead>
-                        <tbody>
-                          {result.bomItems.map((item, i) => {
-                            const candidate = item.materialSubTypeCandidate ?? null;
-                            const resolved = resolveMaterialSubTypeCandidate(candidate);
-                            const selectedValue = item.threadType ?? item.tapeType ?? '';
-                            return (
-                              <tr key={i}>
-                                <td className="border p-1">{item.category ?? '-'}</td>
-                                <td className="border p-1">{item.itemName}</td>
-                                <td className="border p-1">{item.spec ?? '-'}</td>
-                                <td className="border p-1">{item.consumption ?? '-'}</td>
-                                <td className="border p-1">{item.remarks ?? '-'}</td>
-                                <td className="border p-1">
-                                  {candidate && resolved && !selectedValue && (
-                                    <div className="mb-1 bg-yellow-50 border border-yellow-200 rounded px-1 py-0.5 text-xs text-yellow-800" data-testid={`subtype-candidate-${index}-${i}`}>
-                                      AI가 인식한 자재 종류: <b>{candidate}</b> — 적용하시겠습니까?
-                                      <button
-                                        type="button"
-                                        onClick={() => setResults((prev) => setBomItemSubType(prev, index, i, resolved))}
-                                        className="ml-1 px-1 rounded bg-yellow-600 text-white hover:bg-yellow-700"
-                                      >적용</button>
-                                    </div>
-                                  )}
-                                  <select
-                                    className="border rounded px-1 py-0.5 text-xs"
-                                    aria-label="실/테이프 종류"
-                                    value={selectedValue}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      const target = v ? resolveSubTypeValue(v) : null;
-                                      setResults((prev) => setBomItemSubType(prev, index, i, target));
-                                    }}
-                                  >
-                                    <option value="">미지정</option>
-                                    <option value="COA_SA">코아사 (2500M/콘)</option>
-                                    <option value="OBA_SA_SKU_I_SA">오바사·스쿠이사 (4000M/콘)</option>
-                                    <option value="POLY_JINUIDO">폴리지누이도 (500M/콘)</option>
-                                    <option value="DADE">다데 (50M/롤)</option>
-                                    <option value="AMHOL">암홀 (50M/롤)</option>
-                                  </select>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                    {(() => {
+                      const excluded = excludedBomIndexes.get(index) ?? new Set<number>();
+                      const edited = editedBomIndexes.get(index) ?? new Set<number>();
+                      const badges = computeBomRowBadges(result.bomItems, result.overview.totalQty, existingMaterialNames);
+                      return (
+                        <>
+                          <h5 className="text-sm font-semibold text-gray-700 mb-1">
+                            2) 자재명세 ({result.bomItems.length}건 중 {result.bomItems.length - excluded.size}건 포함)
+                          </h5>
+                          <p className="text-xs text-gray-400 mb-1">AI가 읽은 값이므로 작업지시서 원본과 대조해 주세요 — 잘못된 행은 수정하거나 제외할 수 있습니다.</p>
+                          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                            <table className="border text-sm">
+                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1">제외</th><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">비고</th><th className="border p-1">실/테이프 종류</th><th className="border p-1">확인 필요</th></tr></thead>
+                              <tbody>
+                                {result.bomItems.map((item, i) => {
+                                  const candidate = item.materialSubTypeCandidate ?? null;
+                                  const resolved = resolveMaterialSubTypeCandidate(candidate);
+                                  const selectedValue = item.threadType ?? item.tapeType ?? '';
+                                  const isExcluded = excluded.has(i);
+                                  const isEdited = edited.has(i);
+                                  const rowBadges = badges[i];
+                                  return (
+                                    <tr key={i} className={isExcluded ? 'opacity-40' : undefined}>
+                                      <td className="border p-1 text-center">
+                                        <input
+                                          type="checkbox"
+                                          aria-label={`${index + 1}번째 항목 자재명세 ${i + 1}행 제외`}
+                                          data-testid={`bom-exclude-${index}-${i}`}
+                                          checked={isExcluded}
+                                          onChange={() => toggleExcludeBomItem(index, i)}
+                                        />
+                                      </td>
+                                      <td className="border p-1">
+                                        <input
+                                          className="border rounded px-1 py-0.5 w-16 text-xs"
+                                          value={item.category ?? ''}
+                                          disabled={isExcluded}
+                                          onChange={(e) => updateBomItemField(index, i, 'category', e.target.value || null)}
+                                        />
+                                      </td>
+                                      <td className="border p-1">
+                                        <input
+                                          className="border rounded px-1 py-0.5 w-28 text-xs"
+                                          data-testid={`bom-item-name-${index}-${i}`}
+                                          value={item.itemName}
+                                          disabled={isExcluded}
+                                          onChange={(e) => updateBomItemField(index, i, 'itemName', e.target.value)}
+                                        />
+                                        {isEdited && <span className="ml-1 text-[10px] text-blue-600 align-middle">수정됨</span>}
+                                      </td>
+                                      <td className="border p-1">
+                                        <input
+                                          className="border rounded px-1 py-0.5 w-16 text-xs"
+                                          value={item.spec ?? ''}
+                                          disabled={isExcluded}
+                                          onChange={(e) => updateBomItemField(index, i, 'spec', e.target.value || null)}
+                                        />
+                                      </td>
+                                      <td className="border p-1">
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          className="border rounded px-1 py-0.5 w-16 text-xs text-right"
+                                          data-testid={`bom-consumption-${index}-${i}`}
+                                          value={item.consumption ?? ''}
+                                          disabled={isExcluded}
+                                          onChange={(e) => updateBomItemField(index, i, 'consumption', e.target.value === '' ? null : Number(e.target.value))}
+                                        />
+                                      </td>
+                                      <td className="border p-1">{item.remarks ?? '-'}</td>
+                                      <td className="border p-1">
+                                        {candidate && resolved && !selectedValue && (
+                                          <div className="mb-1 bg-yellow-50 border border-yellow-200 rounded px-1 py-0.5 text-xs text-yellow-800" data-testid={`subtype-candidate-${index}-${i}`}>
+                                            AI가 인식한 자재 종류: <b>{candidate}</b> — 적용하시겠습니까?
+                                            <button
+                                              type="button"
+                                              onClick={() => setResults((prev) => setBomItemSubType(prev, index, i, resolved))}
+                                              className="ml-1 px-1 rounded bg-yellow-600 text-white hover:bg-yellow-700"
+                                            >적용</button>
+                                          </div>
+                                        )}
+                                        <select
+                                          className="border rounded px-1 py-0.5 text-xs"
+                                          aria-label="실/테이프 종류"
+                                          value={selectedValue}
+                                          onChange={(e) => {
+                                            const v = e.target.value;
+                                            const target = v ? resolveSubTypeValue(v) : null;
+                                            setResults((prev) => setBomItemSubType(prev, index, i, target));
+                                          }}
+                                        >
+                                          <option value="">미지정</option>
+                                          <option value="COA_SA">코아사 (2500M/콘)</option>
+                                          <option value="OBA_SA_SKU_I_SA">오바사·스쿠이사 (4000M/콘)</option>
+                                          <option value="POLY_JINUIDO">폴리지누이도 (500M/콘)</option>
+                                          <option value="DADE">다데 (50M/롤)</option>
+                                          <option value="AMHOL">암홀 (50M/롤)</option>
+                                        </select>
+                                      </td>
+                                      <td className="border p-1 text-xs space-y-0.5" data-testid={`bom-badges-${index}-${i}`}>
+                                        {rowBadges.isNewMaterial && (
+                                          <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded px-1 py-0.5">자재 마스터에 없는 새 이름</div>
+                                        )}
+                                        {rowBadges.requiredQtyMismatch && (
+                                          <div className="bg-orange-50 border border-orange-200 text-orange-800 rounded px-1 py-0.5">요척×수량이 작지의 출고량과 다름 — 확인해주세요</div>
+                                        )}
+                                        {rowBadges.duplicateLooking && (
+                                          <div className="bg-purple-50 border border-purple-200 text-purple-800 rounded px-1 py-0.5">이름만 다르고 소요량이 같은 행입니다 — 작업지시서와 대조해 주세요</div>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div>

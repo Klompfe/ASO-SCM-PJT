@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getAllItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
+import { getAllItems, getItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 import { getMasterStyles, type MasterStyle } from '../api/styles.service';
-import { getBomByStyleNo, updateBomItem, addBomLabelSet, type BomDetail, type BomItemRow, type ThreadType, type TapeType } from '../api/boms.service';
+import { getBomByStyleNo, updateBomItem, deleteBomItem, swapBomItemMaterial, addBomLabelSet, type BomDetail, type BomItemRow, type ThreadType, type TapeType } from '../api/boms.service';
+import { SearchSelectField } from './SearchSelectField';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
@@ -97,10 +98,16 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   const [editItemForm, setEditItemForm] = useState<{ name: string; englishName: string; unit: string; spec: string; description: string; styleNo: string }>({ name: '', englishName: '', unit: '', spec: '', description: '', styleNo: '' });
 
   // PR-073: 자재명세(BOM) 상세 테이블의 혼용율/HS코드 인라인 수정.
+  // PR-197: 요척/규격/색상/구분도 여기서 함께 고친다(실제 사례 — 엑셀 요척 2.9가 BOM에는
+  // 2.7로 저장돼 필요량이 틀렸던 건을 고칠 화면이 없었다).
   const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
-  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string }>({ composition: '', hsCode: '', threadType: '' });
+  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '' });
   // PR-099: "라벨류 기본 세트 추가" 버튼 처리 중 표시.
   const [addingLabelSet, setAddingLabelSet] = useState(false);
+  // PR-197: BOM 행 삭제/자재 교체 — 사람이 버튼을 눌러야만 동작(자동 정리 없음).
+  const [deletingBomItemId, setDeletingBomItemId] = useState<number | null>(null);
+  const [swappingBomItemId, setSwappingBomItemId] = useState<number | null>(null);
+  const [materialSwapPick, setMaterialSwapPick] = useState<{ id: number; name: string; code: string } | null>(null);
 
   // 엑셀 업로드 → 매핑 프리뷰
   const [error, setError] = useState<string | null>(null);
@@ -278,31 +285,114 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
 
   const startEditBomItem = (row: BomItemRow) => {
     setEditingBomItemId(row.id);
-    setEditBomItemForm({ composition: row.composition || '', hsCode: row.hsCode || '', threadType: row.threadType || row.tapeType || '' });
+    setEditBomItemForm({
+      composition: row.composition || '', hsCode: row.hsCode || '', threadType: row.threadType || row.tapeType || '',
+      consumption: String(row.consumption ?? ''), spec: row.spec || '', colorCode: row.colorCode || '', category: row.category || '',
+    });
   };
 
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
-    setEditBomItemForm({ composition: '', hsCode: '', threadType: '' });
+    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '' });
   };
 
   const handleUpdateBomItem = async (id: number) => {
+    const original = bom?.items.find((i) => i.id === id);
+    const newConsumption = editBomItemForm.consumption === '' ? undefined : Number(editBomItemForm.consumption);
+    if (newConsumption !== undefined && (!Number.isFinite(newConsumption) || newConsumption < 0)) {
+      toast.error('요척은 0 이상의 숫자여야 합니다.');
+      return;
+    }
+    // PR-197: 요척이 실제로 바뀌면 "요척 2.7 → 2.9 (필요량이 바뀝니다)"처럼 변경 전/후를
+    // 확인받는다 — 저장 전 사람이 한 번 더 볼 수 있게.
+    if (original && newConsumption !== undefined && Number(original.consumption) !== newConsumption) {
+      const ok = window.confirm(`요척 ${original.consumption} → ${newConsumption} (필요량이 바뀝니다). 저장하시겠습니까?`);
+      if (!ok) return;
+    }
     try {
       await updateBomItem(id, {
         composition: editBomItemForm.composition,
         hsCode: editBomItemForm.hsCode,
         ...(editBomItemForm.threadType ? resolveSubTypePayload(editBomItemForm.threadType) : {}),
+        ...(newConsumption !== undefined ? { consumption: newConsumption } : {}),
+        spec: editBomItemForm.spec,
+        colorCode: editBomItemForm.colorCode,
+        category: editBomItemForm.category,
       });
-      toast.success('혼용율/HS코드/실 종류가 수정되었습니다.');
+      toast.success('자재명세 항목이 수정되었습니다.');
       cancelEditBomItem();
       if (selectedStyleNo) {
         const res = await getBomByStyleNo(selectedStyleNo);
         setBom(res);
       }
     } catch (err: any) {
-      toast.error(getErrorMessage(err, '혼용율/HS코드 수정에 실패했습니다.'));
+      toast.error(getErrorMessage(err, '자재명세 항목 수정에 실패했습니다.'));
     }
   };
+
+  // PR-197: 저장된 BOM 행 삭제 — 이 스타일 BOM에서만 빠진다(자재 마스터/발주는 그대로).
+  // 사람이 버튼을 눌러야만 동작(자동 정리 없음).
+  const handleDeleteBomItem = async (row: BomItemRow) => {
+    const ok = window.confirm(
+      `"${row.material?.name ?? ''}" 행을 이 스타일 자재명세에서 삭제합니다.\n` +
+      '이 스타일 BOM에서만 빠집니다. 자재 마스터와 기존 발주는 그대로입니다.\n계속하시겠습니까?',
+    );
+    if (!ok) return;
+    setDeletingBomItemId(row.id);
+    try {
+      const result = await deleteBomItem(row.id);
+      if (result.linkedPurchaseOrderCount > 0) {
+        toast.success(`삭제되었습니다 — 이 자재로 연결된 발주(취소 제외) ${result.linkedPurchaseOrderCount}건은 그대로 남아 있습니다.`);
+      } else {
+        toast.success('삭제되었습니다.');
+      }
+      if (selectedStyleNo) {
+        const res = await getBomByStyleNo(selectedStyleNo);
+        setBom(res);
+      }
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '삭제에 실패했습니다.'));
+    } finally {
+      setDeletingBomItemId(null);
+    }
+  };
+
+  // PR-197: 이 BOM 행이 가리키는 자재를 이미 있는 다른 자재로 교체(이름 오인식 교정용).
+  const startSwapMaterial = (row: BomItemRow) => {
+    setSwappingBomItemId(row.id);
+    setMaterialSwapPick(null);
+  };
+
+  const cancelSwapMaterial = () => {
+    setSwappingBomItemId(null);
+    setMaterialSwapPick(null);
+  };
+
+  const handleConfirmSwapMaterial = async (row: BomItemRow) => {
+    if (!materialSwapPick) {
+      toast.error('교체할 자재를 먼저 골라 주세요.');
+      return;
+    }
+    const ok = window.confirm(`"${row.material?.name ?? ''}" → "${materialSwapPick.name}"(으)로 자재를 교체하시겠습니까?`);
+    if (!ok) return;
+    try {
+      await swapBomItemMaterial(row.id, materialSwapPick.id);
+      toast.success('자재가 교체되었습니다.');
+      cancelSwapMaterial();
+      if (selectedStyleNo) {
+        const res = await getBomByStyleNo(selectedStyleNo);
+        setBom(res);
+      }
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '자재 교체에 실패했습니다.'));
+    }
+  };
+
+  const searchMaterialsForSwap = useCallback(async (keyword: string): Promise<{ id: number; name: string; code: string }[]> => {
+    const res = await getItems({ keyword: keyword || undefined, limit: 20 } as GetItemsFilter);
+    const list = Array.isArray(res) ? res : (res?.items ?? []);
+    return list.map((i: any) => ({ id: i.id, name: i.name, code: i.code }));
+  }, []);
 
   // PR-099: 라벨류 기본 세트(MAIN+SIZE LABEL/CARE LABEL/PRICE TAG/SIZE STICKER/
   // TAG PIN/이미지택/POLY BAG, 수량 1)를 한 번에 추가한다 — 이미 있는 항목은 서버가
@@ -587,14 +677,67 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {bom.items.map((it) =>
-                    editingBomItemId === it.id ? (
+                    swappingBomItemId === it.id ? (
+                      <tr key={it.id} className="bg-indigo-50">
+                        <td className="px-4 py-2 font-mono">{it.material?.code}</td>
+                        <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
+                        <td colSpan={12} className="px-4 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600">교체할 자재:</span>
+                            <SearchSelectField<{ id: number; name: string; code: string }>
+                              value={materialSwapPick}
+                              onChange={setMaterialSwapPick}
+                              search={searchMaterialsForSwap}
+                              getKey={(i) => i.id}
+                              getLabel={(i) => `${i.name} (${i.code})`}
+                              renderRow={(i) => (<span>{i.name} <span className="text-gray-400 text-xs">{i.code}</span></span>)}
+                              ariaLabel="교체할 자재 검색"
+                              placeholder="자재 검색"
+                              title="자재 검색 — 이미 등록된 자재만 선택할 수 있습니다"
+                              allowClear
+                              className="w-64"
+                            />
+                            <button className="text-indigo-700 font-medium" onClick={() => handleConfirmSwapMaterial(it)}>확정</button>
+                            <button className="text-gray-500" onClick={cancelSwapMaterial}>취소</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : editingBomItemId === it.id ? (
                       <tr key={it.id} className="bg-yellow-50">
                         <td className="px-4 py-2 font-mono">{it.material?.code}</td>
                         <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
-                        <td className="px-4 py-2 whitespace-pre-line">{it.category}</td>
-                        <td className="px-4 py-2">{it.colorCode}</td>
-                        <td className="px-4 py-2">{it.spec}</td>
-                        <td className="px-4 py-2 text-right">{it.consumption}</td>
+                        <td className="px-4 py-2">
+                          <input
+                            className="border rounded px-2 py-1 w-24"
+                            value={editBomItemForm.category}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, category: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            className="border rounded px-2 py-1 w-16"
+                            value={editBomItemForm.colorCode}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, colorCode: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            className="border rounded px-2 py-1 w-20"
+                            value={editBomItemForm.spec}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, spec: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <input
+                            type="number"
+                            step="any"
+                            min={0}
+                            className="border rounded px-2 py-1 w-20 text-right"
+                            aria-label="요척"
+                            value={editBomItemForm.consumption}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, consumption: e.target.value })}
+                          />
+                        </td>
                         <td className="px-4 py-2 text-right">{it.requiredQty}</td>
                         <td className="px-4 py-2">{it.supplier}</td>
                         <td className="px-4 py-2 text-right">{it.unitPrice}</td>
@@ -654,6 +797,12 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                           <button className="text-blue-600" onClick={() => startEditBomItem(it)}>수정</button>
+                          <button className="text-indigo-600" onClick={() => startSwapMaterial(it)}>자재 교체</button>
+                          <button
+                            className="text-red-600 disabled:opacity-50"
+                            disabled={deletingBomItemId === it.id}
+                            onClick={() => handleDeleteBomItem(it)}
+                          >{deletingBomItemId === it.id ? '삭제 중...' : '삭제'}</button>
                           {it.material?.id && buildEditableOrderByItem(pendingOrders).get(it.material.id) && (
                             <button
                               onClick={() => { const e = buildEditableOrderByItem(pendingOrders).get(it.material.id)!; setEditing({ order: e.order, pendingCount: e.pendingCount }); }}
