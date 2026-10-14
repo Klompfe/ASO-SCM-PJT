@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { VisionService } from './vision.service';
+import { VisionService, todayKstIso } from './vision.service';
 
 // PR-096: GEMINI_API_KEY 미설정 시 목업 데이터를 반환하는 현재 동작 자체는 유지하되,
 // 이 사실이 응답에 명시적으로 드러나는지(isMock)를 검증한다 — 기존에는
@@ -128,19 +128,42 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
     expect(outcome.results[0].overview.targetRddSuspicious).toBe(false);
   });
 
-  // PR-190 실사례: MB74BLM107 — 작성일 2026-07-01인데 납기가 연도 없이 "2/17"로 적혀
-  // 있어 AI가 작성일과 같은 2026년을 붙여 2026-02-17(작성일보다 이전)로 인식했다.
-  // targetRddSuspicious 계산 전에 연도 보정이 먼저 적용돼야 한다.
-  it('납기에 연도가 없어 작성일보다 이전으로 인식되면 다음 해로 보정하고 targetRddYearAdjusted:true, targetRddSuspicious:false로 내려온다', async () => {
-    const service = await buildServiceWithFakeResponse({
-      styleNo: 'MB74BLM107', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null,
-      targetRdd: '2026-02-17', documentDate: '2026-07-01',
-    });
-    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
-    expect(outcome.results[0].overview.targetRdd).toBe('2027-02-17');
-    expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(true);
-    expect(outcome.results[0].overview.targetRddOriginal).toBe('2026-02-17');
-    expect(outcome.results[0].overview.targetRddSuspicious).toBe(false);
+  // PR-190 보강 실사례: MB74BLM107 — 작성일이 2026-01-01로 인식되고 납기가 연도 없이
+  // "2/17"로 적혀 있어 2026-02-17로 인식됐다. 기준이 "오늘(한국시간)"으로 바뀌었으므로
+  // 시스템 시각을 2026-10-14(KST)로 고정해 검증한다 — 작성일이 납기보다 더 이르더라도
+  // (이전 버전이면 보정 대상이 아니었다) 오늘 기준으로 지난 날짜면 보정된다.
+  it('납기에 연도가 없어 오늘(한국시간)보다 이전으로 인식되면 다음 해로 보정하고 targetRddYearAdjusted:true, targetRddSuspicious:false로 내려온다 — 작성일 값은 그대로 유지', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-14T03:00:00Z')); // KST 2026-10-14 12:00
+    try {
+      const service = await buildServiceWithFakeResponse({
+        styleNo: 'MB74BLM107', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null,
+        targetRdd: '2026-02-17', documentDate: '2026-01-01',
+      });
+      const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+      expect(outcome.results[0].overview.targetRdd).toBe('2027-02-17');
+      expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(true);
+      expect(outcome.results[0].overview.targetRddOriginal).toBe('2026-02-17');
+      expect(outcome.results[0].overview.targetRddSuspicious).toBe(false);
+      expect(outcome.results[0].overview.documentDate).toBe('2026-01-01'); // 작성일은 절대 건드리지 않는다
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('납기가 아직 미래이고 작성일보다만 이르면(의도된 변화) 더 이상 보정하지 않고 의심 경고만 유지한다', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-14T03:00:00Z'));
+    try {
+      const service = await buildServiceWithFakeResponse({
+        styleNo: 'S', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null,
+        targetRdd: '2026-12-30', documentDate: '2026-01-01',
+      });
+      const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+      expect(outcome.results[0].overview.targetRdd).toBe('2026-12-30');
+      expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
+      expect(outcome.results[0].overview.targetRddOriginal).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('보정이 일어나지 않으면 targetRddYearAdjusted:false, targetRddOriginal:null이다(기존 미래 날짜 케이스)', async () => {
@@ -152,6 +175,23 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
     const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
     expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
     expect(outcome.results[0].overview.targetRddOriginal).toBeNull();
+  });
+});
+
+// PR-190 보강: "오늘" 계산이 UTC가 아니라 반드시 한국시간(KST, UTC+9) 기준이어야 한다 —
+// new Date().toISOString()(UTC)를 그대로 쓰면 한국 00:00~09:00 사이에 어제 날짜로
+// 계산되는 버그가 있었다. todayKstIso()의 자정 경계를 직접 검증한다.
+describe('todayKstIso — 한국시간(KST) 자정 경계 (PR-190 보강)', () => {
+  it('UTC 2026-10-13T16:00:00Z(KST 2026-10-14 01:00)는 오늘을 2026-10-14로 계산한다', () => {
+    expect(todayKstIso(new Date('2026-10-13T16:00:00Z'))).toBe('2026-10-14');
+  });
+
+  it('UTC 2026-10-14T14:59:00Z(KST 2026-10-14 23:59)는 아직 2026-10-14다', () => {
+    expect(todayKstIso(new Date('2026-10-14T14:59:00Z'))).toBe('2026-10-14');
+  });
+
+  it('UTC 2026-10-14T15:00:00Z(KST 2026-10-15 00:00, 자정을 막 넘김)는 2026-10-15로 넘어간다', () => {
+    expect(todayKstIso(new Date('2026-10-14T15:00:00Z'))).toBe('2026-10-15');
   });
 });
 

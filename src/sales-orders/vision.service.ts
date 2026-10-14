@@ -6,6 +6,13 @@ import { isSuspiciousTargetRdd } from './utils/target-rdd-validation.util';
 import { rolloverTargetRddYear } from './utils/target-rdd-year-rollover.util';
 import { isMidoBuyer } from './utils/mido-buyer.util';
 
+// PR-190 보강: "오늘" 기준 납기 연도 보정/의심 판정은 반드시 한국시간(KST, UTC+9) 날짜여야
+// 한다 — new Date().toISOString()은 UTC라 한국 00:00~09:00 사이에는 하루 전 날짜가 되어
+// 버린다(예: KST 2026-10-14 03:00 = UTC 2026-10-13 18:00 → slice(0,10)하면 어제로 계산됨).
+export function todayKstIso(now: Date = new Date()): string {
+  return new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 export interface AiAnalysisUsage {
   pageCount: number;
   promptTokens: number;
@@ -203,13 +210,14 @@ export class VisionService {
   // 작성일 "6/22"로 잘못 인식)을 100% 막을 수 없어, 응답을 받은 뒤 코드로 결정적으로
   // 재검증한다 — 의심스러우면 targetRddSuspicious=true로 표시해 화면에서 경고한다.
   private applyTargetRddValidation(results: AiSalesOrderResultDto[]): void {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayKstIso();
     for (const result of results) {
-      // PR-190: 의심 여부를 계산하기 전에 연도 보정부터 적용한다 — 납기에 연도가 없어
-      // AI가 작성일 연도를 붙인 탓에 작성일보다 이른 날짜가 됐다면(실사례:
-      // MB74BLM107, 작성일 2026-07-01/납기 2026-02-17) 다음 해로 결정적으로 보정한다
-      // (납기==작성일인 경우는 보정 대상에서 제외 — PR-158의 혼동 패턴이라 의심 경고만 유지).
-      const rollover = rolloverTargetRddYear(result.overview.targetRdd, result.overview.documentDate);
+      // PR-190 보강: 의심 여부를 계산하기 전에 연도 보정부터 적용한다 — 기준은 "오늘(한국
+      // 시간) 날짜"다(실사례: MB74BLM107, 작성일 2026-01-01/납기 2026-02-17로 인식, 조회
+      // 시점 오늘 2026-10-14 기준 이미 지난 날짜 → 2027-02-17로 보정). 작성일 값 자체는
+      // 절대 읽어서 바꾸지 않는다 — 납기==작성일(PR-158의 혼동 패턴)인 경우만 예외로
+      // 보정하지 않는다(의심 경고만 유지).
+      const rollover = rolloverTargetRddYear(result.overview.targetRdd, result.overview.documentDate, today);
       result.overview.targetRdd = rollover.targetRdd;
       result.overview.targetRddYearAdjusted = rollover.adjusted;
       result.overview.targetRddOriginal = rollover.adjusted ? rollover.original : null;
