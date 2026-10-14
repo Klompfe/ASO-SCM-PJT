@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { PackingReceipt } from '../purchase-orders/entities/packing-receipt.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
+import { Bom } from '../boms/entities/bom.entity';
 import { ExportShipment } from './entities/export-shipment.entity';
 import { ExportShipmentLine } from './entities/export-shipment-line.entity';
 import { ExportShipmentsService } from './export-shipments.service';
@@ -13,7 +14,7 @@ import { CustomsExchangeRatesModule } from '../customs-exchange-rates/customs-ex
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PurchaseOrder, PackingReceipt, BomItem, ExportShipment, ExportShipmentLine]),
+    TypeOrmModule.forFeature([PurchaseOrder, PackingReceipt, BomItem, Bom, ExportShipment, ExportShipmentLine]),
     ExportShipmentDefaultsModule,
     BrandPrefixRulesModule,
     CustomsExchangeRatesModule,

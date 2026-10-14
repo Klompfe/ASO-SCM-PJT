@@ -18,10 +18,14 @@ const STATUS_BADGE_STYLES: Record<string, string> = {
 // PR-179: 미진한 상태(미발주/입고대기/포장내역대기)는 행에서 바로 조치할 수 있게 인라인 액션을 단다.
 // 발주 화면으로 넘어가는 액션은 onGoToPurchaseOrders로 탭만 바꾸고, 포장내역 등록은 이 화면에서 모달로 연다.
 interface ProcurementStatusReportProps {
-  onGoToPurchaseOrders?: () => void;
+  // PR-196: 어느 스타일에서 눌렀는지 넘긴다 — 발주 화면이 그 스타일의 부족분 표를
+  // 바로 열고 목록을 그 스타일(+자동 귀속분) 발주로 필터링할 수 있게.
+  onGoToPurchaseOrders?: (styleNo: string) => void;
+  // PR-196: "미연결 발주 N건" 배지를 누르면 정리 화면으로 이동.
+  onGoToUnlinkedPurchaseOrders?: () => void;
 }
 
-export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = ({ onGoToPurchaseOrders }) => {
+export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = ({ onGoToPurchaseOrders, onGoToUnlinkedPurchaseOrders }) => {
   const [packingFor, setPackingFor] = useState<{ purchaseOrderId: number; styleNo: string } | null>(null);
   const [rows, setRows] = useState<ProcurementStatusRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -122,16 +126,31 @@ export const ProcurementStatusReport: React.FC<ProcurementStatusReportProps> = (
                   </td>
                   <td className="p-2 print:hidden whitespace-nowrap">
                     {r.overallStatus === '미발주' && onGoToPurchaseOrders && (
-                      <button className="text-sm text-blue-600 hover:underline" onClick={onGoToPurchaseOrders}>발주하기</button>
+                      <button className="text-sm text-blue-600 hover:underline" onClick={() => onGoToPurchaseOrders(r.styleNo)}>발주하기</button>
                     )}
                     {r.overallStatus === '입고대기' && onGoToPurchaseOrders && (
-                      <button className="text-sm text-blue-600 hover:underline" onClick={onGoToPurchaseOrders}>발주 보기</button>
+                      <button className="text-sm text-blue-600 hover:underline" onClick={() => onGoToPurchaseOrders(r.styleNo)}>발주 보기</button>
                     )}
                     {r.overallStatus === '포장내역대기' && r.packingPendingPurchaseOrderId != null && (
                       <button
                         className="text-sm text-purple-700 hover:underline"
                         onClick={() => setPackingFor({ purchaseOrderId: r.packingPendingPurchaseOrderId as number, styleNo: r.styleNo })}
                       >포장내역 등록</button>
+                    )}
+                    {/* PR-196: 같은 자재를 2개 이상 스타일이 써서 누구 몫인지 알 수 없는
+                        미연결 발주가 있으면 주황 배지로 알린다 — 눌러서 정리 화면으로 이동. */}
+                    {r.unlinkedPoCount > 0 && (
+                      <button
+                        className="ml-2 text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full hover:bg-orange-200"
+                        onClick={onGoToUnlinkedPurchaseOrders}
+                        title="같은 자재를 2개 이상 스타일이 써서 어느 스타일 몫인지 정할 수 없는 발주 — 정리 화면에서 사람이 스타일을 연결해야 한다"
+                      >미연결 발주 {r.unlinkedPoCount}건</button>
+                    )}
+                    {r.autoAttributedPoCount > 0 && (
+                      <span
+                        className="ml-2 text-xs text-gray-400"
+                        title="이 자재를 쓰는 스타일이 이 스타일 하나뿐이라 자동으로 이 스타일 몫으로 센 발주"
+                      >자동 귀속 {r.autoAttributedPoCount}건</span>
                     )}
                   </td>
                 </tr>

@@ -17,6 +17,22 @@ import { resolveOptionalPagination } from '../common/dto/optional-pagination-que
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { pickActiveBom } from '../boms/utils/active-bom.util';
+import { buildItemStyleUsage, attributePo } from './utils/po-style-attribution.util';
+import { IsNull, Not } from 'typeorm';
+
+// PR-196: "미연결 발주 정리" 화면(GET /purchase-orders/unlinked)의 행 1개.
+export interface UnlinkedPurchaseOrderRow {
+  poId: number;
+  itemId: number;
+  itemCode: string | null;
+  itemName: string | null;
+  quantity: number;
+  status: PurchaseOrderStatus;
+  supplierName: string | null;
+  createdAt: Date;
+  candidateStyles: { styleNo: string; styleName: string | null }[];
+  attribution: 'AUTO' | 'AMBIGUOUS' | 'ORPHAN';
+}
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -117,7 +133,9 @@ export class PurchaseOrdersService {
   // 이 발주의 자재(itemId)가 실제로 쓰이고 있는지 확인한다. 둘 중 하나라도 아니면 400 —
   // "스타일 연결"과 "스타일 미연결" 두 트랙을 섞지 않기 위함(BOM에 없는 자재를 억지로
   // 스타일에 연결하면 소요량 계산이 틀어진다).
-  private async assertStyleLinkable(styleNo: string, itemId: number): Promise<void> {
+  // PR-196: "미연결 발주 정리" 화면의 스타일 연결(linkStyle/linkStyleBulk)이 재사용할 수
+  // 있도록 private을 뗀다 — 로직/시그니처는 그대로(스타일 존재 + 활성 BOM에 자재 포함 검증).
+  async assertStyleLinkable(styleNo: string, itemId: number): Promise<void> {
     const style = await this.dataSource.getRepository(MasterStyle).findOne({ where: { styleNo } });
     if (!style) {
       throw new BadRequestException(`존재하지 않는 스타일번호입니다: ${styleNo}`);
@@ -198,6 +216,95 @@ export class PurchaseOrdersService {
       }
       await queryRunner.commitTransaction();
       return created;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  // PR-196: "미연결 발주 정리" 화면 — styleNo가 비어 있고 취소되지 않은 발주 목록을
+  // 후보 스타일(candidateStyles)·귀속 종류(attribution)와 함께 내려준다. 자동 일괄
+  // 배정은 하지 않는다(사람이 화면에서 확인 후 연결 확정).
+  async findUnlinked(): Promise<UnlinkedPurchaseOrderRow[]> {
+    const [orders, boms, styles] = await Promise.all([
+      this.poRepository.find({
+        where: { styleNo: IsNull(), status: Not(PurchaseOrderStatus.CANCELLED) },
+        relations: ['item', 'supplier'],
+        order: { id: 'DESC' },
+      }),
+      this.dataSource.getRepository(Bom).find({ relations: ['items', 'items.material', 'style'] }),
+      this.dataSource.getRepository(MasterStyle).find({ relations: ['overview'] }),
+    ]);
+    const usage = buildItemStyleUsage(boms);
+    const styleNameByStyleNo = new Map(styles.map((s) => [s.styleNo, s.overview?.styleName ?? null]));
+
+    return orders.map((po) => {
+      const result = attributePo(po, usage);
+      const candidateStyleNos = result.kind === 'AUTO' ? [result.styleNo] : result.kind === 'AMBIGUOUS' ? result.candidates : [];
+      return {
+        poId: po.id,
+        itemId: po.itemId,
+        itemCode: po.item?.code ?? null,
+        itemName: po.item?.name ?? null,
+        quantity: po.quantity,
+        status: po.status,
+        supplierName: po.supplier?.name ?? null,
+        createdAt: po.createdAt,
+        candidateStyles: candidateStyleNos.map((styleNo) => ({ styleNo, styleName: styleNameByStyleNo.get(styleNo) ?? null })),
+        attribution: result.kind === 'LINKED' ? 'ORPHAN' : result.kind, // LINKED는 styleNo IS NULL 필터상 나올 수 없음(방어적 처리)
+      };
+    });
+  }
+
+  // PR-196: 미연결 발주(styleNo IS NULL)에만 적용 — 이미 연결된 발주는 재연결 범위 밖(400),
+  // 취소된 발주도 400. 메타데이터(styleNo)만 바꾸고 수량·단가·상태·재고는 건드리지 않는다.
+  async linkStyle(id: number, styleNo: string): Promise<PurchaseOrder> {
+    const po = await this.findOne(id);
+    if (po.status === PurchaseOrderStatus.CANCELLED) {
+      throw new BadRequestException('취소된 발주는 스타일을 연결할 수 없습니다.');
+    }
+    if (po.styleNo) {
+      throw new BadRequestException('이미 스타일에 연결된 발주입니다 — 재연결은 지원하지 않습니다.');
+    }
+    await this.assertStyleLinkable(styleNo, po.itemId);
+    po.styleNo = styleNo;
+    return this.poRepository.save(po);
+  }
+
+  // PR-196: 일괄 확정 — 전부 유효해야 하나라도 저장된다(all-or-nothing). 한 발주는 한
+  // 스타일에만 연결할 수 있다(여러 스타일로 나누는 기능은 만들지 않음).
+  async linkStyleBulk(links: { poId: number; styleNo: string }[]): Promise<PurchaseOrder[]> {
+    const poIds = [...new Set(links.map((l) => l.poId))];
+    const orders = await this.poRepository.findBy({ id: In(poIds) });
+    const missing = poIds.filter((id) => !orders.some((o) => o.id === id));
+    if (missing.length > 0) {
+      throw new NotFoundException(`존재하지 않는 발주입니다: ${missing.join(', ')}`);
+    }
+    for (const link of links) {
+      const po = orders.find((o) => o.id === link.poId)!;
+      if (po.status === PurchaseOrderStatus.CANCELLED) {
+        throw new BadRequestException(`취소된 발주는 스타일을 연결할 수 없습니다: #${po.id}`);
+      }
+      if (po.styleNo) {
+        throw new BadRequestException(`이미 스타일에 연결된 발주입니다: #${po.id}`);
+      }
+      await this.assertStyleLinkable(link.styleNo, po.itemId);
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const saved: PurchaseOrder[] = [];
+      for (const link of links) {
+        const po = orders.find((o) => o.id === link.poId)!;
+        po.styleNo = link.styleNo;
+        saved.push(await queryRunner.manager.save(PurchaseOrder, po));
+      }
+      await queryRunner.commitTransaction();
+      return saved;
     } catch (err) {
       await queryRunner.rollbackTransaction();
       throw err;

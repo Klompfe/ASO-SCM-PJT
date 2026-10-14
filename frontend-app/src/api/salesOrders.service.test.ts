@@ -23,6 +23,16 @@ describe('salesOrders.service — 수주 등록 API 경로 (PR-134)', () => {
     expect(config.headers['Content-Type']).toBe('multipart/form-data');
   });
 
+  // PR-192: 백엔드가 240초 한도로 재시도·폴백을 끝내므로, 중간 프록시가 그보다 먼저
+  // 끊어버리지 않도록 그보다 긴 타임아웃을 명시한다(이 요청에만 — 전역 기본값은 그대로).
+  it('uploadSalesOrderImage: axios timeout을 270초로 지정한다(전역 기본값과 별개)', async () => {
+    client.post.mockResolvedValue({ results: [], chargedAmountKrw: 0, isMock: false });
+    const file = new File(['x'], 'sheet.png', { type: 'image/png' });
+    await sales.uploadSalesOrderImage(file);
+    const [, , config] = client.post.mock.calls[0];
+    expect(config.timeout).toBe(270_000);
+  });
+
   it('commitSalesOrderAnalysis: 분석 결과 그대로 POST /sales-orders/commit-analysis', async () => {
     client.post.mockResolvedValue({ id: 1 });
     const result = { overview: { styleNo: 'S1' }, bomItems: [], sizeSpecs: [], workNotes: null } as any;
