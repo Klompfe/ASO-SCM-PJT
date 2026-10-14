@@ -49,4 +49,53 @@
 
 ---
 
-**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-193` 줄을 붙여 다시 보내 주세요.
+## 단계 1 · PR-190 (+amend2) — 작지 납기 연도 자동 보정("오늘(KST) 기준" 단순화)
+
+- 브랜치: `fix/target-rdd-year-rollover`
+- 병합 전 main SHA: `ebcae0c`(PR-193 보고서 커밋 직후)
+- 병합 후 main SHA: `2c11087`
+- 선행 단계: 없음
+
+### 변경 파일 (origin/main...origin/fix/target-rdd-year-rollover, 10개)
+- `frontend-app/src/api/salesOrders.service.ts`
+- `frontend-app/src/components/SalesOrderUploadModal.tsx`
+- `frontend-app/src/utils/salesOrderOverviewEdit.test.ts`
+- `frontend-app/src/utils/salesOrderOverviewEdit.ts`
+- `prompt-reports/PR-190-report.md`
+- `src/sales-orders/dto/ai-analysis.dto.ts`
+- `src/sales-orders/utils/target-rdd-year-rollover.util.spec.ts`
+- `src/sales-orders/utils/target-rdd-year-rollover.util.ts`
+- `src/sales-orders/vision.service.spec.ts`
+- `src/sales-orders/vision.service.ts`
+
+마이그레이션 변경 없음(`src/migrations/` 0건). `.env*`/엑셀/PDF/CSV/이미지/`vision-eval-out/` 없음. `package.json`/lock 변경 없음. 브랜치 head가 `159d393`(amend2 이전 기준 SHA)의 자손임을 확인했고, `prompt-reports/PR-190-report.md`에 "7. 보강 — 납기 연도 보정을 '오늘(한국시간)' 기준으로 단순화" 절이 있음을 확인했다(amend2 반영 확인).
+
+### 충돌 해결 내역
+`git merge origin/main`(PR-192·PR-196·PR-193 반영분 포함) 시 `src/sales-orders/vision.service.spec.ts` 1개 파일, import 줄 1곳만 충돌:
+- PR-192(이미 main)가 추가한 `import { GatewayTimeoutException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';`
+- PR-190이 추가한 `import { VisionService, todayKstIso } from './vision.service';`의 `todayKstIso`
+
+양쪽을 모두 살려 두 줄을 나란히 유지하는 것으로 기계적 해결(판단 개입 없음). 그 외 파일(`vision.service.ts` 본문, `salesOrders.service.ts`, `SalesOrderUploadModal.tsx`)은 자동 병합(충돌 없음).
+
+### 테스트 숫자
+
+| 항목 | PR-190 보고서 기준선(보강 후) | 이번 게이트 B 검증 |
+|---|---|---|
+| 백엔드 `jest` 전체 | 63 suites / 815 tests | **66 suites / 854 tests** |
+| 백엔드 e2e(`--maxWorkers=2`) | 65 suites / 507 tests | **66 suites / 519 tests** |
+| 프론트 `vitest run` | (PR-190 보고서에 미기재) | **53 files / 348 tests** |
+| 백엔드/프론트 `tsc` · `build` | 통과 | 통과 |
+
+기준선보다 전부 많거나 같음(선행 반영분 PR-192·PR-196·PR-193 포함으로 증가) — 실패 0건.
+
+### 배포 안내
+이 PR은 마이그레이션이 없으므로 Render 배포 로그에서 `No migrations are pending`과 Live 상태만 확인하면 된다.
+
+### 사용자가 화면에서 확인할 것
+- 연도 없는 납기(예: "2/17")가 적힌 작지를 올리면 파란 "연도 자동 보정" 안내가 뜬다.
+- 작성일 2026-01-01·납기 2/17인 작지는 납기가 2027-02-17로 채워지고 작성일은 그대로다.
+- 납기를 직접 고치면 자동 보정 안내가 사라진다.
+
+---
+
+**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-190` 줄을 붙여 다시 보내 주세요.
