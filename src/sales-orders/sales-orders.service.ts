@@ -22,14 +22,15 @@ export class SalesOrdersService {
   ) {}
 
   async analyzeImage(file: Express.Multer.File, userId: number) {
-    const { results, usage, isMock } = await this.visionService.analyzeSalesOrder(file);
+    const { results, usage, isMock, modelUsed, fallbackUsed } = await this.visionService.analyzeSalesOrder(file);
     // 목업 응답(usage.pageCount === 0)은 실제 API 비용이 없으므로 과금 로그를 남기지 않는다.
     let chargedAmountKrw = 0;
     if (usage.pageCount > 0) {
       const log = await this.aiUsageLogService.log(userId, usage.pageCount, usage.promptTokens, usage.outputTokens);
       chargedAmountKrw = log.chargedAmountKrw;
     }
-    return { results, chargedAmountKrw, isMock };
+    // PR-192: 폴백 모델로 처리된 경우 화면에 "대체 모델로 분석했습니다" 안내를 보여주기 위함.
+    return { results, chargedAmountKrw, isMock, modelUsed, fallbackUsed };
   }
 
   async getAiUsageForUser(userId: number) {

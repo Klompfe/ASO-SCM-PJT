@@ -6,6 +6,8 @@ import { PackingReceipt, PackingMaterialCategory } from './entities/packing-rece
 import { PackingReceiptRoll } from './entities/packing-receipt-roll.entity';
 import { PackingReceiptCarton } from './entities/packing-receipt-carton.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
+import { Bom } from '../boms/entities/bom.entity';
+import { resolveBomItemForPurchaseOrder, AMBIGUOUS_UNLINKED_MESSAGE, styleMismatchMessage } from './utils/resolve-po-bom-item.util';
 import { CreatePackingReceiptDto } from './dto/create-packing-receipt.dto';
 import { UploadPackingReceiptDto } from './dto/upload-packing-receipt.dto';
 import { FindPackingReceiptsDto } from './dto/find-packing-receipts.dto';
@@ -52,6 +54,8 @@ export class PackingReceiptsService {
     private readonly cartonRepository: Repository<PackingReceiptCarton>,
     @InjectRepository(BomItem)
     private readonly bomItemRepository: Repository<BomItem>,
+    @InjectRepository(Bom)
+    private readonly bomRepository: Repository<Bom>,
     private readonly midoPriceTableService: MidoPriceTableService,
   ) {}
 
@@ -63,22 +67,27 @@ export class PackingReceiptsService {
     return po;
   }
 
-  // PR-169: 발주(PurchaseOrder)에는 styleNo/브랜드/바이어/생산처가 저장되어 있지 않다
-  // (export-shipments.service.ts generate()와 동일한 이유 — PO.itemId로 BomItem을
-  // 찾아 bom.style(→overview)까지 타고 들어가야 한다). BOM에 연결되지 않은 자재는
-  // 포장내역 양식 자체를 내려줄 수 없으므로 명확한 안내로 막는다.
+  // PR-185부터 PurchaseOrder.styleNo(스타일 연결)가 저장된다 — 연결 발주는 그 스타일의
+  // BOM에서, 미연결 발주는 "이 자재를 쓰는 스타일이 1개뿐일 때만" 추론한다(2개 이상이면
+  // 모호 — 추측 금지). PR-196: material.id = po.itemId인 BomItem 중 "가장 나중에 만든
+  // 것"(id DESC)을 쓰던 예전 로직은 같은 자재가 여러 스타일 BOM에 있으면 엉뚱한 스타일이
+  // 포장내역 양식에 찍히는 원인이었다.
   private async resolveBomItemOrFail(po: PurchaseOrder): Promise<BomItem> {
-    const bomItem = await this.bomItemRepository.findOne({
-      where: { material: { id: po.itemId } },
-      relations: ['bom', 'bom.style', 'bom.style.overview', 'material'],
-      order: { id: 'DESC' },
-    });
-    if (!bomItem) {
+    const resolution = await resolveBomItemForPurchaseOrder(this.bomRepository, po);
+    if (resolution.kind === 'NO_BOM') {
       throw new BadRequestException(
         `발주 ID ${po.id}(품목: ${po.item?.name ?? po.itemId})가 어떤 자재명세(BOM)에도 연결되어 있지 않아 포장내역 양식에 필요한 스타일 정보를 확인할 수 없습니다. 먼저 BOM에 이 자재를 등록해 주세요.`,
       );
     }
-    return bomItem;
+    if (resolution.kind === 'STYLE_MISMATCH') {
+      throw new BadRequestException(styleMismatchMessage(resolution.styleNo));
+    }
+    if (resolution.kind === 'AMBIGUOUS_UNLINKED') {
+      throw new BadRequestException(AMBIGUOUS_UNLINKED_MESSAGE);
+    }
+    // 호출부가 bomItem.bom.style(.overview)로 접근하므로 조회해 둔 bom을 그대로 붙여 준다
+    // (BomItem.bom은 조회 시 relations에 넣지 않으면 비어 있는 일반 관계 필드이기 때문).
+    return { ...resolution.bomItem, bom: resolution.bom } as BomItem;
   }
 
   async buildTemplateContext(purchaseOrderId: number): Promise<PackingReceiptTemplateContext> {

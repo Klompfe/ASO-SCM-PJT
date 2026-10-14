@@ -9,6 +9,7 @@ import {
   resolveSubTypeValue,
   prefillHandwrittenCmtDraft,
 } from '../utils/salesOrderOverviewEdit';
+import { buildUploadFailureInfo, resolveUploadFailureToastMessage, type UploadFailureInfo } from '../utils/salesOrderUploadError';
 
 interface Props {
   isOpen: boolean;
@@ -39,6 +40,23 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   const [usageSummary, setUsageSummary] = useState<AiUsageSummary | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(0);
+  // PR-192: 분석 실패가 토스트(사라짐)만으로 끝나면 "결과 없이 멈춘 것"처럼 보인다 —
+  // 닫기 전까지 유지되는 안내 영역에 원인/시도시각/경과시간/다음 행동/재시도 버튼을 둔다.
+  const [uploadError, setUploadError] = useState<UploadFailureInfo | null>(null);
+  // PR-192: 분석 중(특히 페이지가 많을 때) "결과 없음"으로 오해하지 않도록 경과 초를 보여준다.
+  const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
+  // PR-192: 폴백 모델로 처리된 경우 — 저장 전 사람이 인식 결과를 더 꼼꼼히 확인하도록 안내.
+  const [fallbackUsed, setFallbackUsed] = useState(false);
+
+  useEffect(() => {
+    if (!loading) return;
+    const startedAt = Date.now();
+    setLoadingElapsedSec(0);
+    const timer = window.setInterval(() => {
+      setLoadingElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -71,6 +89,9 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   const handleUpload = async () => {
     if (!file) return;
     setLoading(true);
+    setUploadError(null);
+    const triedAt = new Date();
+    const startedMs = Date.now();
     try {
       const res = await uploadSalesOrderImage(file);
       const data: AiSalesOrderResult[] = Array.isArray(res?.results) ? res.results : [];
@@ -81,6 +102,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       setResults(prefillHandwrittenCmtDraft(data));
       setLastChargeKrw(charge);
       setIsMock(mock);
+      setFallbackUsed(res?.fallbackUsed === true);
       setSavedIndexes(new Set());
       setStep(2);
       if (mock) {
@@ -90,7 +112,10 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
         getAiUsageSummary().then((r) => setUsageSummary(r)).catch(() => {});
       }
     } catch (e) {
-      toast.error(getErrorMessage(e, 'AI 분석 실패'));
+      const elapsedSec = Math.round((Date.now() - startedMs) / 1000);
+      const info = buildUploadFailureInfo(e, triedAt, elapsedSec);
+      toast.error(resolveUploadFailureToastMessage(info.cause, getErrorMessage(e, '')));
+      setUploadError(info);
     } finally {
       setLoading(false);
     }
@@ -191,6 +216,8 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setSavedIndexes(new Set());
     setLastChargeKrw(null);
     setIsMock(false);
+    setUploadError(null);
+    setFallbackUsed(false);
     onClose();
   };
 
@@ -228,8 +255,20 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                 </span>
               </label>
               <button onClick={handleUpload} className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50" disabled={!file || loading}>
-                {loading ? '분석 중...' : 'AI 분석 시작'}
+                {loading ? `분석 중... (페이지가 많으면 수 분 걸립니다, ${loadingElapsedSec}초 경과)` : 'AI 분석 시작'}
               </button>
+              {uploadError && (
+                <div className="border-2 border-orange-300 bg-orange-50 rounded-lg p-3 text-sm space-y-1" data-testid="upload-error-panel">
+                  <p className="font-semibold text-orange-800">⚠️ AI 분석 실패 — {uploadError.causeLabel}</p>
+                  <p className="text-orange-700">시도 시각 {uploadError.triedAt} · 경과 {uploadError.elapsedSec}초</p>
+                  <p className="text-orange-700">{uploadError.nextAction}</p>
+                  <button
+                    onClick={handleUpload}
+                    disabled={loading}
+                    className="mt-1 bg-orange-600 text-white px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50"
+                  >다시 시도</button>
+                </div>
+              )}
             </div>
           )}
 
@@ -238,6 +277,11 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
               {isMock && (
                 <div className="bg-red-50 border-2 border-red-400 text-red-800 rounded-lg p-3 text-sm font-semibold">
                   ⚠️ 목업 데이터입니다 — 실제 AI 분석이 아닙니다. 관리자에게 GEMINI_API_KEY 설정을 요청하세요. (저장이 비활성화되었습니다)
+                </div>
+              )}
+              {!isMock && fallbackUsed && (
+                <div className="bg-blue-50 border border-blue-300 text-blue-800 rounded-lg p-3 text-sm" data-testid="fallback-model-notice">
+                  ℹ️ 대체 AI 모델로 분석했습니다. 인식 결과를 더 꼼꼼히 확인해 주세요.
                 </div>
               )}
               <div className="flex justify-between items-center gap-4">

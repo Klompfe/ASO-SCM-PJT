@@ -8,6 +8,7 @@ import { PackingReceiptRoll } from './entities/packing-receipt-roll.entity';
 import { PackingReceiptCarton } from './entities/packing-receipt-carton.entity';
 import { PurchaseOrderLine } from './entities/purchase-order-line.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
+import { Bom } from '../boms/entities/bom.entity';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PackingReceiptsService } from './packing-receipts.service';
@@ -23,7 +24,7 @@ import { PriceReferenceService } from './price-reference.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PurchaseOrder, PurchaseOrderLine, Item, PackingReceipt, PackingReceiptRoll, PackingReceiptCarton, BomItem]),
+    TypeOrmModule.forFeature([PurchaseOrder, PurchaseOrderLine, Item, PackingReceipt, PackingReceiptRoll, PackingReceiptCarton, BomItem, Bom]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     AuthModule,
     MidoPriceTableModule,
