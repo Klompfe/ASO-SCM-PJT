@@ -5,6 +5,7 @@ import { ExportShipmentsService } from './export-shipments.service';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { PackingReceipt } from '../purchase-orders/entities/packing-receipt.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
+import { Bom } from '../boms/entities/bom.entity';
 import { ExportShipment } from './entities/export-shipment.entity';
 import { ExportShipmentLine } from './entities/export-shipment-line.entity';
 import { ExportShipmentDefaultsService } from '../export-shipment-defaults/export-shipment-defaults.service';
@@ -34,6 +35,7 @@ describe('ExportShipmentsService.findAll — 검색 필터 (PR-102)', () => {
         { provide: getRepositoryToken(PurchaseOrder), useValue: {} },
         { provide: getRepositoryToken(PackingReceipt), useValue: {} },
         { provide: getRepositoryToken(BomItem), useValue: {} },
+        { provide: getRepositoryToken(Bom), useValue: {} },
         {
           provide: getRepositoryToken(ExportShipment),
           useValue: { find: jest.fn(), createQueryBuilder: jest.fn() },
@@ -127,6 +129,7 @@ describe('ExportShipmentsService.updateExchangeRate / confirmLinePrice (PR-157)'
         { provide: getRepositoryToken(PurchaseOrder), useValue: { findOne: jest.fn(), find: jest.fn() } },
         { provide: getRepositoryToken(PackingReceipt), useValue: { findOne: jest.fn(), find: jest.fn() } },
         { provide: getRepositoryToken(BomItem), useValue: {} },
+        { provide: getRepositoryToken(Bom), useValue: {} },
         { provide: getRepositoryToken(ExportShipment), useValue: { findOne: jest.fn(), save: jest.fn((x) => x) } },
         { provide: getRepositoryToken(ExportShipmentLine), useValue: { findOne: jest.fn(), save: jest.fn((x) => x) } },
         { provide: ExportShipmentDefaultsService, useValue: {} },

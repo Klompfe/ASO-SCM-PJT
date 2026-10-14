@@ -23,6 +23,8 @@ import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rule
 import { CustomsExchangeRatesService, type ExchangeRateLookupResult } from '../customs-exchange-rates/customs-exchange-rates.service';
 import { ExchangeRateType } from '../customs-exchange-rates/entities/customs-exchange-rate.entity';
 import { effectiveSubType } from '../common/utils/packaging-subtype.util';
+import { Bom } from '../boms/entities/bom.entity';
+import { resolveBomItemForPurchaseOrder, AMBIGUOUS_UNLINKED_MESSAGE, styleMismatchMessage } from '../purchase-orders/utils/resolve-po-bom-item.util';
 
 const sum = (arr: { [key: string]: any }[], key: string): number =>
   arr.reduce((total, item) => total + (Number(item[key]) || 0), 0);
@@ -43,6 +45,8 @@ export class ExportShipmentsService {
     private readonly packingReceiptRepository: Repository<PackingReceipt>,
     @InjectRepository(BomItem)
     private readonly bomItemRepository: Repository<BomItem>,
+    @InjectRepository(Bom)
+    private readonly bomRepository: Repository<Bom>,
     @InjectRepository(ExportShipment)
     private readonly exportShipmentRepository: Repository<ExportShipment>,
     @InjectRepository(ExportShipmentLine)
@@ -133,19 +137,26 @@ export class ExportShipmentsService {
         throw new NotFoundException(`ID가 ${purchaseOrderId}인 발주를 찾을 수 없습니다.`);
       }
 
-      const bomItem = await this.bomItemRepository.findOne({
-        where: { material: { id: po.itemId } },
-        relations: ['bom', 'bom.style', 'material'],
-        order: { id: 'DESC' },
-      });
-      if (!bomItem) {
+      // PR-196: material.id = po.itemId인 BomItem 중 "가장 나중에 만든 것"(id DESC)을
+      // 쓰던 예전 로직은 같은 자재가 여러 스타일 BOM에 있으면 엉뚱한 스타일이 INVOICE에
+      // 찍히는 원인이었다 — 발주에 연결된 스타일(po.styleNo)을 우선 쓰고, 미연결 발주는
+      // 그 자재를 쓰는 스타일이 1개일 때만 허용한다(2개 이상이면 모호 — 추측 금지).
+      const resolution = await resolveBomItemForPurchaseOrder(this.bomRepository, po);
+      if (resolution.kind === 'NO_BOM') {
         throw new BadRequestException(
           `발주 ID ${purchaseOrderId}(품목: ${po.item?.name ?? po.itemId})가 어떤 자재명세(BOM)에도 연결되어 있지 않아 ` +
             'INVOICE에 필요한 스타일/규격/혼용율 정보를 확인할 수 없습니다. 먼저 BOM에 이 자재를 등록해 주세요.',
         );
       }
+      if (resolution.kind === 'STYLE_MISMATCH') {
+        throw new BadRequestException(styleMismatchMessage(resolution.styleNo));
+      }
+      if (resolution.kind === 'AMBIGUOUS_UNLINKED') {
+        throw new BadRequestException(AMBIGUOUS_UNLINKED_MESSAGE);
+      }
+      const bomItem = resolution.bomItem;
 
-      const styleNo = bomItem.bom.style.styleNo;
+      const styleNo = resolution.bom.style!.styleNo;
       styleNoSet.add(styleNo);
       const description = [bomItem.spec, bomItem.material?.englishName, bomItem.composition]
         .filter((v) => v != null && String(v).trim() !== '')
