@@ -12,6 +12,7 @@ import { CreateMasterStyleDto } from './dto/create-master-style.dto';
 import { UpdateMasterStyleDto } from './dto/update-master-style.dto';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
 import { classifyBrand } from '../common/utils/brand-classifier.util';
+import { findSimilarStyleNos } from './utils/style-no-similarity.util';
 
 export interface MasterStyleWithBrand extends MasterStyle {
   brand: string | null;
@@ -166,5 +167,14 @@ export class StylesService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  // PR-198: 작지 AI가 스타일번호 끝 영문 구분자를 놓치는 오인식을 사람에게 알려주기
+  // 위한 읽기 전용 조회 — 기존 findAll 응답(브랜드 분류 등)에는 영향 없음. 전체
+  // 스타일번호만 가져와(가벼운 쿼리) 순수 함수로 비교한다.
+  async findSimilar(styleNo: string): Promise<{ styleNo: string }[]> {
+    const all = await this.masterStyleRepository.find({ select: ['styleNo'] });
+    const candidates = findSimilarStyleNos(styleNo, all.map((s) => s.styleNo));
+    return candidates.map((s) => ({ styleNo: s }));
   }
 }

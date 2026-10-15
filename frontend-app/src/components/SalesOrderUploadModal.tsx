@@ -18,6 +18,8 @@ import {
 } from '../utils/salesOrderBomReview';
 import { getAllItems } from '../api/items.service';
 import { buildUploadFailureInfo, resolveUploadFailureToastMessage, type UploadFailureInfo } from '../utils/salesOrderUploadError';
+import { getSimilarMasterStyles } from '../api/styles.service';
+import { findSimilarStyleNos } from '../utils/styleNoSimilarity';
 
 interface Props {
   isOpen: boolean;
@@ -63,6 +65,23 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
   // PR-192: 폴백 모델로 처리된 경우 — 저장 전 사람이 인식 결과를 더 꼼꼼히 확인하도록 안내.
   const [fallbackUsed, setFallbackUsed] = useState(false);
+  // PR-198: 작지 AI가 읽은 스타일번호가 기존 스타일과 "끝 글자만 다른" 경우의 후보 목록
+  // (결과 인덱스별) — 자동 변경하지 않고 버튼을 눌러야 입력칸 값이 바뀐다.
+  const [similarStyleCandidates, setSimilarStyleCandidates] = useState<Map<number, string[]>>(new Map());
+
+  const refreshSimilarStyleCandidates = async (index: number, styleNo: string | null) => {
+    if (!styleNo) {
+      setSimilarStyleCandidates((prev) => { const next = new Map(prev); next.delete(index); return next; });
+      return;
+    }
+    try {
+      const similar = await getSimilarMasterStyles(styleNo);
+      const candidates = findSimilarStyleNos(styleNo, similar.map((s) => s.styleNo));
+      setSimilarStyleCandidates((prev) => { const next = new Map(prev); next.set(index, candidates); return next; });
+    } catch {
+      // 조회 실패는 조용히 넘어간다 — 이 경고는 참고용이라 실패해도 저장을 막지 않는다.
+    }
+  };
 
   useEffect(() => {
     if (!loading) return;
@@ -127,6 +146,9 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       getAllItems({})
         .then((items) => setExistingMaterialNames(new Set(items.map((it) => normalizeMaterialName(it.name)))))
         .catch(() => setExistingMaterialNames(new Set()));
+      // PR-198: 결과마다 읽은 스타일번호가 기존 스타일과 끝 글자만 다른지 확인한다.
+      setSimilarStyleCandidates(new Map());
+      data.forEach((r, i) => { void refreshSimilarStyleCandidates(i, r.overview.styleNo ?? null); });
       if (mock) {
         toast.error('⚠️ 목업 데이터입니다 — 실제 AI 분석이 아닙니다. 관리자에게 GEMINI_API_KEY 설정을 요청하세요.', { duration: 10000 });
       } else if (charge > 0) {
@@ -152,6 +174,8 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     value: AiSalesOrderResult['overview'][K],
   ) => {
     setResults((prev) => updateOverviewFieldPure(prev, index, field, value));
+    // PR-198: 스타일번호를 직접 고치면 그 값 기준으로 유사 스타일 후보를 다시 조회한다.
+    if (field === 'styleNo') void refreshSimilarStyleCandidates(index, (value as string | null) ?? null);
   };
 
   // PR-197: 체크하면 저장 요청에서 빠진다(되돌릴 수 있음 — 체크 해제로 복원).
@@ -183,6 +207,17 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     if (isMock) {
       toast.error('목업 데이터는 저장할 수 없습니다.');
       return;
+    }
+    // PR-198: 저장 직전에도 한 번 더 확인 — 비슷한 스타일이 있는데 번호가 다르면
+    // "새 스타일로 만들까요?"로 한 번 더 묻는다(자동 변경 없음, 사람이 계속 진행을 선택).
+    const styleNo = results[index].overview.styleNo;
+    const candidates = similarStyleCandidates.get(index) ?? [];
+    if (styleNo && candidates.length > 0) {
+      const proceed = window.confirm(
+        `비슷한 스타일 ${candidates.join(', ')}이(가) 이미 있습니다 — 같은 스타일이면 번호를 확인해 주세요.\n` +
+        `계속 "${styleNo}"로 새 스타일을 만들까요?`,
+      );
+      if (!proceed) return;
     }
     const result = buildCommitResult(results[index], excludedBomIndexes.get(index) ?? new Set());
     if (hasBlankMaterialName(result.bomItems)) {
@@ -277,6 +312,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setEditedBomIndexes(new Map());
     setUploadError(null);
     setFallbackUsed(false);
+    setSimilarStyleCandidates(new Map());
     onClose();
   };
 
@@ -391,9 +427,25 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                         <span className="text-gray-500 text-xs">Style No.</span>
                         <input
                           className="border rounded px-2 py-1"
+                          data-testid={`style-no-input-${index}`}
                           value={result.overview.styleNo ?? ''}
                           onChange={(e) => updateOverviewField(index, 'styleNo', e.target.value || null)}
                         />
+                        {/* PR-198: 끝 글자만 다른 기존 스타일이 있으면 알려준다 — 자동으로
+                            바꾸지 않고 버튼을 눌러야 입력칸 값이 바뀐다. */}
+                        {(similarStyleCandidates.get(index) ?? []).length > 0 && (
+                          <div className="mt-0.5 bg-yellow-50 border border-yellow-200 rounded px-1.5 py-1 text-xs text-yellow-800" data-testid={`similar-style-warning-${index}`}>
+                            비슷한 스타일 {(similarStyleCandidates.get(index) ?? []).join(', ')}이(가) 이미 있습니다 — 같은 스타일이면 번호를 확인해 주세요.
+                            {(similarStyleCandidates.get(index) ?? []).map((candidate) => (
+                              <button
+                                key={candidate}
+                                type="button"
+                                onClick={() => updateOverviewField(index, 'styleNo', candidate)}
+                                className="ml-1 px-1 rounded bg-yellow-600 text-white hover:bg-yellow-700"
+                              >{candidate}로 바꾸기</button>
+                            ))}
+                          </div>
+                        )}
                       </label>
                       <label className="flex flex-col">
                         <span className="text-gray-500 text-xs">스타일명</span>

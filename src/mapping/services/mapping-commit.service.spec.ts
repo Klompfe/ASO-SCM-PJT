@@ -8,7 +8,10 @@ import { BomItem } from '../../boms/entities/bom-item.entity';
 import { ImportFile } from '../../imports/entities/import-file.entity';
 import { Item } from '../../items/entities/item.entity';
 import { MasterStyle } from '../../styles/entities/master-style.entity';
+import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
 import { CommitMappingDto } from '../dto/commit-mapping.dto';
+import { BomDiffRequestDto } from '../dto/bom-diff.dto';
+import { BomReconcileRequestDto } from '../dto/bom-reconcile.dto';
 
 describe('MappingCommitService', () => {
   let service: MappingCommitService;
@@ -18,6 +21,8 @@ describe('MappingCommitService', () => {
     find: jest.fn(),
     save: jest.fn((_entity: any, data: any) => Promise.resolve(data)),
     create: jest.fn((_entity: any, data: any) => data),
+    delete: jest.fn(),
+    count: jest.fn().mockResolvedValue(0),
   };
 
   const mockQueryRunner = {
@@ -29,8 +34,15 @@ describe('MappingCommitService', () => {
     manager: mockQueryRunnerManager,
   };
 
+  // diff()는 트랜잭션 없이 this.dataSource.manager를 직접 쓴다(읽기 전용).
+  const mockDataSourceManager = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+  };
+
   const mockDataSource = {
     createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
+    manager: mockDataSourceManager,
   };
 
   const validPayload: CommitMappingDto = {
@@ -54,6 +66,10 @@ describe('MappingCommitService', () => {
     mockQueryRunnerManager.create.mockImplementation((_entity: any, data: any) => data);
     mockQueryRunnerManager.findOne.mockResolvedValue(null);
     mockQueryRunnerManager.find.mockResolvedValue([]); // 기본: 이 스타일에 등록된 BOM 없음
+    mockQueryRunnerManager.delete.mockResolvedValue({ affected: 1 });
+    mockQueryRunnerManager.count.mockResolvedValue(0);
+    mockDataSourceManager.find.mockResolvedValue([]);
+    mockDataSourceManager.findOne.mockResolvedValue(null);
 
     service = new MappingCommitService(mockDataSource as unknown as DataSource);
   });
@@ -564,6 +580,195 @@ describe('MappingCommitService', () => {
 
       const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
       expect(bomItemSave[1].composition).toBe('WOOL 98%, POLYURETHANE 2%');
+    });
+  });
+
+  // PR-198: 저장 전 "기존 BOM과 비교"(읽기 전용) — MB73SKM109Z 실사례(다데<실크> 2.7→2.9) 재현.
+  describe('diff (PR-198)', () => {
+    const existingBomItem: BomItem = {
+      id: 501,
+      bom: undefined as any,
+      material: { id: 10, name: '다데<실크>' } as any,
+      category: '부자재',
+      colorCode: 'N/A',
+      spec: 'N/A',
+      consumption: 2.7 as any,
+      requiredQty: 2646 as any,
+      supplier: null,
+      unitPrice: 0 as any,
+      remarks: 'N/A',
+      composition: null,
+      hsCode: null,
+    };
+    const existingBom: Bom = {
+      id: 77,
+      bomNo: 'BOM-MB73SKM109Z-001',
+      version: 'V1',
+      isActive: true,
+      style: undefined as any,
+      items: [existingBomItem],
+    };
+
+    const diffPayload: BomDiffRequestDto = {
+      styleNo: 'MB73SKM109Z',
+      bomItems: [{ itemName: '다데<실크>', category: '부자재', consumption: 2.9 } as any],
+    };
+
+    it('그 스타일에 등록된 BOM이 없으면 hasExistingBom=false만 돌려주고 비교하지 않는다', async () => {
+      mockDataSourceManager.find.mockResolvedValue([]);
+      const result = await service.diff(diffPayload);
+      expect(result).toEqual({ hasExistingBom: false });
+    });
+
+    it('기존 BOM이 있으면 요척 2.7→2.9 차이를 VALUE_DIFF로 분류한다', async () => {
+      mockDataSourceManager.find.mockImplementation((entity: any) =>
+        Promise.resolve(entity === Bom ? [existingBom] : []),
+      );
+      const result = await service.diff(diffPayload);
+      expect(result.hasExistingBom).toBe(true);
+      expect(result.rows).toEqual([
+        {
+          type: 'VALUE_DIFF',
+          existing: expect.objectContaining({ bomItemId: 501, itemName: '다데<실크>', consumption: 2.7, linkedPoCount: 0 }),
+          incoming: expect.objectContaining({ itemName: '다데<실크>', consumption: 2.9 }),
+        },
+      ]);
+    });
+
+    it('기존 행에 연결된(취소 아닌) 발주가 있으면 linkedPoCount가 채워진다', async () => {
+      mockDataSourceManager.find.mockImplementation((entity: any) => {
+        if (entity === Bom) return Promise.resolve([existingBom]);
+        if (entity === PurchaseOrder) return Promise.resolve([{ itemId: 10 }, { itemId: 10 }]);
+        return Promise.resolve([]);
+      });
+      const result = await service.diff(diffPayload);
+      expect(result.rows?.[0].existing?.linkedPoCount).toBe(2);
+    });
+  });
+
+  // PR-198: 비교 화면에서 고른 동작 적용 — all-or-nothing.
+  describe('reconcile (PR-198)', () => {
+    const bomItem = (id: number, materialName: string, consumption: number): BomItem => ({
+      id,
+      bom: undefined as any,
+      material: { id: id + 1000, name: materialName } as any,
+      category: '부자재',
+      colorCode: 'N/A',
+      spec: 'N/A',
+      consumption: consumption as any,
+      requiredQty: (consumption * 980) as any,
+      supplier: null,
+      unitPrice: 0 as any,
+      remarks: 'N/A',
+      composition: null,
+      hsCode: null,
+    });
+
+    const bomFixture = (items: BomItem[]): Bom => ({
+      id: 77,
+      bomNo: 'BOM-MB73SKM109Z-001',
+      version: 'V1',
+      isActive: true,
+      style: { styleNo: 'MB73SKM109Z', overview: { totalQty: 980 } } as any,
+      items,
+    });
+
+    it('OVERWRITE — 요척을 2.7→2.9로 덮어쓰면 소요량도 2.9×980=2,842로 재계산된다', async () => {
+      const existing = bomItem(501, '다데<실크>', 2.7);
+      mockQueryRunnerManager.find.mockResolvedValue([bomFixture([existing])]);
+
+      const payload: BomReconcileRequestDto = {
+        styleNo: 'MB73SKM109Z',
+        actions: [{ type: 'OVERWRITE', bomItemId: 501, newItem: { itemName: '다데<실크>', consumption: 2.9 } as any }],
+      };
+      const result = await service.reconcile(payload);
+
+      expect(result.applied).toEqual({ overwritten: 1, added: 0, removed: 0, replaced: 0 });
+      const saveCall = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(saveCall[1]).toEqual(expect.objectContaining({ consumption: 2.9, requiredQty: 2842 }));
+      expect(mockQueryRunner.commitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('ADD — 엑셀에만 있는 행을 새 BOM 행으로 추가한다(자재는 이름으로 찾고 없으면 생성)', async () => {
+      mockQueryRunnerManager.find.mockResolvedValue([bomFixture([])]);
+      mockQueryRunnerManager.findOne.mockResolvedValue(null); // 자재 마스터에 없음 → 새로 생성
+
+      const payload: BomReconcileRequestDto = {
+        styleNo: 'MB73SKM109Z',
+        actions: [{ type: 'ADD', newItem: { itemName: '새자재', consumption: 1 } as any }],
+      };
+      const result = await service.reconcile(payload);
+
+      expect(result.applied.added).toBe(1);
+      const itemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === Item);
+      expect(itemSave).toBeDefined();
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1]).toEqual(expect.objectContaining({ consumption: 1, requiredQty: 980 }));
+    });
+
+    it('REMOVE — 행을 제거해도 Item/발주는 건드리지 않고, 연결 발주가 있으면 warnings에 남는다', async () => {
+      const existing = bomItem(501, '다데<실크>', 2.7);
+      mockQueryRunnerManager.find.mockResolvedValue([bomFixture([existing])]);
+      mockQueryRunnerManager.count.mockResolvedValue(3);
+
+      const payload: BomReconcileRequestDto = { styleNo: 'MB73SKM109Z', actions: [{ type: 'REMOVE', bomItemId: 501 }] };
+      const result = await service.reconcile(payload);
+
+      expect(result.applied.removed).toBe(1);
+      expect(mockQueryRunnerManager.delete).toHaveBeenCalledWith(BomItem, 501);
+      expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('연결된 발주(취소 제외) 3건')]));
+    });
+
+    it('REPLACE — 기존 행이 가리키는 자재를 엑셀 이름의(이미 있는) 자재로 바꾸고 값도 갱신한다', async () => {
+      const existing = bomItem(501, 'DARK GREY DG (원단A)', 1.73);
+      mockQueryRunnerManager.find.mockResolvedValue([bomFixture([existing])]);
+      const replacementMaterial = { id: 999, name: '원단A' };
+      mockQueryRunnerManager.findOne.mockResolvedValue(replacementMaterial);
+
+      const payload: BomReconcileRequestDto = {
+        styleNo: 'MB73SKM109Z',
+        actions: [{ type: 'REPLACE', bomItemId: 501, newItem: { itemName: '원단A', consumption: 1.72 } as any }],
+      };
+      const result = await service.reconcile(payload);
+
+      expect(result.applied.replaced).toBe(1);
+      const saveCall = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(saveCall[1].material).toEqual(replacementMaterial);
+      expect(saveCall[1]).toEqual(expect.objectContaining({ consumption: 1.72 }));
+    });
+
+    it('다른 스타일의 bomItemId가 섞이면 400이고 전체 롤백된다', async () => {
+      const existing = bomItem(501, '다데<실크>', 2.7);
+      mockQueryRunnerManager.find.mockResolvedValue([bomFixture([existing])]);
+
+      const payload: BomReconcileRequestDto = {
+        styleNo: 'MB73SKM109Z',
+        actions: [
+          { type: 'OVERWRITE', bomItemId: 501, newItem: { itemName: '다데<실크>', consumption: 2.9 } as any },
+          { type: 'REMOVE', bomItemId: 9999 }, // 이 스타일 BOM 소속이 아님
+        ],
+      };
+
+      await expect(service.reconcile(payload)).rejects.toThrow();
+      expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
+      // 첫 action(OVERWRITE)이 실제로 save되지 않았어야 한다(validation을 모든 action에 대해 먼저 수행).
+      expect(mockQueryRunnerManager.save.mock.calls.some(([entity]: any) => entity === BomItem)).toBe(false);
+    });
+
+    it('등록된 BOM이 없는 스타일이면 404', async () => {
+      mockQueryRunnerManager.find.mockResolvedValue([]);
+      const payload: BomReconcileRequestDto = { styleNo: 'NO-SUCH-STYLE', actions: [] };
+      await expect(service.reconcile(payload)).rejects.toThrow();
+    });
+
+    it('제거해도 Item 마스터는 삭제하지 않는다(delete는 BomItem에만 호출)', async () => {
+      const existing = bomItem(501, '다데<실크>', 2.7);
+      mockQueryRunnerManager.find.mockResolvedValue([bomFixture([existing])]);
+
+      await service.reconcile({ styleNo: 'MB73SKM109Z', actions: [{ type: 'REMOVE', bomItemId: 501 }] });
+
+      expect(mockQueryRunnerManager.delete).not.toHaveBeenCalledWith(Item, expect.anything());
     });
   });
 });
