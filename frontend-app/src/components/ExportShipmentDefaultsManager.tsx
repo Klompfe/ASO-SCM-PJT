@@ -8,11 +8,13 @@ import {
 import { getErrorMessage } from '../utils/errorMessage';
 
 const emptyForm: UpdateExportShipmentDefaults = {
-  shipperInfo: '', consigneeInfo: '', portOfLoading: '', finalDestination: '', carrier: '',
+  shipperInfo: '', consigneeInfo: '', portOfLoading: '', finalDestination: '',
 };
 
-// PR-079: 매번 바뀌지 않는 회사 고정정보(선적자/수하인/출항지/도착지/운송사) 기본값
+// PR-079: 매번 바뀌지 않는 회사 고정정보(선적자/수하인/출항지/도착지) 기본값
 // 화면 — MANAGER/ADMIN만 이 탭에 접근할 수 있다(App.tsx에서 탭 자체를 숨김).
+// PR-193: Carrier(선박/운송사/항차)는 선적 건마다 바뀌는 값이라 기본값에서 뺐다 —
+// 이전 선적의 Carrier가 새 서류에 그대로 들어가는 사고 위험 때문(건별 헤더 입력은 유지).
 export const ExportShipmentDefaultsManager: React.FC = () => {
   const [form, setForm] = useState<UpdateExportShipmentDefaults>(emptyForm);
   const [loading, setLoading] = useState(false);
@@ -29,7 +31,6 @@ export const ExportShipmentDefaultsManager: React.FC = () => {
           consigneeInfo: res.consigneeInfo ?? '',
           portOfLoading: res.portOfLoading ?? '',
           finalDestination: res.finalDestination ?? '',
-          carrier: res.carrier ?? '',
         });
         setUpdatedAt(res.updatedAt ?? null);
       } else {
@@ -112,16 +113,6 @@ export const ExportShipmentDefaultsManager: React.FC = () => {
               />
             </div>
           </div>
-          <div className="flex flex-col">
-            <label className="text-sm text-gray-600 mb-1">Carrier</label>
-            <input
-              className="border border-gray-300 rounded px-3 py-2"
-              placeholder="예: DONGJIN CONTINENTAL / 0217W"
-              value={form.carrier}
-              onChange={(e) => setForm({ ...form, carrier: e.target.value })}
-            />
-          </div>
-
           <div className="flex items-center gap-3">
             <button
               type="submit"

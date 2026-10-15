@@ -24,6 +24,20 @@ export class AiOverviewDto {
   @IsBoolean()
   targetRddSuspicious?: boolean;
 
+  // PR-190: 서버가 계산해 내려주는 값(AI가 채우는 필드 아님) — 납기에 연도가 없어
+  // 작성일보다 이른 날짜로 인식됐을 때 다음 해로 자동 보정했는지와, 보정했다면 원래
+  // 인식값(화면 안내용). commitAnalysis()는 targetRddSuspicious와 마찬가지로 이 두
+  // 필드를 읽지 않는다(targetRdd 자체만 저장).
+  @ApiPropertyOptional({ description: '납기 연도를 다음 해로 자동 보정했는지(서버 계산)' })
+  @IsOptional()
+  @IsBoolean()
+  targetRddYearAdjusted?: boolean;
+
+  @ApiPropertyOptional({ description: '연도 보정 전 원래 인식값(YYYY-MM-DD, 보정했을 때만, 서버 계산)' })
+  @IsOptional()
+  @IsString()
+  targetRddOriginal?: string | null;
+
   // PR-168: 미도 전용 — 작업지시서 이미지 상단에 수기로 적힌 CMT단가 숫자(AI 후보일
   // 뿐, 그대로 저장되지 않는다). 미도가 아닌 바이어 건은 vision.service.ts가 결정적으로
   // null로 덮어쓴다(바이어 인식 자체를 AI 판단에만 맡기지 않음, PR-158과 동일한 원칙).

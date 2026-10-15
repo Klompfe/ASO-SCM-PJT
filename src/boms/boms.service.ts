@@ -1,12 +1,28 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { Bom } from './entities/bom.entity';
 import { BomItem } from './entities/bom-item.entity';
 import { UpdateBomItemDto } from './dto/update-bom-item.dto';
+import { SwapBomItemMaterialDto } from './dto/swap-bom-item-material.dto';
 import { Item, ItemType } from '../items/entities/item.entity';
+import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
 import { LABEL_SET } from './label-set.constants';
 import { areBomContentsIdentical, normalizeMaterialName, pickActiveBom } from './utils/active-bom.util';
+
+// PR-197: updateItem()이 돌려주는 변경 전 값 스냅샷 — 화면이 "요척 2.7 → 2.9" 같은
+// 변경 전/후 확인 문구를 만들 수 있게 한다(감사 테이블은 만들지 않음, 서버 로그만 남김).
+export interface BomItemBeforeSnapshot {
+  composition: string | null | undefined;
+  hsCode: string | null | undefined;
+  threadType: string | null | undefined;
+  tapeType: string | null | undefined;
+  consumption: number;
+  spec: string;
+  colorCode: string;
+  category: string;
+  requiredQty: number;
+}
 
 export interface DuplicateBomItemView {
   id: number;
@@ -50,6 +66,8 @@ export interface AddLabelSetResult {
 
 @Injectable()
 export class BomsService {
+  private readonly logger = new Logger(BomsService.name);
+
   constructor(
     @InjectRepository(Bom)
     private readonly bomRepository: Repository<Bom>,
@@ -57,6 +75,8 @@ export class BomsService {
     private readonly bomItemRepository: Repository<BomItem>,
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @InjectRepository(PurchaseOrder)
+    private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
   ) {}
 
   // 같은 style에 Bom이 여러 개 생성될 수 있는 알려진 이슈가 있어(CHARTER.md 5.2절), 화면/재고 차감/소요명세서가
@@ -73,21 +93,116 @@ export class BomsService {
   }
 
   // PR-073: 자재명세(BOM) 상세 화면에서 혼용율/HS코드를 인라인으로 수정한다.
-  async updateItem(id: number, dto: UpdateBomItemDto): Promise<BomItem> {
+  // PR-197: 요척/규격/색상/구분도 여기서 고칠 수 있다. 요척이 바뀌면 requiredQty(소요량
+  // 스냅샷)도 "요척 × 스타일 총수량"으로 같이 갱신한다 — 실제 소요량 계산(work-orders 쪽
+  // calculateMaterialRequirements)은 BomItem.requiredQty가 아니라 매번 consumption ×
+  // targetQuantity로 다시 계산하므로 이 재계산이 그 값에 영향을 주지는 않지만, 이
+  // 컬럼을 그대로 보여주는 다른 화면과 어긋나지 않게 스냅샷을 맞춰 둔다. 총수량이 없는
+  // 스타일(StyleOverview 미등록 등)이면 requiredQty는 건드리지 않는다.
+  async updateItem(id: number, dto: UpdateBomItemDto): Promise<BomItem & { before: BomItemBeforeSnapshot }> {
     const bomItem = await this.bomItemRepository.findOne({
       where: { id },
-      relations: ['material'],
+      relations: ['material', 'bom', 'bom.style', 'bom.style.overview'],
     });
     if (!bomItem) {
       throw new NotFoundException(`ID가 ${id}인 자재명세 항목을 찾을 수 없습니다.`);
     }
 
+    const before: BomItemBeforeSnapshot = {
+      composition: bomItem.composition,
+      hsCode: bomItem.hsCode,
+      threadType: bomItem.threadType,
+      tapeType: bomItem.tapeType,
+      consumption: Number(bomItem.consumption),
+      spec: bomItem.spec,
+      colorCode: bomItem.colorCode,
+      category: bomItem.category,
+      requiredQty: Number(bomItem.requiredQty),
+    };
+
     if (dto.composition !== undefined) bomItem.composition = dto.composition;
     if (dto.hsCode !== undefined) bomItem.hsCode = dto.hsCode;
     if (dto.threadType !== undefined) bomItem.threadType = dto.threadType;
     if (dto.tapeType !== undefined) bomItem.tapeType = dto.tapeType;
+    if (dto.spec !== undefined) bomItem.spec = dto.spec;
+    if (dto.colorCode !== undefined) bomItem.colorCode = dto.colorCode;
+    if (dto.category !== undefined) bomItem.category = dto.category;
+    if (dto.consumption !== undefined) {
+      bomItem.consumption = dto.consumption;
+      const totalQty = Number(bomItem.bom?.style?.overview?.totalQty);
+      if (Number.isFinite(totalQty) && totalQty > 0) {
+        bomItem.requiredQty = Math.round(dto.consumption * totalQty * 10000) / 10000;
+      }
+    }
 
-    return await this.bomItemRepository.save(bomItem);
+    const saved = await this.bomItemRepository.save(bomItem);
+
+    const after: Record<string, unknown> = { ...saved };
+    for (const field of Object.keys(before) as (keyof BomItemBeforeSnapshot)[]) {
+      const beforeValue = before[field];
+      const afterValue = field === 'consumption' || field === 'requiredQty' ? Number(after[field]) : after[field];
+      if (beforeValue !== afterValue) {
+        this.logger.log(`BomItem #${id} ${field}: ${beforeValue} → ${afterValue}`);
+      }
+    }
+
+    return Object.assign(saved, { before });
+  }
+
+  // PR-197: 저장된 BOM 행 삭제 — 이 스타일 BOM에서만 빠진다. 자재 마스터(Item)와
+  // 기존 발주(PurchaseOrder)는 절대 건드리지 않는다(재고·입고 로직 변경 없음). 같은
+  // 자재로 이 스타일에 연결된 취소 아닌 발주가 있으면 삭제를 막지 않되 건수를 함께
+  // 돌려줘 화면이 확인창에서 사람에게 알리게 한다.
+  async deleteItem(id: number): Promise<{ deletedId: number; linkedPurchaseOrderCount: number }> {
+    const bomItem = await this.bomItemRepository.findOne({
+      where: { id },
+      relations: ['material', 'bom', 'bom.style'],
+    });
+    if (!bomItem) {
+      throw new NotFoundException(`ID가 ${id}인 자재명세 항목을 찾을 수 없습니다.`);
+    }
+
+    const styleNo = bomItem.bom?.style?.styleNo;
+    const materialId = bomItem.material?.id;
+    let linkedPurchaseOrderCount = 0;
+    if (styleNo && materialId) {
+      linkedPurchaseOrderCount = await this.purchaseOrderRepository.count({
+        where: { styleNo, itemId: materialId, status: Not(PurchaseOrderStatus.CANCELLED) },
+      });
+    }
+
+    await this.bomItemRepository.delete(id);
+    this.logger.log(`BomItem #${id} 삭제됨(자재 마스터/발주는 유지) — 연결된 발주(취소 제외) ${linkedPurchaseOrderCount}건`);
+    return { deletedId: id, linkedPurchaseOrderCount };
+  }
+
+  // PR-197: 이 BOM 행이 가리키는 자재를 이미 있는 다른 자재로 바꾼다(이름 오인식 교정
+  // 용도). 없는 자재는 새로 만들지 않고 400 — 새 자재는 기존 자재 등록 화면에서만
+  // 만든다. 스타일 연결 발주(PurchaseOrder.itemId)는 바꾸지 않는다(이 BOM 행과
+  // 발주는 서로 다른 레코드 — 발주를 다른 자재로 옮기는 기능이 아니다).
+  async swapMaterial(id: number, dto: SwapBomItemMaterialDto): Promise<BomItem> {
+    const bomItem = await this.bomItemRepository.findOne({ where: { id }, relations: ['material'] });
+    if (!bomItem) {
+      throw new NotFoundException(`ID가 ${id}인 자재명세 항목을 찾을 수 없습니다.`);
+    }
+
+    let newMaterial: Item | null = null;
+    if (dto.materialId != null) {
+      newMaterial = await this.itemRepository.findOne({ where: { id: dto.materialId } });
+    } else if (dto.materialName && dto.materialName.trim()) {
+      newMaterial = await this.itemRepository.findOne({ where: { name: dto.materialName.trim() } });
+    }
+    if (!newMaterial) {
+      throw new BadRequestException(
+        '지정한 자재를 찾을 수 없습니다 — 이미 등록된 자재만 선택할 수 있습니다(새 자재는 자재 등록 화면에서 먼저 만들어 주세요).',
+      );
+    }
+
+    const beforeMaterialId = bomItem.material?.id ?? null;
+    bomItem.material = newMaterial;
+    const saved = await this.bomItemRepository.save(bomItem);
+    this.logger.log(`BomItem #${id} material: ${beforeMaterialId} → ${newMaterial.id}(${newMaterial.name})`);
+    return saved;
   }
 
   // PR-099: "라벨류 기본 세트 추가" — MAIN+SIZE LABEL/CARE LABEL/PRICE TAG/SIZE
