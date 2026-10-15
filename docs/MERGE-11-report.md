@@ -150,4 +150,56 @@
 
 ---
 
+## 단계 5 · PR-194 — 여러 스타일 묶음 일괄발주(다품번 일괄발주) + 보완(시즌·브랜드 필터, 점검표 진입점)
+
+- 브랜치: `feat/multi-style-bulk-order`
+- 병합 전 main SHA: `5576f83`(PR-197 보고서 커밋 직후)
+- 병합 후 main SHA: `5fd27eb`
+- 선행 단계: 단계 4(PR-196) — main에 있음 확인(`f857c10` 조상)
+
+### 게이트 A 추가 확인 — "구버전 PR-194" 여부
+`prompt-reports/PR-194-report.md`(브랜치 버전)에 다음 4가지가 모두 반영돼 있음을 확인(최신 보완판):
+① 점검표(발주·입고·출고 현황) 체크박스 열(`ProcurementStatusReport.tsx`)
+② 시즌(연도+SS/FW)·브랜드·상태 드롭다운(`procurementStatusFilters.ts`의 `filterProcurementStatusRows`/`extractDistinctBrands`)
+③ 30건 수동 선택 제한(`toggleStyleSelection` — 자동 상위 30개 선택 없음, 이미 선택된 건 항상 해제 가능)
+④ PR-196이 추가한 `targetRdd`(시즌 필터가 사용)·`brand`(브랜드 필터가 사용)·`unlinkedPoCount`(배지 유지) 필드 사용
+→ **최신 버전으로 확인, 진행.**
+
+### 변경 파일 (origin/main...origin/feat/multi-style-bulk-order, 26개)
+- `frontend-app/src/App.tsx`, `frontend-app/src/api/multiStyleBulkOrderApi.test.ts`, `frontend-app/src/api/purchaseOrders.service.ts`, `frontend-app/src/api/workOrders.service.ts`
+- `frontend-app/src/components/MultiStyleBulkOrder.tsx`(신규), `ProcurementStatusReport.tsx`, `PurchaseOrdersManager.tsx`
+- `frontend-app/src/utils/bomRequirementReport.ts`, `multiStyleBulkOrder.ts`(+test, 신규), `procurementStatusFilters.ts`(+test, 신규)
+- `prompt-reports/PR-194-report.md`
+- `src/common/utils/packaging-subtype.util.ts`(+spec), `src/purchase-orders/dto/combined-purchase-order-document.dto.ts`(신규), `purchase-order-document.service.ts`, `purchase-orders.controller.ts`, `purchase-orders.module.ts`, `utils/purchase-order-document.util.ts`(+spec)
+- `src/work-orders/utils/material-requirements.util.ts`(+spec), `work-orders.controller.ts`, `work-orders.service.ts`
+- `test/multi-style-bulk-order-flow.e2e-spec.ts`(신규)
+
+마이그레이션 변경 없음(`src/migrations/` 0건). `.env*`/엑셀/PDF/CSV/이미지/`vision-eval-out/` 없음. `package.json`/lock 변경 없음.
+
+### 충돌 해결 내역
+`git merge origin/main`(PR-190·PR-192·PR-196·PR-193·PR-197 반영분 포함) — **충돌 없음**(사전 dry-run `git merge-tree`에서도 충돌 0건 확인, 실제 병합도 자동 완료).
+
+### 테스트 숫자
+
+| 항목 | PR-194 보완 보고서 기준선 | 이번 게이트 B 검증 |
+|---|---|---|
+| 백엔드 `jest` 전체 | 64 suites / 837 tests | **66 suites / 881 tests** |
+| 백엔드 e2e(`--maxWorkers=2`) | 67 suites / 531 tests | **68 suites / 544 tests** |
+| 프론트 `vitest run` | 55 files / 372 tests | **57 files / 405 tests** |
+| 백엔드/프론트 `tsc` · `build` | 통과 | 통과 |
+
+기준선보다 전부 많거나 같음(선행 반영분 PR-190·PR-192·PR-196·PR-193·PR-197 포함으로 증가) — 실패 0건.
+
+### 배포 안내
+이 PR은 마이그레이션이 없으므로 Render 배포 로그에서 `No migrations are pending`과 Live 상태만 확인하면 된다.
+
+### 사용자가 화면에서 확인할 것 (PR-194-report.md 체크리스트 기준)
+- 발주·입고·출고 현황에서 연도+시즌(SS/FW)을 고르면 해당 기간 납기 스타일만 남고, "납기 미정 포함"을 켜기 전까지 납기 미정 스타일은 빠진다.
+- 같은 화면에서 체크박스로 스타일을 고르고 "선택 스타일 다품번 일괄발주"를 누르면 다품번 일괄발주 화면으로 이동하면서 고른 스타일이 그대로 선택돼 있다(최대 30개, 30개 찬 상태에서 더 고르면 선택이 바뀌지 않고 안내만 뜬다).
+- 같은 자재를 쓰는 스타일 중 하나만 발주하면, 발주·입고·출고 현황에서 그 스타일만 발주완료로 바뀌고 나머지 스타일은 미발주로 남는다(PR-196 회귀 없음).
+- 다품번 일괄발주 결과 화면에서 업체별 발주서 다운로드가 동작한다.
+- 발주 목록(기존 화면)의 체크박스 열·"선택 발주 합본 발주서" 버튼, 기존 단일 스타일 일괄발주(PR-179) 화면은 변경 없음.
+
+---
+
 **다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-197` 줄을 붙여 다시 보내 주세요.
