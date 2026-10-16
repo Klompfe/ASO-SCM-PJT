@@ -202,4 +202,49 @@
 
 ---
 
-**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-197` 줄을 붙여 다시 보내 주세요.
+## 단계 6 · PR-198 — 자재명세 엑셀 업로드: 기존 BOM과 비교해 사람이 고르는 덮어쓰기·교체 + 작지 스타일번호 유사 경고
+
+- 브랜치: `feat/bom-excel-reconcile`
+- 병합 전 main SHA: `8ee5125`(PR-194 보고서 커밋 직후)
+- 병합 후 main SHA: `ee05e88`
+- 선행 단계: 단계 3(PR-197) — main에 있음 확인
+
+### 변경 파일 (origin/main...origin/feat/bom-excel-reconcile, 24개)
+- `frontend-app/src/api/mapping.service.ts`, `styles.service.ts`
+- `frontend-app/src/components/MappingPreviewModal.tsx`, `SalesOrderUploadModal.tsx`
+- `frontend-app/src/utils/bomDiffReview.ts`(+test, 신규), `styleNoSimilarity.ts`(+test, 신규)
+- `prompt-reports/PR-198-report.md`
+- `src/boms/utils/bom-name-normalize.util.ts`(+spec, 신규)
+- `src/mapping/controllers/mapping-commit.controller.ts`, `services/mapping-commit.service.ts`(+spec)
+- `src/mapping/dto/bom-diff.dto.ts`, `bom-reconcile.dto.ts`(신규), `utils/bom-diff.util.ts`(+spec, 신규)
+- `src/styles/dto/similar-master-styles.dto.ts`(신규), `styles.controller.ts`, `styles.service.ts`, `utils/style-no-similarity.util.ts`(+spec, 신규)
+- `test/bom-excel-reconcile-flow.e2e-spec.ts`(신규)
+
+마이그레이션 변경 없음(`src/migrations/` 0건). `.env*`/엑셀/PDF/CSV/이미지/`vision-eval-out/` 없음(테스트는 전부 익명 데이터). `package.json`/lock 변경 없음. `src/mapping/services/mapping-commit.service.ts`의 기존 `commit()` 메서드 본문은 diff에 전혀 나타나지 않음(새 메서드 `diff()`/`reconcile()`만 추가) — 기존 `POST /mapping/commit` 동작·응답 변경 없음을 확인.
+
+### 충돌 해결 내역
+`git merge origin/main` 시 **충돌 없음** — 사실 병합할 것도 없었다. `feat/bom-excel-reconcile`가 분기한 지점(`8ee5125`)이 이번 게이트 A 시점의 `origin/main` 최신과 정확히 같아 `git merge origin/main`이 "Already up to date"로 끝남(새 커밋 없음, dry-run `merge-tree`도 충돌 0건 확인).
+
+### 테스트 숫자
+
+| 항목 | PR-198 보고서 기준선 | 이번 게이트 B 검증 |
+|---|---|---|
+| 백엔드 `jest` 전체 | 69 suites / 917 tests | **69 suites / 917 tests** |
+| 백엔드 e2e(`--maxWorkers=2`) | 69 suites / 555 tests | **69 suites / 555 tests** |
+| 프론트 `vitest run` | 59 files / 425 tests | **59 files / 425 tests** |
+| 백엔드/프론트 `tsc` · `build` | 통과 | 통과 |
+
+선행 단계가 더 반영되지 않아(이미 main과 동일 지점에서 분기) 기준선과 정확히 같음 — 실패 0건.
+
+### 배포 안내
+이 PR은 마이그레이션이 없으므로 Render 배포 로그에서 `No migrations are pending`과 Live 상태만 확인하면 된다.
+
+### 사용자가 화면에서 확인할 것
+- AI로 만든 BOM이 있는 스타일에 엑셀을 올리면(저장 버튼을 누르면) 비교 화면이 뜬다 — BOM이 없는 스타일은 비교 없이 바로 저장된다.
+- "엑셀 기준으로 모두 맞추기"는 체크만 채워 줄 뿐이고, [적용]을 눌러야 실제로 반영된다.
+- 이름만 다르고 소요량이 같은 중복 행이 "유사 짝(제안)"으로 한 줄에 묶여 나온다(자동 확정 아님, 사람이 "교체"를 직접 골라야 함).
+- 작지 분석 화면에서 AI가 읽은 스타일번호가 기존 스타일과 끝 글자만 다르면 노란 안내와 "OOO로 바꾸기" 버튼이 뜨고, 버튼을 눌러야 입력칸 값이 바뀐다(자동 변경 없음).
+
+---
+
+**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-198` 줄을 붙여 다시 보내 주세요.
