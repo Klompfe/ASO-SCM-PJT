@@ -247,4 +247,50 @@
 
 ---
 
-**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-198` 줄을 붙여 다시 보내 주세요.
+## 단계 10 · PR-191 — 부족자재 표 헤더 어긋남 수정 + "수정하기"는 이 스타일 미입고 발주일 때만
+
+- 브랜치: `fix/shortage-table-header-and-edit-button`
+- 병합 전 main SHA: `8a391c9`(PR-198 보고서 커밋 직후)
+- 병합 후 main SHA: `8559688`
+- 선행 단계: 단계 4(PR-196)·단계 5(PR-194) — 둘 다 main에 있음 확인
+
+### 게이트 A 추가 확인 — "불필요(이미 해결)" 여부
+PR-191 보고서의 0단계에서 `origin/main`(당시 `8ee5125`, PR-196·PR-194 반영 후) 기준으로 두 증상을 코드로 직접 확인: (1) `ShortageTable` 헤더 어긋남 — **아직 있었음**(체크박스 `<td>`는 맨 앞, "일괄" `<th>`는 맨 뒤) (2) "수정하기" 판정이 스타일을 보지 않음 — **아직 있었음**(`PurchaseOrdersManager`가 `buildEditableOrderByItem(pendingOrders)`로 전체 미입고 발주를 자재 기준으로만 거름). 둘 다 미해결이라 **빈 PR이 아니라 실제 수정이 있는 PR**로 확인하고 진행.
+
+### 변경 파일 (origin/main...origin/fix/shortage-table-header-and-edit-button, 6개) — 전부 `frontend-app/` 안
+- `frontend-app/src/components/PurchaseOrdersManager.tsx`
+- `frontend-app/src/components/ShortageTable.test.tsx`(신규)
+- `frontend-app/src/components/StyleShortagePanel.tsx`
+- `frontend-app/src/utils/purchaseOrderForm.test.ts`
+- `frontend-app/src/utils/purchaseOrderForm.ts`
+- `prompt-reports/PR-191-report.md`
+
+백엔드 `src/` 변경 0건(`git diff --stat origin/main -- src/ test/` 확인, PR-191 보고서에도 명시), 마이그레이션 0건, `.env*`/엑셀/PDF/CSV/이미지 없음, `package.json`/lock 변경 없음. 바꾼 기존 테스트는 없음(보고서에 "기존 테스트를 수정한 것은 없다"로 명시 — `SearchSelectField.test.tsx`/`StyleShortagePanelLabels.test.tsx`/`multiStyleBulkOrder.test.ts` 재실행으로 회귀 없음만 재확인).
+
+### 충돌 해결 내역
+`git merge origin/main`(PR-198 반영분 포함) — **충돌 없음**(PR-198은 매핑/스타일 유사도 쪽이라 `StyleShortagePanel`/`PurchaseOrdersManager`와 겹치지 않음, dry-run `merge-tree`도 충돌 0건 확인).
+
+### 테스트 숫자
+
+| 항목 | PR-191 보고서 기준선 | 이번 게이트 B 검증 |
+|---|---|---|
+| 백엔드 `jest` 전체 | (백엔드 변경 없음, 재실행 대상 아님) | **69 suites / 917 tests**(PR-191 영향 없음, 기준선 그대로) |
+| 백엔드 e2e(`--maxWorkers=2`) | (백엔드 변경 없음, 재실행 대상 아님) | **69 suites / 555 tests**(PR-191 영향 없음, 기준선 그대로) |
+| 프론트 `vitest run` | 58 files / 421 tests | **60 files / 441 tests**(선행 PR-198 반영분 +2 files/+20 tests 포함) |
+| 백엔드/프론트 `tsc` · `build` | 통과 | 통과 |
+
+기준선보다 전부 많거나 같음 — 실패 0건.
+
+### 배포 안내
+이 PR은 마이그레이션이 없으므로 Render 배포 로그에서 `No migrations are pending`과 Live 상태만 확인하면 된다.
+
+### 사용자가 화면에서 확인할 것
+- 발주 화면 "스타일번호로 필요 자재 찾기" 표의 머리글과 값 열이 일치한다("필요 총수량" 열에 실제 필요 총수량이 보임).
+- 이 스타일로 발주한 적 없는 자재는 "수정하기"가 뜨지 않고 "이 자재로 발주하기"가 뜬다.
+- 다른 스타일의 미입고 발주가 있으면 자재명 아래 회색 "참고: 다른 스타일 미입고 발주 N건 있음" 문구만 뜬다(버튼 아님).
+- 이 스타일에 연결된 미입고 발주가 있는 자재만 주황 "수정하기" 버튼이 뜬다.
+- 다품번 일괄발주(PR-194)와 PR-196의 "미연결 발주" 안내는 그대로 동작한다(변경 없음).
+
+---
+
+**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-191` 줄을 붙여 다시 보내 주세요.
