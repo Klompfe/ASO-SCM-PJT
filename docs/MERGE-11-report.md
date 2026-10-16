@@ -293,4 +293,41 @@ PR-191 보고서의 0단계에서 `origin/main`(당시 `8ee5125`, PR-196·PR-194
 
 ---
 
-**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-191` 줄을 붙여 다시 보내 주세요.
+## 단계 7 · PR-199 — 작지 AI 판독 정확도 측정 하네스 (DB 없음·읽기 전용·로컬 실행)
+
+- 브랜치: `chore/vision-eval-harness`
+- 병합 전 main SHA: `18bd713`(PR-191 보고서 커밋 직후)
+- 병합 후 main SHA: `16a78a0`
+- 선행 단계: 단계 2(PR-192) — main에 있음 확인
+
+### 변경 파일 (origin/main...origin/chore/vision-eval-harness, 31개)
+- `.gitignore`(`vision-eval-out/` 추가), `package.json`(`vision:eval`/`vision:eval:test`/`vision:eval:typecheck` 스크립트 3개만 추가)
+- `src/sales-orders/vision.service.ts`(`PROMPT`·`RESPONSE_SCHEMA`에 `export`만 추가 — `git diff`로 `commit()`/`analyzeSalesOrder()` 본문 변경 없음 확인)
+- `prompt-reports/PR-199-report.md`
+- `scripts/vision-eval/` 전체(신규 — `types.ts`, `key-mask.util.ts`, `call-count.util.ts`, `manifest.util.ts`, `golden-extract.util.ts`, `model-runner.ts`, `pdf-tools.ts`, `signals.ts`, `cli.ts`, `scoring/`(style-field·date-field·bom-match·supplier-item·instability), `no-db-import.spec.ts`, 각 `.spec.ts`, `jest.config.js`, `tsconfig.json`)
+
+마이그레이션 변경 없음(`src/migrations/` 0건). `.env*`/엑셀/PDF/CSV/이미지/`vision-eval-out/`(결과물 디렉터리 자체) 저장소에 없음 — `.gitignore`에만 패턴 추가. `package.json`에 새 런타임 의존성 없음(스크립트 3개만). `vision.service.ts`는 export 추가 외 변경 없음을 diff로 재확인.
+
+### 충돌 해결 내역
+`git merge origin/main`(PR-191 반영분 포함) — **충돌 없음**. 이 브랜치가 PR-199 작업을 시작한 시점에 이미 main 최신(PR-191 포함)에서 분기했기 때문에 "Already up to date"로 끝남(dry-run `merge-tree`도 충돌 0건 확인).
+
+### 테스트 숫자
+
+| 항목 | PR-199 보고서 기준선 | 이번 게이트 B 검증 |
+|---|---|---|
+| 백엔드 `jest` 전체 | 69 suites / 917 tests | **69 suites / 917 tests**(export만 추가해 기준선과 정확히 동일) |
+| 백엔드 e2e(`--maxWorkers=2`) | 69 suites / 555 tests | **69 suites / 555 tests**(동일) |
+| 하네스 전용 `npm run vision:eval:test` | 11 suites / 76 tests | **11 suites / 76 tests** |
+| 백엔드 `tsc` · `build` / 하네스 `vision:eval:typecheck` | 통과 | 통과 |
+
+기준선과 정확히 같음(선행 PR-191이 이미 분기 시점에 포함돼 있어 추가 증가 없음) — 실패 0건.
+
+### 배포 안내
+이 PR은 마이그레이션이 없으므로 Render 배포 로그에서 `No migrations are pending`과 Live 상태만 확인하면 된다. **화면 변화는 없다**(로컬 CLI 도구).
+
+### 사용자가 할 것
+로컬에서 `GEMINI_API_KEY`를 환경변수로 설정하고 파일럿을 돌려 `summary.md`를 가져온다(단계 8·PR-200의 합격 기준 비교에 쓴다). 명령 예시는 `prompt-reports/PR-199-report.md` 4번 항목 참고.
+
+---
+
+**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-199` 줄을 붙여 다시 보내 주세요.
