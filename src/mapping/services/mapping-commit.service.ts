@@ -1,6 +1,6 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, Not, In } from 'typeorm';
 import { MasterStyle } from '../../styles/entities/master-style.entity';
 import { StyleOverview, StyleOverviewStatus } from '../../styles/entities/style-overview.entity';
 import { Bom } from '../../boms/entities/bom.entity';
@@ -8,7 +8,17 @@ import { pickActiveBom } from '../../boms/utils/active-bom.util';
 import { BomItem } from '../../boms/entities/bom-item.entity';
 import { ImportFile, ImportStatus } from '../../imports/entities/import-file.entity';
 import { Item, ItemType } from '../../items/entities/item.entity';
-import { CommitMappingDto } from '../dto/commit-mapping.dto';
+import { PurchaseOrder, PurchaseOrderStatus } from '../../purchase-orders/entities/purchase-order.entity';
+import { CommitMappingDto, CommitBomItemDto } from '../dto/commit-mapping.dto';
+import { BomDiffRequestDto } from '../dto/bom-diff.dto';
+import { BomReconcileRequestDto } from '../dto/bom-reconcile.dto';
+import {
+  classifyBomDiff,
+  type BomDiffExistingRow,
+  type BomDiffIncomingRow,
+  type BomDiffRow,
+  type BomSimilarPair,
+} from '../utils/bom-diff.util';
 
 // PR-132: commit()이 사용자에게 알려야 하는 두 종류의 사실을 문자열 패턴이 아니라 구조로 구분한다.
 // - NEEDS_REVIEW: 병합 중 "자동 반영을 보류"했다 → 사용자가 확인하고 필요하면 수동으로 고쳐야 한다.
@@ -50,8 +60,25 @@ function isLiningItem(category?: string | null, itemName?: string | null): boole
   return name.includes('안감') || name.includes('조바');
 }
 
+// PR-198: bom-diff 응답 — hasExistingBom=false면 rows/similarPairs는 생략되고(화면은
+// 비교 없이 바로 기존 저장 경로로 진행), true면 둘 다 채워진다.
+export interface BomDiffResponse {
+  hasExistingBom: boolean;
+  rows?: BomDiffRow[];
+  similarPairs?: BomSimilarPair[];
+}
+
+export interface BomReconcileResult {
+  styleNo: string;
+  applied: { overwritten: number; added: number; removed: number; replaced: number };
+  remainingBomItemCount: number;
+  warnings: string[];
+}
+
 @Injectable()
 export class MappingCommitService {
+  private readonly logger = new Logger(MappingCommitService.name);
+
   constructor(
     private readonly dataSource: DataSource,
   ) {}
@@ -209,6 +236,195 @@ export class MappingCommitService {
       return { success: true, styleNo, notices, warnings: notices.map((n) => n.message) };
     } catch (err) {
       await queryRunner.rollbackTransaction();
+      throw new InternalServerErrorException(err);
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  // PR-198: 엑셀 업로드 저장 전 "기존 BOM과 비교"(읽기 전용, 저장 안 함). 이미 활성 BOM이
+  // 있는 스타일에서만 비교 화면을 보여줄 필요가 있다 — 없으면 그냥 commit()이 새로 만든다.
+  async diff(payload: BomDiffRequestDto): Promise<BomDiffResponse> {
+    const { styleNo, bomItems } = payload;
+    const existingBoms = await this.dataSource.manager.find(Bom, {
+      where: { style: { styleNo } },
+      relations: ['items', 'items.material'],
+    });
+    const bom = pickActiveBom(existingBoms);
+    if (!bom || (bom.items ?? []).length === 0) {
+      return { hasExistingBom: false };
+    }
+
+    const materialIds = [...new Set((bom.items ?? []).map((i) => i.material?.id).filter((v): v is number => v != null))];
+    const linkedCounts = new Map<number, number>();
+    if (materialIds.length > 0) {
+      const pos = await this.dataSource.manager.find(PurchaseOrder, {
+        where: { styleNo, itemId: In(materialIds), status: Not(PurchaseOrderStatus.CANCELLED) },
+      });
+      for (const po of pos) {
+        linkedCounts.set(po.itemId, (linkedCounts.get(po.itemId) ?? 0) + 1);
+      }
+    }
+
+    const existingRows: BomDiffExistingRow[] = (bom.items ?? []).map((i) => ({
+      bomItemId: i.id,
+      itemName: i.material?.name ?? '',
+      category: i.category ?? null,
+      colorCode: i.colorCode ?? null,
+      spec: i.spec ?? null,
+      consumption: Number(i.consumption),
+      linkedPoCount: (i.material?.id != null ? linkedCounts.get(i.material.id) : undefined) ?? 0,
+    }));
+    const incomingRows: BomDiffIncomingRow[] = bomItems.map((item) => ({
+      itemName: item.itemName,
+      category: item.category ?? null,
+      colorCode: item.colorCode ?? null,
+      spec: item.spec ?? null,
+      consumption: item.consumption ?? null,
+    }));
+
+    const { rows, similarPairs } = classifyBomDiff(existingRows, incomingRows);
+    return { hasExistingBom: true, rows, similarPairs };
+  }
+
+  // PR-198: bom-diff 비교 화면에서 사람이 행별로 고른 동작을 적용한다(all-or-nothing —
+  // 하나라도 이 스타일 BOM 소속이 아닌 bomItemId가 섞이면 전체 롤백). commit()의
+  // "같은 (자재명,색상,규격)이면 절대 덮어쓰지 않는다" 규칙과 달리, 여기서는 사람이
+  // 화면에서 명시적으로 고른 행만 실제로 값을 바꾼다.
+  async reconcile(payload: BomReconcileRequestDto): Promise<BomReconcileResult> {
+    const { styleNo, actions } = payload;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    const warnings: string[] = [];
+    const applied = { overwritten: 0, added: 0, removed: 0, replaced: 0 };
+
+    try {
+      const boms = await queryRunner.manager.find(Bom, {
+        where: { style: { styleNo } },
+        relations: ['items', 'items.material', 'style', 'style.overview'],
+      });
+      const bom = pickActiveBom(boms);
+      if (!bom) {
+        throw new NotFoundException(`등록된 자재명세가 없습니다: ${styleNo}`);
+      }
+
+      const bomItemIds = new Set((bom.items ?? []).map((i) => i.id));
+      for (const action of actions) {
+        if ((action.type === 'OVERWRITE' || action.type === 'REMOVE' || action.type === 'REPLACE') && !action.bomItemId) {
+          throw new BadRequestException(`${action.type} 동작에는 bomItemId가 필요합니다.`);
+        }
+        if (action.bomItemId != null && !bomItemIds.has(action.bomItemId)) {
+          throw new BadRequestException(`BOM 행 #${action.bomItemId}은(는) 스타일 ${styleNo}의 자재명세가 아닙니다.`);
+        }
+        if ((action.type === 'OVERWRITE' || action.type === 'ADD' || action.type === 'REPLACE') && !action.newItem) {
+          throw new BadRequestException(`${action.type} 동작에는 newItem이 필요합니다.`);
+        }
+      }
+
+      const totalQty = Number(bom.style?.overview?.totalQty);
+      const hasTotalQty = Number.isFinite(totalQty) && totalQty > 0;
+      let items = [...(bom.items ?? [])];
+
+      const findOrCreateMaterial = async (itemName: string): Promise<Item> => {
+        let material = await queryRunner.manager.findOne(Item, { where: { name: itemName } });
+        if (!material) {
+          material = await queryRunner.manager.save(Item, {
+            code: `MAT-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+            name: itemName,
+            type: ItemType.RAW_MATERIAL,
+            unit: 'EA',
+          });
+        }
+        return material;
+      };
+
+      const applyNewItemValues = (bomItem: BomItem, newItem: CommitBomItemDto) => {
+        if (newItem.category !== undefined) bomItem.category = newItem.category || 'GENERAL';
+        if (newItem.colorCode !== undefined) bomItem.colorCode = normalizeKeyPart(newItem.colorCode);
+        if (newItem.spec !== undefined) bomItem.spec = normalizeKeyPart(newItem.spec);
+        if (newItem.supplier !== undefined) bomItem.supplier = newItem.supplier || null;
+        if (newItem.unitPrice !== undefined) bomItem.unitPrice = newItem.unitPrice ?? 0;
+        if (newItem.remarks !== undefined) bomItem.remarks = newItem.remarks || 'N/A';
+        if (newItem.composition !== undefined) bomItem.composition = newItem.composition ?? null;
+        if (newItem.hsCode !== undefined) bomItem.hsCode = newItem.hsCode ?? null;
+        if (newItem.threadType !== undefined) bomItem.threadType = (newItem.threadType as any) ?? null;
+        if (newItem.tapeType !== undefined) bomItem.tapeType = (newItem.tapeType as any) ?? null;
+        if (newItem.consumption !== undefined) {
+          const consumption = newItem.consumption ?? 0;
+          bomItem.consumption = consumption;
+          bomItem.requiredQty = hasTotalQty
+            ? Math.round(consumption * totalQty * 10000) / 10000
+            : (newItem.requiredQty ?? bomItem.requiredQty);
+        }
+      };
+
+      for (const action of actions) {
+        if (action.type === 'OVERWRITE') {
+          const bomItem = items.find((i) => i.id === action.bomItemId)!;
+          const before = { consumption: Number(bomItem.consumption), spec: bomItem.spec, colorCode: bomItem.colorCode };
+          applyNewItemValues(bomItem, action.newItem!);
+          const saved = await queryRunner.manager.save(BomItem, bomItem);
+          items = items.map((i) => (i.id === saved.id ? saved : i));
+          this.logger.log(`BomItem #${saved.id} 덮어쓰기: ${JSON.stringify(before)} → consumption=${saved.consumption}, spec=${saved.spec}, colorCode=${saved.colorCode}`);
+          applied.overwritten++;
+        } else if (action.type === 'ADD') {
+          const newItem = action.newItem!;
+          const material = await findOrCreateMaterial(newItem.itemName);
+          const consumption = newItem.consumption ?? 0;
+          const requiredQty = hasTotalQty ? Math.round(consumption * totalQty * 10000) / 10000 : (newItem.requiredQty ?? 0);
+          const saved = await queryRunner.manager.save(BomItem, {
+            bom,
+            material,
+            category: newItem.category || 'GENERAL',
+            colorCode: normalizeKeyPart(newItem.colorCode),
+            spec: normalizeKeyPart(newItem.spec),
+            consumption,
+            requiredQty,
+            supplier: newItem.supplier || null,
+            unitPrice: newItem.unitPrice ?? 0,
+            remarks: newItem.remarks || 'N/A',
+            composition: newItem.composition ?? null,
+            hsCode: newItem.hsCode ?? null,
+            threadType: (newItem.threadType as any) ?? null,
+            tapeType: (newItem.tapeType as any) ?? null,
+          });
+          items.push(saved);
+          this.logger.log(`BomItem #${saved.id} 추가(엑셀 기준): ${newItem.itemName}`);
+          applied.added++;
+        } else if (action.type === 'REMOVE') {
+          const bomItem = items.find((i) => i.id === action.bomItemId)!;
+          const materialId = bomItem.material?.id;
+          if (materialId != null) {
+            const linkedCount = await queryRunner.manager.count(PurchaseOrder, {
+              where: { styleNo, itemId: materialId, status: Not(PurchaseOrderStatus.CANCELLED) },
+            });
+            if (linkedCount > 0) {
+              warnings.push(`BomItem #${bomItem.id}(${bomItem.material?.name ?? ''}) 제거 — 연결된 발주(취소 제외) ${linkedCount}건이 있습니다.`);
+            }
+          }
+          await queryRunner.manager.delete(BomItem, bomItem.id);
+          items = items.filter((i) => i.id !== bomItem.id);
+          this.logger.log(`BomItem #${bomItem.id} 제거(엑셀 기준 — 자재 마스터/발주는 유지)`);
+          applied.removed++;
+        } else if (action.type === 'REPLACE') {
+          const bomItem = items.find((i) => i.id === action.bomItemId)!;
+          const newItem = action.newItem!;
+          const beforeMaterialId = bomItem.material?.id ?? null;
+          bomItem.material = await findOrCreateMaterial(newItem.itemName);
+          applyNewItemValues(bomItem, newItem);
+          const saved = await queryRunner.manager.save(BomItem, bomItem);
+          items = items.map((i) => (i.id === saved.id ? saved : i));
+          this.logger.log(`BomItem #${saved.id} 자재 교체: material ${beforeMaterialId} → ${saved.material?.id}(${newItem.itemName})`);
+          applied.replaced++;
+        }
+      }
+
+      await queryRunner.commitTransaction();
+      return { styleNo, applied, remainingBomItemCount: items.length, warnings };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      if (err instanceof BadRequestException || err instanceof NotFoundException) throw err;
       throw new InternalServerErrorException(err);
     } finally {
       await queryRunner.release();
