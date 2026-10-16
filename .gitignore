@@ -44,3 +44,7 @@ desktop.ini
 
 # Local design reference docs (not part of the repo)
 docs/design/
+
+# PR-199: 작지 AI 측정 하네스 결과물 — 실제 업무 파일(작지 PDF/MATERIAL LIST 엑셀)과
+# 실행 결과(summary.md/details.jsonl)는 저장소에 절대 넣지 않는다.
+vision-eval-out/

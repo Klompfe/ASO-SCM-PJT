@@ -41,7 +41,9 @@ export interface AiAnalysisOutcome {
   fallbackUsed: boolean;
 }
 
-const RESPONSE_SCHEMA = {
+// PR-199: export만 추가(측정 하네스가 운영 프롬프트/스키마를 그대로 재사용하기 위함) —
+// 값/동작은 전혀 바꾸지 않음.
+export const RESPONSE_SCHEMA = {
   type: SchemaType.ARRAY,
   items: {
     type: SchemaType.OBJECT,
@@ -108,7 +110,7 @@ const RESPONSE_SCHEMA = {
   },
 };
 
-const PROMPT = `이 문서는 의류 제조업체의 "작업지시서"입니다. 여러 페이지가 있을 수 있고, 각 페이지(또는 각 스타일)마다 하나의 결과 항목을 배열로 반환하세요.
+export const PROMPT = `이 문서는 의류 제조업체의 "작업지시서"입니다. 여러 페이지가 있을 수 있고, 각 페이지(또는 각 스타일)마다 하나의 결과 항목을 배열로 반환하세요.
 
 각 항목은 아래 3가지로 구분해서 추출합니다:
 
