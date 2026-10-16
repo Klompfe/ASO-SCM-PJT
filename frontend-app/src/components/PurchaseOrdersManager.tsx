@@ -23,7 +23,7 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
 import {
-  pickLatestOrderDefaults, resolveAutofill, buildEditableOrderByItem, isUnitPriceRequired,
+  pickLatestOrderDefaults, resolveAutofill, isUnitPriceRequired,
   sumPurchaseOrderLines, suggestStyleLinkedQuantity, suggestUnlinkedQuantity, trackBadgeLabel, isQuantityFilled, type SupplierRef,
 } from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
@@ -421,7 +421,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         onPickMaterial={handlePickMaterial}
         onGoToList={() => setListTrack('ALL')}
         refreshKey={panelRefresh}
-        editable={buildEditableOrderByItem(pendingOrders)}
+        pendingOrders={pendingOrders}
         onEdit={(order, pendingCount) => setEditing({ order, pendingCount })}
         onBulkDone={() => { setPanelRefresh((n) => n + 1); loadPurchaseOrders(); loadPendingOrders(); }}
       />

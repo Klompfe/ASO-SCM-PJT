@@ -4,7 +4,7 @@ import { getStyleRequirements, type StyleRequirements } from '../api/workOrders.
 import { getMasterStyles } from '../api/styles.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { requirementEmptyMessage, type MaterialRequirementRow } from '../utils/bomRequirementReport';
-import { sortForShortage } from '../utils/purchaseOrderForm';
+import { sortForShortage, filterOrdersByStyleNo, countOtherStylePendingByItem, buildEditableOrderByItem } from '../utils/purchaseOrderForm';
 import { SearchSelectField } from './SearchSelectField';
 import { BulkOrderPreviewModal } from './BulkOrderPreviewModal';
 import type { PurchaseOrder } from '../api/purchaseOrders.service';
@@ -26,10 +26,13 @@ interface ShortageTableProps {
   // PR-179: 일괄발주용 체크박스(선택 상태는 호출하는 쪽이 가진다).
   selected?: Set<number>;
   onToggle?: (itemId: number) => void;
+  // PR-191: 다른 스타일(또는 미연결)의 미입고 발주 건수 — "수정하기" 대상은 아니지만
+  // 참고로만 알려준다(버튼 아님). 미연결은 이미 unlinkedOrderedQty 쪽 안내가 있어 여기 포함하지 않는다.
+  otherStylePendingCountByItem?: Map<number, number>;
 }
 
 // 부족 자재 표(표시 전용). 부족 수량이 있는 행이 위에 오고 강조된다(정렬은 호출하는 쪽의 sortForShortage).
-export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, editable, onEdit, selected, onToggle, onGoToList }) => {
+export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, editable, onEdit, selected, onToggle, onGoToList, otherStylePendingCountByItem }) => {
   const th = 'px-2 py-1 text-left text-xs bg-gray-100 border border-gray-200';
   const td = 'px-2 py-1 text-sm border border-gray-200';
   return (
@@ -38,14 +41,16 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
       <table className="border-collapse" data-testid="shortage-table">
         <thead className="sticky top-0">
           <tr>
+            {/* PR-191: 체크박스 <td>가 각 행의 맨 앞에 렌더링되므로 머리글도 맨 앞에 둔다
+                (예전에는 맨 뒤 "일괄" 머리글이라 onToggle이 있을 때 모든 머리글이 한 칸씩 밀렸다). */}
+            {onToggle && <th className={th}>선택</th>}
             <th className={th}>자재</th>
             <th className={th}>카테고리</th>
             <th className={`${th} text-right`}>필요 총수량</th>
             <th className={`${th} text-right`}>발주(스타일 연결)</th>
             <th className={`${th} text-right`}>발주(미연결, 참고)</th>
             <th className={`${th} text-right`}>부족 수량</th>
-            <th className={th}></th>
-            {onToggle && <th className={th}>일괄</th>}
+            <th className={th}>발주</th>
           </tr>
         </thead>
         <tbody>
@@ -60,6 +65,12 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                 {r.itemName}{r.itemCode && <span className="block text-xs text-gray-400">{r.itemCode}</span>}
                 {r.packaging && <span className="block text-xs text-amber-700">{r.packaging.conversionFormula}</span>}
                 {r.conversionWarning && <span className="block text-xs text-amber-700" data-testid={`conversion-warning-${r.itemId}`}>⚠ {r.conversionWarning}</span>}
+                {(otherStylePendingCountByItem?.get(r.itemId) ?? 0) > 0 && (
+                  <span className="block text-xs text-gray-400" data-testid={`other-style-pending-${r.itemId}`}>
+                    참고: 다른 스타일 미입고 발주 {otherStylePendingCountByItem!.get(r.itemId)}건 있음
+                    {onGoToList && <button type="button" className="ml-1 text-blue-600 underline" onClick={onGoToList}>(발주 목록에서 확인)</button>}
+                  </span>
+                )}
               </td>
               <td className={td}>{r.categories.join(', ') || '-'}</td>
               <td className={`${td} text-right`}>{r.packaging ? `${fmt(r.requiredQty)}m (${r.packaging.requiredPackages}${r.packaging.packagingUnitLabel})` : fmt(r.requiredQty)}</td>
@@ -99,11 +110,15 @@ export const StyleShortagePanel: React.FC<{
   // PR-185 B: "미연결 발주 N개" 안내를 눌렀을 때 발주 목록 화면으로 이동.
   onGoToList?: () => void;
   refreshKey?: number;
-  editable?: EditableOrderMap;
+  // PR-191: editable(자재 기준 맵) 대신 전체 미입고 발주 배열을 받아, 패널 안에서
+  // 지금 고른 스타일로 필터링한 뒤 buildEditableOrderByItem에 넘긴다 — 그래야 "이
+  // 스타일에 연결된" 미입고 발주만 "수정하기"로 판정된다(다른 스타일/미연결 발주
+  // 때문에 공용 자재가 엉뚱하게 "이미 발주"로 보이던 문제 수정).
+  pendingOrders?: PurchaseOrder[];
   onEdit?: (order: PurchaseOrder, pendingCount: number) => void;
   // PR-179: 일괄발주 완료 후 호출(발주 목록/미입고 발주 새로고침용).
   onBulkDone?: () => void;
-}> = ({ onPickMaterial, onGoToList, refreshKey = 0, editable, onEdit, onBulkDone }) => {
+}> = ({ onPickMaterial, onGoToList, refreshKey = 0, pendingOrders = [], onEdit, onBulkDone }) => {
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [style, setStyle] = useState<StyleOption | null>(null);
@@ -158,6 +173,10 @@ export const StyleShortagePanel: React.FC<{
 
   const rows = data ? sortForShortage(data.rows) : [];
   const emptyMessage = data ? requirementEmptyMessage(data.reason) : null;
+  // PR-191: "수정하기"는 이 스타일에 연결된 미입고 발주일 때만 — 다른 스타일/미연결
+  // 미입고 발주는 참고 안내로만 보여준다(countOtherStylePendingByItem).
+  const editable: EditableOrderMap = style ? buildEditableOrderByItem(filterOrdersByStyleNo(pendingOrders, style.styleNo)) : new Map();
+  const otherStylePendingCountByItem = style ? countOtherStylePendingByItem(pendingOrders, style.styleNo) : new Map<number, number>();
 
   return (
     <details className="bg-white border border-gray-200 rounded-lg" open>
@@ -230,6 +249,7 @@ export const StyleShortagePanel: React.FC<{
                 if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
                 return next;
               })}
+              otherStylePendingCountByItem={otherStylePendingCountByItem}
             />
           </>
         )}

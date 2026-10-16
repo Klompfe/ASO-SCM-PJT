@@ -116,6 +116,76 @@ describe('buildEditableOrderByItem (PR-177)', () => {
   });
 });
 
+// PR-191: 공용 자재(오바사/다데 등)가 다른 스타일 미입고 발주 때문에 새 스타일에서도
+// "수정하기"로 잘못 뜨던 문제 — buildEditableOrderByItem에 styleNo로 미리 필터링한
+// 배열을 넘겨야 한다는 것을 못 박는다.
+import { filterOrdersByStyleNo, countOtherStylePendingByItem } from './purchaseOrderForm';
+
+describe('filterOrdersByStyleNo (PR-191)', () => {
+  const o = (styleNo: string | null) => ({ styleNo });
+
+  it('현재 스타일과 같은 것만 남긴다', () => {
+    const result = filterOrdersByStyleNo([o('MB73SLM109Z'), o('MB73SKM109Z'), o(null)], 'MB73SLM109Z');
+    expect(result).toEqual([{ styleNo: 'MB73SLM109Z' }]);
+  });
+
+  it('현재 스타일에 연결된 발주가 없으면 빈 배열(→ buildEditableOrderByItem이 빈 맵을 돌려줌 → "발주하기")', () => {
+    expect(filterOrdersByStyleNo([o('MB73SKM109Z'), o(null)], 'MB73SLM109Z')).toEqual([]);
+  });
+});
+
+describe('filterOrdersByStyleNo + buildEditableOrderByItem (PR-191) — 통합 확인', () => {
+  const po = (id: number, itemId: number, status: string, styleNo: string | null) => ({ id, itemId, status, styleNo });
+
+  it('실사례: 오바사에 다른 스타일(MB73SKM109Z)의 미입고 발주만 있으면 새 스타일(MB73SLM109Z)에서는 "수정하기"가 아니다', () => {
+    const allPending = [po(1, 10, 'PENDING', 'MB73SKM109Z')];
+    const editable = buildEditableOrderByItem(filterOrdersByStyleNo(allPending, 'MB73SLM109Z'));
+    expect(editable.has(10)).toBe(false);
+  });
+
+  it('현재 스타일에 연결된 미입고 발주가 있으면 "수정하기"다', () => {
+    const allPending = [po(1, 10, 'PENDING', 'MB73SLM109Z')];
+    const editable = buildEditableOrderByItem(filterOrdersByStyleNo(allPending, 'MB73SLM109Z'));
+    expect(editable.get(10)?.order.id).toBe(1);
+  });
+
+  it('스타일 미연결(styleNo 없음) 미입고 발주만 있으면 "수정하기"가 아니다(기존 미연결 안내로 따로 표시)', () => {
+    const allPending = [po(1, 10, 'PENDING', null)];
+    const editable = buildEditableOrderByItem(filterOrdersByStyleNo(allPending, 'MB73SLM109Z'));
+    expect(editable.has(10)).toBe(false);
+  });
+
+  it('입고완료/취소 발주는 스타일이 같아도 제외된다(기존 규칙 유지)', () => {
+    const allPending = [po(1, 10, 'RECEIVED', 'MB73SLM109Z'), po(2, 10, 'CANCELLED', 'MB73SLM109Z')];
+    const editable = buildEditableOrderByItem(filterOrdersByStyleNo(allPending, 'MB73SLM109Z'));
+    expect(editable.has(10)).toBe(false);
+  });
+});
+
+describe('countOtherStylePendingByItem (PR-191) — "참고: 다른 스타일 미입고 발주" 안내용 건수', () => {
+  const po = (itemId: number, status: string, styleNo: string | null) => ({ itemId, status, styleNo });
+
+  it('다른 스타일(스타일 있음)의 미입고 발주만 센다', () => {
+    const m = countOtherStylePendingByItem([po(10, 'PENDING', 'MB73SKM109Z'), po(10, 'PENDING', 'MB73JKM109Z')], 'MB73SLM109Z');
+    expect(m.get(10)).toBe(2);
+  });
+
+  it('현재 스타일의 발주는 세지 않는다', () => {
+    const m = countOtherStylePendingByItem([po(10, 'PENDING', 'MB73SLM109Z')], 'MB73SLM109Z');
+    expect(m.has(10)).toBe(false);
+  });
+
+  it('스타일 미연결(styleNo 없음) 발주는 세지 않는다(서버의 미연결 안내와 중복되지 않게)', () => {
+    const m = countOtherStylePendingByItem([po(10, 'PENDING', null)], 'MB73SLM109Z');
+    expect(m.has(10)).toBe(false);
+  });
+
+  it('입고완료/취소 발주는 세지 않는다', () => {
+    const m = countOtherStylePendingByItem([po(10, 'RECEIVED', 'MB73SKM109Z'), po(10, 'CANCELLED', 'MB73SKM109Z')], 'MB73SLM109Z');
+    expect(m.has(10)).toBe(false);
+  });
+});
+
 // PR-176: 색상/사이즈 라인 합계 계산.
 import { sumPurchaseOrderLines, isLineTotalMismatch, resolveBulkSupplierId, isBulkRowReady } from './purchaseOrderForm';
 
