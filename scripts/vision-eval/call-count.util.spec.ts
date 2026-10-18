@@ -1,4 +1,4 @@
-import { computeCallCount, estimateCost, shouldCallApi } from './call-count.util';
+import { computeCallCount, estimateCost, shouldCallApi, computeCallCountByMode, countDistinctPdfs } from './call-count.util';
 
 describe('computeCallCount (PR-199)', () => {
   it('페이지×모드×실행×모델을 곱한다', () => {
@@ -29,5 +29,28 @@ describe('shouldCallApi (PR-199) — --yes 없이는 API를 호출하지 않는�
   it('yes=true일 때만 호출을 허용한다', () => {
     expect(shouldCallApi(true)).toBe(true);
     expect(shouldCallApi(false)).toBe(false);
+  });
+});
+
+describe('countDistinctPdfs (PR-199b)', () => {
+  it('같은 PDF 이름이 여러 번 나와도 한 번만 센다(모드 A 호출 수 기준)', () => {
+    expect(countDistinctPdfs(['a.pdf', 'a.pdf', 'b.pdf', 'a.pdf'])).toBe(2);
+  });
+});
+
+describe('computeCallCountByMode (PR-199b) — 모드 A는 PDF 수, 나머지는 페이지 수', () => {
+  it('모드 A 호출 수 = PDF 수 × 실행 × 모델(페이지 수가 아니라)', () => {
+    // 실사례 재현: PDF 2개(각 4·5페이지=9페이지)를 모드 A로, 모델 1개·실행 1회.
+    const total = computeCallCountByMode([{ mode: 'A', unitCount: 2 }], 1, 1);
+    expect(total).toBe(2); // 9가 아니라 2
+  });
+
+  it('모드별로 단위가 다르면 각각 계산해 더한다(A=PDF수, C=페이지수)', () => {
+    const total = computeCallCountByMode(
+      [{ mode: 'A', unitCount: 2 }, { mode: 'C', unitCount: 9 }],
+      3,
+      2,
+    );
+    expect(total).toBe((2 + 9) * 3 * 2);
   });
 });

@@ -1,4 +1,4 @@
-import { classifyBomItems, standardGroupOf, digitDiff, checkLabelZonePresence } from './bom-match';
+import { classifyBomItems, standardGroupOf, digitDiff, checkLabelZonePresence, classifyNameMatch } from './bom-match';
 import type { GoldenBomItem, AiBomItemLike } from '../types';
 
 const golden = (overrides: Partial<GoldenBomItem>): GoldenBomItem => ({
@@ -74,10 +74,46 @@ describe('classifyBomItems (PR-199)', () => {
     expect(classifyBomItems([g], [])).toEqual([{ type: 'MISSING', golden: g }]);
   });
 
+  it('AI 값이 null이면 VALUE_MISSING — VALUE_DIFF와 섞지 않는다(실사례: 양면지퍼 1 → 미추출)', () => {
+    const g = golden({ itemName: '지퍼', consumption: 1 });
+    const a = ai({ itemName: '지퍼', consumption: null as any });
+    const result = classifyBomItems([g], [a]);
+    expect(result).toEqual([{ type: 'VALUE_MISSING', golden: g, ai: a }]);
+  });
+
+  it('값이 같고 이름이 괄호 세부사항만 다르면 NAME_ABBREV(실사례: 본봉사(코아사) 150 ↔ 봉사 150)', () => {
+    const g = golden({ itemName: '본봉사(코아사)', consumption: 150 });
+    const a = ai({ itemName: '봉사', consumption: 150 });
+    const result = classifyBomItems([g], [a]);
+    expect(result).toEqual([{ type: 'NAME_ABBREV', golden: g, ai: a }]);
+  });
+
   it('라벨 구역(isLabelZone)은 요척 비교 대상에서 빠진다', () => {
     const g = golden({ itemName: 'CARE LABEL', isLabelZone: true, consumption: 0 });
     const result = classifyBomItems([g], []);
     expect(result).toEqual([]);
+  });
+});
+
+describe('classifyNameMatch (PR-199b — PILOT-2 보정)', () => {
+  it('정규화 후 완전히 같으면 EXACT', () => {
+    expect(classifyNameMatch('오바사', '오바사')).toBe('EXACT');
+  });
+
+  it('정답에 줄바꿈 뒤 영문 설명이 붙어 있어도 첫 줄만 비교해 EXACT(실사례: "오바사\\nOVERLOCK THREAD")', () => {
+    expect(classifyNameMatch('오바사\nOVERLOCK THREAD', '오바사')).toBe('EXACT');
+  });
+
+  it('괄호 세부사항을 떼면 같으면 ABBREV(실사례: "본봉사(코아사)" ↔ "봉사")', () => {
+    expect(classifyNameMatch('본봉사(코아사)', '봉사')).toBe('ABBREV');
+  });
+
+  it('괄호 세부사항을 뗀 핵심과 AI 이름이 완전히 같아도 ABBREV(실사례: "안감(다후다)" ↔ "안감")', () => {
+    expect(classifyNameMatch('안감(다후다)', '안감')).toBe('ABBREV');
+  });
+
+  it('괄호가 없고 실제로 다른 글자면 DIFF(실사례: "걸고리" ↔ "겉고리")', () => {
+    expect(classifyNameMatch('걸고리', '겉고리')).toBe('DIFF');
   });
 });
 

@@ -47,10 +47,39 @@ export interface BomMatchResult {
 const goldenConsumption = (item: GoldenBomItem): number =>
   Array.isArray(item.consumption) ? item.consumption[0] : item.consumption;
 
+// PR-199b(PILOT-2에서 확인): 정답 자재명 A열에는 줄바꿈 뒤로 영문 설명이 같이 들어
+// 있다(예: "오바사\nOVERLOCK THREAD"). 비교는 첫 줄(한글명)만 쓴다 — 영문 설명이 있다는
+// 이유로 값이 맞는데도 NAME_DIFF가 되는 것을 막기 위함.
+const firstLine = (name: string): string => (name ?? '').split('\n')[0];
+
+// 괄호 세부사항(예: "본봉사(코아사)" → "본봉사")을 뗀 핵심 이름.
+const stripParenDetail = (name: string): string => name.replace(/\([^)]*\)/g, '').trim();
+
+export type NameMatchType = 'EXACT' | 'ABBREV' | 'DIFF';
+
+// PR-199b(PILOT-2에서 확인): 값이 같은데 이름만 다르게 보이는 두 가지 원인을 구분한다.
+// EXACT: 정규화 후 완전히 같음(첫 줄 비교이므로 영문 설명 유무는 이미 걸러짐).
+// ABBREV: 정답의 괄호 세부사항을 떼면 AI 이름과 같거나 포함 관계 — 오독이 아니라
+// 표기 차이(정답이 더 상세하거나 AI가 줄여 읽음). 그 외는 진짜 다른 이름(DIFF).
+export function classifyNameMatch(goldenRawName: string, aiName: string): NameMatchType {
+  const gFirst = firstLine(goldenRawName);
+  const gNorm = normalizeItemName(gFirst);
+  const aNorm = normalizeItemName(aiName);
+  if (gNorm === aNorm) return 'EXACT';
+
+  const gCore = normalizeItemName(stripParenDetail(gFirst));
+  const aCore = normalizeItemName(stripParenDetail(aiName));
+  if (gCore && aNorm && (gCore === aNorm || gCore === aCore || aNorm.includes(gCore) || gCore.includes(aNorm))) {
+    return 'ABBREV';
+  }
+  return 'DIFF';
+}
+
 // PR-199: 항목 매칭·채점 — 표준 이름 사전으로 분류 후 같은 분류끼리 짝짓고(여럿이면
-// 요척이 가장 가까운 것끼리), OK/VALUE_DIFF/NAME_DIFF/EXTRA_DUPLICATE/EXTRA_OTHER/
-// MISSING으로 분류한다. 라벨 구역(MAIN+SIZE 이후, isLabelZone)은 요척 비교에서
-// 제외하고 호출하는 쪽이 "존재 여부"만 따로 센다(이 함수는 다루지 않음).
+// 요척이 가장 가까운 것끼리), OK/VALUE_DIFF/VALUE_MISSING/NAME_DIFF/NAME_ABBREV/
+// EXTRA_DUPLICATE/EXTRA_OTHER/MISSING으로 분류한다. 라벨 구역(MAIN+SIZE 이후,
+// isLabelZone)은 요척 비교에서 제외하고 호출하는 쪽이 "존재 여부"만 따로 센다(이
+// 함수는 다루지 않음).
 export function classifyBomItems(golden: GoldenBomItem[], ai: AiBomItemLike[]): BomMatchResult[] {
   const comparableGolden = golden.filter((g) => !g.isLabelZone);
   const results: BomMatchResult[] = [];
@@ -74,13 +103,25 @@ export function classifyBomItems(golden: GoldenBomItem[], ai: AiBomItemLike[]): 
     const best = candidates[0];
     usedAi.add(best.idx);
 
-    const sameName = normalizeItemName(best.item.itemName) === normalizeItemName(g.itemName);
-    const sameValue = Math.abs((best.item.consumption ?? 0) - gConsumption) < 1e-9;
+    const aiConsumption = best.item.consumption;
+    if (aiConsumption == null) {
+      // PR-199b(PILOT-2에서 확인): 값을 안 읽은 것("0으로 오독"처럼 보이던 digitDiff
+      // 오해)과 실제로 다르게 읽은 것을 분리한다.
+      results.push({ type: 'VALUE_MISSING', golden: g, ai: best.item });
+      continue;
+    }
 
-    if (sameName && sameValue) {
+    const sameValue = Math.abs(aiConsumption - gConsumption) < 1e-9;
+    if (!sameValue) {
+      results.push({ type: 'VALUE_DIFF', golden: g, ai: best.item, digitDiff: digitDiff(gConsumption, aiConsumption) });
+      continue;
+    }
+
+    const nameMatch = classifyNameMatch(g.itemName, best.item.itemName);
+    if (nameMatch === 'EXACT') {
       results.push({ type: 'OK', golden: g, ai: best.item });
-    } else if (!sameValue) {
-      results.push({ type: 'VALUE_DIFF', golden: g, ai: best.item, digitDiff: digitDiff(gConsumption, best.item.consumption ?? 0) });
+    } else if (nameMatch === 'ABBREV') {
+      results.push({ type: 'NAME_ABBREV', golden: g, ai: best.item });
     } else {
       results.push({ type: 'NAME_DIFF', golden: g, ai: best.item });
     }
