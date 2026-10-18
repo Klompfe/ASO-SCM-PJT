@@ -330,4 +330,65 @@ PR-191 보고서의 0단계에서 `origin/main`(당시 `8ee5125`, PR-196·PR-194
 
 ---
 
-**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-199` 줄을 붙여 다시 보내 주세요.
+## 단계 11 · PR-199b — vision-eval 측정 도구 보정(모드 A 페이지 정렬·재채점·이름/값 비교)
+
+- 브랜치: `fix/vision-eval-mode-a-alignment`
+- 병합 전 main SHA: `ccddfc4`(PR-199 보고서 커밋 직후)
+- 병합 후 main SHA: `6d40d45`
+- 선행 단계: 단계 7(PR-199) — main에 있음 확인(`16a78a0` 조상)
+
+### 변경 파일 (origin/main...origin/fix/vision-eval-mode-a-alignment, 13개) — 전부 `scripts/vision-eval/` + 보고서
+- `prompt-reports/PR-199b-report.md`(신규)
+- `scripts/vision-eval/alignment.ts`(신규), `alignment.spec.ts`(신규)
+- `scripts/vision-eval/scoring-pipeline.ts`(신규), `scoring-pipeline.spec.ts`(신규)
+- `scripts/vision-eval/scoring/face-split.ts`(신규), `face-split.spec.ts`(신규)
+- `scripts/vision-eval/scoring/bom-match.ts`, `bom-match.spec.ts`
+- `scripts/vision-eval/call-count.util.ts`, `call-count.util.spec.ts`
+- `scripts/vision-eval/cli.ts`
+- `scripts/vision-eval/types.ts`
+
+백엔드 `src/` 변경 0건, `src/migrations/` 0건, `package.json`/lock 변경 0건(`git status --short -- src/ test/` 확인). `.env*`/엑셀/PDF/CSV/이미지/`vision-eval-out/`/실제 업무 데이터(실제 스타일번호·자재명·거래처명) 저장소에 없음(테스트는 전부 가짜 값). Gemini API 호출 0건(검증은 단위 테스트와 `--rescore`로만 수행).
+
+### 충돌 해결 내역
+`git merge origin/main`(PR-199 반영분 포함) — **충돌 없음**. 브랜치가 이미 main 최신(PR-199 포함)을 전부 포함하고 있어 "Already up to date"로 끝남(dry-run `merge-tree`도 충돌 0건 확인, fast-forward 후 트리 해시도 게이트 B 검증 트리와 동일함을 확인).
+
+### 테스트 숫자
+
+| 항목 | PR-199 기준선(변동 없음) | 이번 게이트 B 검증 |
+|---|---|---|
+| 백엔드 `jest` 전체 | 69 suites / 917 tests | **69 suites / 917 tests**(동일) |
+| 백엔드 e2e(`--maxWorkers=2`) | 69 suites / 555 tests | **69 suites / 555 tests**(동일) |
+| 하네스 전용 `npm run vision:eval:test` | 11 suites / 76 tests | **14 suites / 107 tests**(alignment·scoring-pipeline·face-split 신규 + bom-match·call-count 보강) |
+| 백엔드 `tsc` · `build` / 하네스 `vision:eval:typecheck` | 통과 | 통과 |
+
+백엔드 수치는 기준선과 정확히 동일(src/ 변경 없음) — 실패 0건. 하네스 테스트만 신규 분량만큼 증가.
+
+### 보정 전/후 재채점 비교(실제 파일럿 결과, `--rescore`로 API 호출 0건 재계산, 거래처명은 `거래처A`로 치환)
+
+| 분류 | 보정 전(버그, 9건) | 보정 후(재채점, 41건) |
+|---|---|---|
+| OK | 0 | 31 |
+| VALUE_DIFF | 18 | 17 |
+| VALUE_MISSING(신규) | — | 10 |
+| NAME_DIFF | 10 | 42 |
+| NAME_ABBREV(신규) | — | 54 |
+| EXTRA_DUPLICATE | 2 | 0 |
+| EXTRA_OTHER | 54 | 172 |
+| MISSING | 48 | 159 |
+| FACE_SPLIT_BY_COLOR(신규) | — | 23 |
+| styleNo EXACT | 1 | 11 |
+| styleNo SUFFIX_MISSING | 1 | 12 |
+| styleNo SUFFIX_DIGIT | 0 | 0 |
+| styleNo OTHER_MISMATCH | 5 | 8 |
+
+보정 전 수치는 모드 A가 PDF당 1페이지 결과를 모든 manifest 행에 중복 대입한 버그값이라 의미가 없었음(9건만 집계, 2/9 페이지는 시트 누락으로 제외). 보정 후 41건 전부 올바르게 정렬·채점됨. `SHEET_NOT_FOUND`(정답 시트 없음) 2건은 별도 집계 제외 목록으로 표시. 라벨 구역(`MAIN+SIZE`) 마커 자체는 정상 동작 확인(이전 PILOT-2 추정은 오류였음 — 실제 원인은 `standardGroupOf` 표준 사전에 라벨류 키워드 누락). 모드 B/C/E는 이미 페이지 단위로 올바르게 호출/채점하고 있어 수정 불필요(코드 재확인만, 변경 없음). 상세는 `prompt-reports/PR-199b-report.md` 참고.
+
+### 배포 안내
+이 PR은 마이그레이션이 없으므로 Render 배포 로그에서 `No migrations are pending`과 Live 상태만 확인하면 된다. **화면 변화는 없다**(로컬 CLI 도구, Render/Cloudflare 동작 변경 없음).
+
+### 사용자가 할 것
+로컬에서 보정된 모드 A로 7개 PDF를 다시 측정하고(`--yes` 전 호출 수가 `PDF 수 × 실행 × 모델`로 표시되는지 확인) 결과를 단계 8(PR-200)의 합격 기준 비교에 쓴다.
+
+---
+
+**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-199b` 줄을 붙여 다시 보내 주세요.
