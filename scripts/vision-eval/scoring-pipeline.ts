@@ -1,5 +1,7 @@
 import { classifyBomItems } from './scoring/bom-match';
 import { mergeFaceColorSplits } from './scoring/face-split';
+import { markImplicitMissing } from './scoring/implicit-items';
+import { pairMissingWithExtraByValue } from './scoring/value-pairing';
 import { scoreStyleNo, aggregateConfusionPairs } from './scoring/style-field';
 import { identifyUnstableFields, type InstabilityResult } from './scoring/instability';
 import { findGoldenBySheetName } from './golden-extract.util';
@@ -19,11 +21,16 @@ export interface ScoredEntry {
 }
 
 const BOM_COUNT_KEYS: FieldErrorType[] = [
-  'OK', 'VALUE_DIFF', 'VALUE_MISSING', 'NAME_DIFF', 'NAME_ABBREV',
-  'EXTRA_DUPLICATE', 'EXTRA_OTHER', 'EXTRA_HEADER_MATERIAL', 'MISSING',
+  'OK', 'VALUE_DIFF', 'VALUE_MISSING', 'NAME_DIFF', 'NAME_ABBREV', 'NAME_DIFF_PAIRED_BY_VALUE',
+  'EXTRA_DUPLICATE', 'EXTRA_OTHER', 'EXTRA_HEADER_MATERIAL', 'MISSING', 'MISSING_IMPLICIT',
   'SUPPLIER_MERGED', 'SUPPLIER_NAME_DIFF', 'ITEM_CODE_DIGIT_DIFF', 'FACE_SPLIT_BY_COLOR',
 ];
 const STYLE_COUNT_KEYS: StyleNoErrorType[] = ['EXACT', 'SUFFIX_MISSING', 'SUFFIX_DIGIT', 'OTHER_MISMATCH'];
+const PAGE_ROW_COLUMNS = [
+  'OK', 'VALUE_DIFF', 'VALUE_MISSING', 'NAME_DIFF', 'NAME_ABBREV', 'NAME_DIFF_PAIRED_BY_VALUE',
+  'EXTRA', 'MISSING', 'MISSING_IMPLICIT',
+] as const;
+type PageRowColumn = (typeof PAGE_ROW_COLUMNS)[number];
 
 export interface AlignmentIssue {
   mode: string;
@@ -32,6 +39,19 @@ export interface AlignmentIssue {
   page: number;
   sheet: string;
   status: EntryAlignmentStatus;
+}
+
+// PR-199c: PILOT-3에서 수작업으로 만들었던 PDF·쪽별 표를 summary에 자동으로 넣는다.
+// EXTRA는 EXTRA_OTHER+EXTRA_DUPLICATE를 합친 값(요약 표 칸을 과도하게 늘리지 않기 위함).
+export interface PageRow {
+  pdf: string;
+  page: number;
+  sheet: string;
+  goldenRowCount: number;
+  // 같은 (pdf,page,sheet)가 여러 번(run) 호출됐으면 그 실행들의 AI 행 수를 모두 더한다
+  // (counts 칸들도 모든 실행을 합산하므로 같은 기준).
+  aiRowCount: number;
+  counts: Record<PageRowColumn, number>;
 }
 
 export interface SummaryData {
@@ -43,6 +63,14 @@ export interface SummaryData {
   sheetNotFound: { pdf: string; page: number; sheet: string }[];
   unstableFields: InstabilityResult[];
   faceSplitCount: number;
+  // PR-199c 추가 —
+  gtStyleNoteCount: number;
+  gtStyleNoteList: string[];
+  valuePairedCount: number;
+  valuePairedExamples: { golden: string; ai: string }[];
+  implicitItemNames: string[];
+  pageRows: PageRow[];
+  pageRowTotalWarnings: string[];
 }
 
 function emptyRecord<T extends string>(keys: T[]): Record<T, number> {
@@ -61,7 +89,44 @@ function buildInstabilityInputs(entries: ScoredEntry[]) {
   return [...byKey.entries()].map(([fieldKey, valuesByRun]) => ({ fieldKey, valuesByRun }));
 }
 
-export function buildSummaryData(entries: ScoredEntry[], golden: GoldenStyle[]): SummaryData {
+function emptyPageRowCounts(): Record<PageRowColumn, number> {
+  return PAGE_ROW_COLUMNS.reduce((acc, k) => ({ ...acc, [k]: 0 }), {} as Record<PageRowColumn, number>);
+}
+
+const toPageRowColumn = (type: FieldErrorType): PageRowColumn | null => {
+  if (type === 'EXTRA_OTHER' || type === 'EXTRA_DUPLICATE') return 'EXTRA';
+  return (PAGE_ROW_COLUMNS as readonly string[]).includes(type) ? (type as PageRowColumn) : null;
+};
+
+// PR-199c: pageRows 합계가 전체 bomCounts와 일치하는지 코드로 검증한다(불일치 시
+// summary에 경고를 남긴다 — 집계 로직이 두 곳(전체 합계·페이지별 표)에서 갈라지면
+// 조용히 어긋날 수 있어서다).
+export function validatePageRowTotals(pageRows: PageRow[], bomCounts: Record<string, number>): string[] {
+  const totals = emptyPageRowCounts();
+  for (const row of pageRows) {
+    for (const col of PAGE_ROW_COLUMNS) totals[col] += row.counts[col];
+  }
+  const expected: Record<PageRowColumn, number> = {
+    OK: bomCounts.OK ?? 0,
+    VALUE_DIFF: bomCounts.VALUE_DIFF ?? 0,
+    VALUE_MISSING: bomCounts.VALUE_MISSING ?? 0,
+    NAME_DIFF: bomCounts.NAME_DIFF ?? 0,
+    NAME_ABBREV: bomCounts.NAME_ABBREV ?? 0,
+    NAME_DIFF_PAIRED_BY_VALUE: bomCounts.NAME_DIFF_PAIRED_BY_VALUE ?? 0,
+    EXTRA: (bomCounts.EXTRA_OTHER ?? 0) + (bomCounts.EXTRA_DUPLICATE ?? 0),
+    MISSING: bomCounts.MISSING ?? 0,
+    MISSING_IMPLICIT: bomCounts.MISSING_IMPLICIT ?? 0,
+  };
+  const warnings: string[] = [];
+  for (const col of PAGE_ROW_COLUMNS) {
+    if (totals[col] !== expected[col]) {
+      warnings.push(`페이지별 표 합계(${col}=${totals[col]})가 전체 합계(${expected[col]})와 다릅니다.`);
+    }
+  }
+  return warnings;
+}
+
+export function buildSummaryData(entries: ScoredEntry[], golden: GoldenStyle[], implicitItemNames: string[] = []): SummaryData {
   const callCountMap = new Map<string, number>();
   const bomCounts = emptyRecord(BOM_COUNT_KEYS);
   const styleNoCounts = emptyRecord(STYLE_COUNT_KEYS);
@@ -70,6 +135,12 @@ export function buildSummaryData(entries: ScoredEntry[], golden: GoldenStyle[]):
   const sheetNotFoundKeys = new Set<string>();
   const sheetNotFound: { pdf: string; page: number; sheet: string }[] = [];
   let faceSplitCount = 0;
+  let gtStyleNoteCount = 0;
+  const gtStyleNoteList: string[] = [];
+  let valuePairedCount = 0;
+  const valuePairedExamples: { golden: string; ai: string }[] = [];
+  const implicitFoundNames = new Set<string>();
+  const pageRowMap = new Map<string, PageRow>();
 
   for (const e of entries) {
     const key = `${e.mode}\u0000${e.model}`;
@@ -97,17 +168,45 @@ export function buildSummaryData(entries: ScoredEntry[], golden: GoldenStyle[]):
       const styleScore = scoreStyleNo(g.styleNo, e.ai.overview?.styleNo ?? null);
       styleNoCounts[styleScore.type]++;
       if (styleScore.confusion) confusionPairs.push(styleScore.confusion);
+      if (styleScore.gtNote) {
+        gtStyleNoteCount++;
+        gtStyleNoteList.push(`${e.sheet}: "${g.styleNo}"`);
+      }
     }
 
     const rawResults = classifyBomItems(g.bomItems, e.ai.bomItems ?? []);
-    const { results: mergedResults, faceSplitCount: fsCount } = mergeFaceColorSplits(rawResults);
+    const { results: afterFaceSplit, faceSplitCount: fsCount } = mergeFaceColorSplits(rawResults);
     faceSplitCount += fsCount;
-    for (const br of mergedResults) {
+    const { results: afterImplicit, implicitItemNames: foundNames } = markImplicitMissing(afterFaceSplit, implicitItemNames);
+    for (const n of foundNames) implicitFoundNames.add(n);
+    const { results: afterPairing, pairedCount } = pairMissingWithExtraByValue(afterImplicit);
+    valuePairedCount += pairedCount;
+
+    const pageKey = `${e.pdf}\u0000${e.page}\u0000${e.sheet}`;
+    let pageRow = pageRowMap.get(pageKey);
+    if (!pageRow) {
+      pageRow = {
+        pdf: e.pdf, page: e.page, sheet: e.sheet,
+        goldenRowCount: g.bomItems.filter((b) => !b.isLabelZone).length,
+        aiRowCount: 0,
+        counts: emptyPageRowCounts(),
+      };
+      pageRowMap.set(pageKey, pageRow);
+    }
+    pageRow.aiRowCount += (e.ai.bomItems ?? []).length;
+
+    for (const br of afterPairing) {
       if (br.type in bomCounts) bomCounts[br.type]++;
+      const col = toPageRowColumn(br.type);
+      if (col) pageRow.counts[col]++;
+      if (br.type === 'NAME_DIFF_PAIRED_BY_VALUE' && valuePairedExamples.length < 6 && br.golden && br.ai) {
+        valuePairedExamples.push({ golden: br.golden.itemName, ai: br.ai.itemName });
+      }
     }
   }
 
   const unstableFields = identifyUnstableFields(buildInstabilityInputs(entries));
+  const pageRows = [...pageRowMap.values()];
 
   return {
     callCountByModeModel: [...callCountMap.entries()].map(([key, count]) => {
@@ -121,6 +220,13 @@ export function buildSummaryData(entries: ScoredEntry[], golden: GoldenStyle[]):
     sheetNotFound,
     unstableFields,
     faceSplitCount,
+    gtStyleNoteCount,
+    gtStyleNoteList,
+    valuePairedCount,
+    valuePairedExamples,
+    implicitItemNames: [...implicitFoundNames],
+    pageRows,
+    pageRowTotalWarnings: validatePageRowTotals(pageRows, bomCounts),
   };
 }
 
@@ -158,6 +264,39 @@ export function renderSummaryMarkdown(data: SummaryData): string {
   if (data.unstableFields.length > 0) {
     lines.push('\n## 불안정 필드(반복 실행 간 값이 바뀜)');
     for (const f of data.unstableFields) lines.push(`- ${f.fieldKey}: 서로 다른 값 ${f.distinctValueCount}종, 불안정도 ${(f.instabilityRate * 100).toFixed(0)}%`);
+  }
+
+  if (data.gtStyleNoteCount > 0) {
+    lines.push('\n## 정답 셀 메모(GT_STYLE_NOTE — 본체만 비교에 썼음)');
+    lines.push(`- 건수: ${data.gtStyleNoteCount}`);
+    for (const s of data.gtStyleNoteList) lines.push(`- ${s}`);
+  }
+
+  if (data.valuePairedCount > 0) {
+    lines.push('\n## 값 기반 보조 짝짓기(NAME_DIFF_PAIRED_BY_VALUE — OK/NAME_ABBREV에 미포함, 사람 확인용)');
+    lines.push(`- 건수: ${data.valuePairedCount}`);
+    for (const p of data.valuePairedExamples) lines.push(`- 정답 "${p.golden}" ↔ AI "${p.ai}"`);
+  }
+
+  if (data.implicitItemNames.length > 0) {
+    lines.push('\n## 암묵 자재(MISSING_IMPLICIT — 작지에 안 적혀 있어 AI가 읽을 수 없음, 인식 실패 집계 제외)');
+    lines.push(`- 건수: ${data.bomCounts.MISSING_IMPLICIT ?? 0}`);
+    for (const n of data.implicitItemNames) lines.push(`- ${n}`);
+  }
+
+  if (data.pageRows.length > 0) {
+    lines.push('\n## PDF·쪽별 자재명세 표');
+    lines.push('| PDF | 쪽 | 정답행수 | AI행수 | OK | VALUE_DIFF | VALUE_MISSING | NAME_DIFF | NAME_ABBREV | NAME_DIFF_PAIRED_BY_VALUE | EXTRA | MISSING | MISSING_IMPLICIT |');
+    lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+    for (const r of data.pageRows) {
+      lines.push(
+        `| ${r.pdf} | ${r.page} | ${r.goldenRowCount} | ${r.aiRowCount} | ${r.counts.OK} | ${r.counts.VALUE_DIFF} | ${r.counts.VALUE_MISSING} | ${r.counts.NAME_DIFF} | ${r.counts.NAME_ABBREV} | ${r.counts.NAME_DIFF_PAIRED_BY_VALUE} | ${r.counts.EXTRA} | ${r.counts.MISSING} | ${r.counts.MISSING_IMPLICIT} |`,
+      );
+    }
+    if (data.pageRowTotalWarnings.length > 0) {
+      lines.push('\n> ⚠ 합계 불일치 경고:');
+      for (const w of data.pageRowTotalWarnings) lines.push(`> - ${w}`);
+    }
   }
 
   return lines.join('\n');

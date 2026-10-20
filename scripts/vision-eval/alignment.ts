@@ -12,19 +12,23 @@ export interface AlignedPageResult {
   ai: AiResultLike | null;
 }
 
-// 배열 길이가 그 PDF의 manifest 최대 page와 같으면 results[page-1]로 그대로 짝짓는다
-// (= 1번 호출, 인덱스만 올바르게 사용 — PILOT-2가 지적한 버그의 직접적인 수정).
-// 길이가 다르면 PAGE_COUNT_MISMATCH로 표시하고, 스타일번호 편집거리(≤2)가 유일 최소인
-// 항목에만 ALIGNED_BY_STYLE로 대체 매칭한다(그 외는 짝짓지 않음 — 틀린 스타일로 채점하지
-// 않기 위해, manifest 정확도와 같은 원칙).
+// PR-199c(PILOT-3에서 확인): "배열 길이 === manifest 최대 page"로 비교하면 manifest에
+// 일부 쪽만 들어있을 때(예: 6쪽짜리 PDF인데 manifest엔 3·4쪽만 있음) 길이가 달라
+// 불필요하게 경고가 난다(실제로는 results[page-1]이 정확히 맞았음 — 오탐). 이제는
+// 행 단위로 "그 쪽이 배열 범위 안에 있는지"만 보고, 아래 둘 중 하나일 때만 불일치로
+// 본다: (a) 배열이 manifest가 요구하는 쪽수보다 짧다, (b) 호출의 usage.pageCount를
+// 알 때 그 값과 배열 길이가 다르다(응답이 일부만 잘려 온 경우).
 export function alignResultsToPages(
   entries: ManifestEntry[],
   results: AiResultLike[],
   goldenStyleNoBySheet: Map<string, string | null>,
+  usagePageCount?: number,
 ): AlignedPageResult[] {
   const maxPage = Math.max(0, ...entries.map((e) => e.page));
+  const lengthTooShort = results.length < maxPage;
+  const usageMismatch = usagePageCount != null && results.length !== usagePageCount;
 
-  if (results.length === maxPage) {
+  if (!lengthTooShort && !usageMismatch) {
     return entries.map((e) => ({ page: e.page, sheet: e.sheet, status: 'OK', ai: results[e.page - 1] ?? null }));
   }
 

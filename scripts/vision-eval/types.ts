@@ -78,7 +78,15 @@ export type FieldErrorType =
   | 'ITEM_CODE_DIGIT_DIFF'
   // PILOT-2에서 확인: 정답의 겉감(소재) 한 줄을 AI가 색상별로 여러 행으로 나눠
   // 돌려주면 MISSING+EXTRA_OTHER 쌍으로 잘못 잡힌다 — 한 줄로 묶어 따로 센다.
-  | 'FACE_SPLIT_BY_COLOR';
+  | 'FACE_SPLIT_BY_COLOR'
+  // PR-199c(PILOT-3에서 확인): 이름 사전 매칭엔 실패했지만 같은 페이지의 남은
+  // MISSING/EXTRA를 수량(±5%)으로 일대일 짝지은 경우 — OK/NAME_ABBREV에 섞지 않고
+  // 따로 센다(이름이 왜 다른지는 사람이 확인해야 함).
+  | 'NAME_DIFF_PAIRED_BY_VALUE'
+  // PR-199c(PILOT-3에서 확인): 정답 시트에는 있지만 작지에 적혀 있지 않아 AI가 원천적으로
+  // 읽을 수 없는 자재(사이즈 스티커·케어라벨 등, implicit-items.json 목록) — 인식 실패
+  // 후보(MISSING)와 섞지 않는다.
+  | 'MISSING_IMPLICIT';
 
 export type StyleNoErrorType = 'EXACT' | 'SUFFIX_MISSING' | 'SUFFIX_DIGIT' | 'OTHER_MISMATCH';
 

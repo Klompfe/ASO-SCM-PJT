@@ -1,4 +1,4 @@
-import { buildSummaryData, renderSummaryMarkdown, type ScoredEntry } from './scoring-pipeline';
+import { buildSummaryData, renderSummaryMarkdown, validatePageRowTotals, type ScoredEntry, type PageRow } from './scoring-pipeline';
 import type { GoldenStyle } from './types';
 
 const goldenStyle = (overrides: Partial<GoldenStyle>): GoldenStyle => ({
@@ -80,6 +80,45 @@ describe('buildSummaryData (PR-199b)', () => {
     );
     expect(data.confusionTable).toEqual([{ golden: 'Z', read: '1', count: 1 }]);
   });
+
+  it('PR-199c: 정답 셀 메모는 gtStyleNoteCount/List에 남고 EXACT 분류는 그대로다', () => {
+    const data = buildSummaryData([entry({})], [goldenStyle({ styleNo: 'FAKE-1 (끝자리 확인요망)' })]);
+    expect(data.styleNoCounts.EXACT).toBe(1);
+    expect(data.gtStyleNoteCount).toBe(1);
+    expect(data.gtStyleNoteList[0]).toContain('(끝자리 확인요망)');
+  });
+
+  it('PR-199c: 값 기반 보조 짝짓기 — MISSING/EXTRA가 수량으로 짝지어지면 NAME_DIFF_PAIRED_BY_VALUE로 세고 MISSING/EXTRA에서는 뺀다', () => {
+    const data = buildSummaryData(
+      [entry({ ai: { overview: { styleNo: 'FAKE-1' }, bomItems: [{ itemName: '전혀다른이름', consumption: 10 }] } })],
+      [goldenStyle({})],
+    );
+    expect(data.bomCounts.NAME_DIFF_PAIRED_BY_VALUE).toBe(1);
+    expect(data.bomCounts.MISSING).toBe(0);
+    expect(data.bomCounts.EXTRA_OTHER).toBe(0);
+    expect(data.valuePairedCount).toBe(1);
+    expect(data.valuePairedExamples).toEqual([{ golden: '가짜자재', ai: '전혀다른이름' }]);
+  });
+
+  it('PR-199c: 암묵 자재 목록과 매칭되는 MISSING은 MISSING_IMPLICIT으로 분리된다', () => {
+    const data = buildSummaryData(
+      [entry({ ai: { overview: { styleNo: 'FAKE-1' }, bomItems: [] } })],
+      [goldenStyle({ bomItems: [{ itemName: '가짜케어라벨', consumption: 1, unit: null, isLabelZone: false }] })],
+      ['가짜케어라벨'],
+    );
+    expect(data.bomCounts.MISSING_IMPLICIT).toBe(1);
+    expect(data.bomCounts.MISSING).toBe(0);
+    expect(data.implicitItemNames).toEqual(['가짜케어라벨']);
+  });
+
+  it('PR-199c: PDF·쪽별 표를 만들고 합계가 전체 bomCounts와 일치해 경고가 없다', () => {
+    const data = buildSummaryData([entry({})], [goldenStyle({})]);
+    expect(data.pageRows).toEqual([
+      expect.objectContaining({ pdf: 'a.pdf', page: 1, sheet: 'FAKE-1', goldenRowCount: 1, aiRowCount: 1 }),
+    ]);
+    expect(data.pageRows[0].counts.OK).toBe(1);
+    expect(data.pageRowTotalWarnings).toEqual([]);
+  });
 });
 
 describe('renderSummaryMarkdown (PR-199b)', () => {
@@ -95,5 +134,36 @@ describe('renderSummaryMarkdown (PR-199b)', () => {
     const data = buildSummaryData([entry({})], [goldenStyle({})]);
     data.faceSplitCount = 3;
     expect(renderSummaryMarkdown(data)).toContain('FACE_SPLIT_BY_COLOR로 합쳐진 건수: 3');
+  });
+
+  it('PR-199c: PDF·쪽별 표가 요약에 나온다', () => {
+    const data = buildSummaryData([entry({})], [goldenStyle({})]);
+    const md = renderSummaryMarkdown(data);
+    expect(md).toContain('## PDF·쪽별 자재명세 표');
+    expect(md).toContain('| a.pdf | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |');
+  });
+
+});
+
+describe('validatePageRowTotals (PR-199c) — 페이지별 표 합계와 전체 합계 일치 검증', () => {
+  const fakeRow = (overrides: Partial<PageRow['counts']>): PageRow => ({
+    pdf: 'a.pdf', page: 1, sheet: 'FAKE-1', goldenRowCount: 1, aiRowCount: 1,
+    counts: { OK: 0, VALUE_DIFF: 0, VALUE_MISSING: 0, NAME_DIFF: 0, NAME_ABBREV: 0, NAME_DIFF_PAIRED_BY_VALUE: 0, EXTRA: 0, MISSING: 0, MISSING_IMPLICIT: 0, ...overrides },
+  });
+
+  it('합계가 맞으면 경고가 없다', () => {
+    const warnings = validatePageRowTotals([fakeRow({ OK: 1 })], { OK: 1 });
+    expect(warnings).toEqual([]);
+  });
+
+  it('합계가 안 맞으면 경고를 하나 남긴다', () => {
+    const warnings = validatePageRowTotals([fakeRow({ OK: 1 })], { OK: 2 });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('OK');
+  });
+
+  it('EXTRA_OTHER+EXTRA_DUPLICATE 합을 EXTRA 칸과 비교한다', () => {
+    const warnings = validatePageRowTotals([fakeRow({ EXTRA: 3 })], { EXTRA_OTHER: 2, EXTRA_DUPLICATE: 1 });
+    expect(warnings).toEqual([]);
   });
 });

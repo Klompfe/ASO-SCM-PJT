@@ -9,6 +9,7 @@ import { extractGoldenFromWorkbook, findGoldenBySheetName } from './golden-extra
 import { createStandaloneVisionService, runAnalysis } from './model-runner';
 import { checkPdfseparate, checkPdftoppm, checkPdftocairo, separatePdfPages, renderPageToGrayPng, cropPageRegionToGrayPng, makeTempDir, CROP_REGIONS } from './pdf-tools';
 import { alignResultsToPages } from './alignment';
+import { loadImplicitItemNames } from './scoring/implicit-items';
 import { buildSummaryData, renderSummaryMarkdown, type ScoredEntry } from './scoring-pipeline';
 import type { EvalMode, GoldenStyle, ManifestEntry, AiResultLike } from './types';
 
@@ -187,7 +188,7 @@ async function runEvalMode(args: CliArgs, outDir: string) {
               buffer: fs.readFileSync(pdfPath), originalname: pdf, mimetype: 'application/pdf',
             });
             detailsStream.write(JSON.stringify({ mode, model, pdf, page: null, run, outcome, error }) + '\n');
-            const aligned = alignResultsToPages(entriesForPdf, outcome?.results ?? [], styleNoBySheet);
+            const aligned = alignResultsToPages(entriesForPdf, outcome?.results ?? [], styleNoBySheet, outcome?.usage?.pageCount);
             for (const a of aligned) {
               scoredEntries.push({ mode, model, pdf, page: a.page, sheet: a.sheet, run, status: a.status, ai: a.ai });
             }
@@ -228,7 +229,7 @@ async function runEvalMode(args: CliArgs, outDir: string) {
   }
   detailsStream.end();
 
-  const summaryData = buildSummaryData(scoredEntries, golden);
+  const summaryData = buildSummaryData(scoredEntries, golden, loadImplicitItemNames());
   fs.writeFileSync(path.join(outDir, 'summary.md'), renderSummaryMarkdown(summaryData), 'utf8');
   console.log(`[vision-eval] 완료 — ${maskPath(outDir)}/summary.md, details.jsonl 작성됨.`);
 }
@@ -252,13 +253,13 @@ async function rescoreMode(args: CliArgs, outDir: string) {
   const { styleNoBySheet, sheetFound, sheetNotFound } = buildStyleNoMap(manifest, golden);
 
   const records = fs.readFileSync(detailsPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  const callsByKey = new Map<string, AiResultLike[][]>();
+  const callsByKey = new Map<string, { results: AiResultLike[]; pageCount?: number }[]>();
   let noArrayCount = 0;
   for (const rec of records) {
     if (!rec.outcome?.results) { noArrayCount++; continue; }
     const key = `${rec.mode}\u0000${rec.model}\u0000${rec.pdf}`;
     const list = callsByKey.get(key) ?? [];
-    list.push(rec.outcome.results);
+    list.push({ results: rec.outcome.results, pageCount: rec.outcome.usage?.pageCount });
     callsByKey.set(key, list);
   }
   if (noArrayCount > 0) {
@@ -275,15 +276,15 @@ async function rescoreMode(args: CliArgs, outDir: string) {
     const entriesForPdf = sheetFound.filter((e) => e.pdf === pdf);
     const notFoundForPdf = sheetNotFound.filter((e) => e.pdf === pdf);
 
-    trials.forEach((results, idx) => {
+    trials.forEach((trial, idx) => {
       const run = idx + 1;
-      const aligned = alignResultsToPages(entriesForPdf, results, styleNoBySheet);
+      const aligned = alignResultsToPages(entriesForPdf, trial.results, styleNoBySheet, trial.pageCount);
       for (const a of aligned) scoredEntries.push({ mode, model, pdf, page: a.page, sheet: a.sheet, run, status: a.status, ai: a.ai });
       for (const e of notFoundForPdf) scoredEntries.push({ mode, model, pdf, page: e.page, sheet: e.sheet, run, status: 'SHEET_NOT_FOUND', ai: null });
     });
   }
 
-  const summaryData = buildSummaryData(scoredEntries, golden);
+  const summaryData = buildSummaryData(scoredEntries, golden, loadImplicitItemNames());
   fs.writeFileSync(path.join(outDir, 'summary.md'), renderSummaryMarkdown(summaryData), 'utf8');
   fs.copyFileSync(detailsPath, path.join(outDir, 'details.jsonl'));
   console.log(`[vision-eval] 재채점 완료(API 호출 0건) — ${maskPath(outDir)}/summary.md 작성됨. 원본 결과: ${maskPath(args.rescoreDir)}`);
