@@ -170,7 +170,7 @@ MISSING은 129→70으로 줄었다 — 대부분(57건)은 값 기반 보조 �
 
 - 브랜치: `fix/vision-eval-pairing-implicit`
 - 선행 조건 확인: PR-199b `c5927ce`가 `origin/main`에 있음(`git log origin/main` 확인)
-- 이 브랜치의 커밋 SHA는 커밋·push 후 확정(아래 "브랜치만 push" 단계에서 기록)
+- 커밋 SHA: `76bfd37`
 
 ## ⑦ 남은 위험
 
