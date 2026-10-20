@@ -391,4 +391,48 @@ PR-191 보고서의 0단계에서 `origin/main`(당시 `8ee5125`, PR-196·PR-194
 
 ---
 
-**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-199b` 줄을 붙여 다시 보내 주세요.
+## 단계 12 · PR-199c — vision-eval 측정 도구 소형 보정(정렬 경고 기준·정답 메모 제거·값 기반 보조 짝짓기·암묵 자재 분리)
+
+- 브랜치: `fix/vision-eval-pairing-implicit`
+- 병합 전 main SHA: `c5927ce`(PR-199b 보고서 커밋 직후)
+- 병합 후 main SHA: `41fb703`
+- 선행 단계: 단계 11(PR-199b) — main에 있음 확인(`6d40d45` 조상)
+
+### 변경 파일 (origin/main...origin/fix/vision-eval-pairing-implicit, 15개) — 전부 `scripts/vision-eval/` + 보고서
+- `prompt-reports/PR-199c-report.md`(신규)
+- `scripts/vision-eval/README.md`(신규), `implicit-items.json`(신규)
+- `scripts/vision-eval/scoring/value-pairing.ts`(신규), `value-pairing.spec.ts`(신규)
+- `scripts/vision-eval/scoring/implicit-items.ts`(신규), `implicit-items.spec.ts`(신규)
+- `scripts/vision-eval/scoring/style-field.ts`, `style-field.spec.ts`
+- `scripts/vision-eval/alignment.ts`, `alignment.spec.ts`
+- `scripts/vision-eval/scoring-pipeline.ts`, `scoring-pipeline.spec.ts`
+- `scripts/vision-eval/cli.ts`, `types.ts`
+
+백엔드 `src/` 변경 0건, `src/migrations/` 0건, `package.json`/lock 변경 0건(`git diff --name-only` 확인). `.env*`/엑셀/PDF/CSV/이미지/`vision-eval-out/`/실제 업무 데이터 저장소에 없음(테스트는 전부 가짜 값). Gemini API 호출 0건(검증은 단위 테스트와 `--rescore`로만 수행).
+
+### 충돌 해결 내역
+`git merge origin/main`(PR-199b 반영분 포함) — **충돌 없음**. 브랜치가 이미 main 최신(PR-199b 포함)을 전부 포함하고 있어 "Already up to date"로 끝남(dry-run `merge-tree`도 충돌 0건 확인, fast-forward 후 트리 해시도 게이트 B 검증 트리와 동일함을 확인).
+
+### 테스트 숫자
+
+| 항목 | PR-199b 기준선(변동 없음) | 이번 게이트 B 검증 |
+|---|---|---|
+| 백엔드 `jest` 전체 | 69 suites / 917 tests | **69 suites / 917 tests**(동일) |
+| 백엔드 e2e(`--maxWorkers=2`) | 69 suites / 555 tests | **69 suites / 555 tests**(동일) |
+| 하네스 전용 `npm run vision:eval:test` | 14 suites / 107 tests | **16 suites / 135 tests**(value-pairing·implicit-items 신규 2개 + alignment·style-field·scoring-pipeline 보강) |
+| 백엔드 `tsc` · `build` / 하네스 `vision:eval:typecheck` | 통과 | 통과 |
+
+백엔드 수치는 기준선과 정확히 동일(src/ 변경 없음) — 실패 0건. 하네스 테스트만 신규 분량만큼 증가.
+
+### 보정 내용 요약 (`--rescore`로 API 호출 0건 재확인, 상세는 `prompt-reports/PR-199c-report.md` 참고)
+① 모드 A 정렬 경고 기준을 "배열 길이=manifest 최대 page"에서 행 단위("page ≤ 배열 길이")로 바꿔 PILOT-3에서 확인된 오탐(6Y 사례)이 사라짐(재채점 결과 정렬 경고 섹션 자체가 없어짐). ② 정답 스타일번호 셀의 사람 메모(예: "끝자리 확인요망")를 떼고 본체만 비교해 `GT_STYLE_NOTE`로 분리(해당 건 OTHER_MISMATCH→EXACT로 정정). ③ 값 기반 보조 짝짓기(`NAME_DIFF_PAIRED_BY_VALUE`)로 이름만 다르게 보이던 MISSING/EXTRA 쌍 57건을 분리(사람 확인용, OK에는 합산하지 않음 — 보고서에 의심 사례 2건도 직접 지적). ④ 암묵 자재(사이즈 스티커·케어라벨 등, `implicit-items.json`) 분리 — 이번 샘플은 라벨구역 판별이 이미 걸러내 0건. ⑤ summary.md에 PDF·쪽별 자재명세 표를 자동 출력하고 합계를 코드로 검증.
+
+### 배포 안내
+이 PR은 마이그레이션이 없으므로 Render 배포 로그에서 `No migrations are pending`과 Live 상태만 확인하면 된다. **화면 변화는 없다**(로컬 CLI 도구, Render/Cloudflare 동작 변경 없음).
+
+### 사용자가 할 것
+보정된 도구로 7개 PDF를 다시 측정하고(`--yes` 전 호출 수 확인), `NAME_DIFF_PAIRED_BY_VALUE` 쌍을 사람이 눈으로 검증한다(보고서 ③에 의심 사례 2건이 이미 표시돼 있음).
+
+---
+
+**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-199c` 줄을 붙여 다시 보내 주세요.
