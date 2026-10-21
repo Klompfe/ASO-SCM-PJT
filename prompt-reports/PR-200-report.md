@@ -109,4 +109,4 @@ npm run vision:eval -- --pdf-dir "C:\vision-eval\pdf" --xlsx "C:\vision-eval\xls
 
 ## 브랜치·SHA
 
-브랜치만 push, **main 병합 안 함**(큐 정책 `pause-after`). 커밋·푸시 직후 SHA를 이어서 보고한다.
+브랜치만 push, **main 병합 안 함**(큐 정책 `pause-after`). 커밋 SHA: `21bef54`.
