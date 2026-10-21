@@ -26,6 +26,7 @@ import {
   groupDuplicateIndexes,
   applyKeepOnlyThisRow,
   findWarning,
+  collectFormatConfirmItems,
 } from '../utils/visionGuardrails';
 import { OriginalPagePreview } from './OriginalPagePreview';
 
@@ -235,6 +236,15 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       );
       if (!proceed) return;
     }
+    // PR-200b: 끝 글자 숫자는 아니지만 형식이 안 맞는 스타일번호(하이픈 섞임, 품목코드
+    // 자리의 숫자 0 등)는 저장을 막지는 않되, 한 번 더 확인창을 띄운다.
+    const formatConfirmItems = collectFormatConfirmItems([{ index, overview: results[index].overview }]);
+    if (formatConfirmItems.length > 0) {
+      const proceed = window.confirm(
+        `스타일번호 형식이 맞지 않습니다 — 그대로 저장할까요? (${formatConfirmItems.map((i) => i.styleNo ?? `#${i.index + 1}`).join(', ')})`,
+      );
+      if (!proceed) return;
+    }
     const result = buildCommitResult(results[index], excludedBomIndexes.get(index) ?? new Set());
     if (hasBlankMaterialName(result.bomItems)) {
       toast.error('자재명이 빈 행이 있습니다 — 자재명을 채우거나 그 행을 제외해 주세요.');
@@ -268,6 +278,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     if (targets.length === 0) {
       toast.error('일괄 저장할 대상이 없습니다(Style No. 인식 실패 또는 이미 저장됨은 제외됩니다).');
       return;
+    }
+
+    // PR-200b: 일괄 저장 대상 중 형식 오류(끝 글자 숫자는 아닌) 스타일번호가 섞여 있으면
+    // 한 번에 확인창을 띄운다(개별 저장과 동일한 규칙, 대상 전체를 한 목록으로).
+    const formatConfirmItems = collectFormatConfirmItems(targets.map(({ result, index }) => ({ index, overview: result.overview })));
+    if (formatConfirmItems.length > 0) {
+      const proceed = window.confirm(
+        `스타일번호 형식이 맞지 않습니다 — 그대로 저장할까요? (${formatConfirmItems.map((i) => i.styleNo ?? `#${i.index + 1}`).join(', ')})`,
+      );
+      if (!proceed) return;
     }
 
     setBulkSaving(true);
@@ -468,7 +488,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                     <div className="lg:max-w-md">
                       {/* PR-200: 모드 A 관례상 results[index]는 업로드 PDF의 (index+1)번째
                           쪽과 1:1 대응한다(실제로 안 맞으면 컴포넌트 안의 ◀▶로 옆 쪽을 본다). */}
-                      <OriginalPagePreview file={file} page={index + 1} />
+                      <OriginalPagePreview file={file} page={index + 1} resultCount={results.length} />
                     </div>
                   )}
 

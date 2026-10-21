@@ -110,3 +110,44 @@ npm run vision:eval -- --pdf-dir "C:\vision-eval\pdf" --xlsx "C:\vision-eval\xls
 ## 브랜치·SHA
 
 브랜치만 push, **main 병합 안 함**(큐 정책 `pause-after`). 커밋 SHA: `21bef54`.
+
+---
+
+## PR-200b 보완
+
+PR-200 보고서의 단순화 3건 중 저장 확인창·패널 고정·쪽 번호 안내를 보완했다. **프런트만 변경**(백엔드/마이그레이션/`package.json`·락 변경 0 — `git diff origin/feat/vision-guardrails --stat`로 확인).
+
+### 변경 파일 (4개, 전부 `frontend-app/`)
+| 파일 | 내용 |
+|---|---|
+| `src/utils/visionGuardrails.ts` | `collectFormatConfirmItems`(형식 오류 확인창 대상), `pageMismatchNotice`, `clampPage` 추가 |
+| `src/utils/visionGuardrails.test.ts` | 위 3개 함수 테스트 13건 추가 |
+| `src/components/OriginalPagePreview.tsx` | sticky 고정, 높이 선택(작게/보통/크게, 좁은 화면 40vh 캡), 쪽 번호 불일치 안내, `clampPage` 재사용 |
+| `src/components/SalesOrderUploadModal.tsx` | 개별/일괄 저장 직전 형식 오류 확인창, `OriginalPagePreview`에 `resultCount` 전달 |
+
+### 테스트 숫자 (전/후)
+| 항목 | PR-200 기준 | PR-200b 이후 |
+|---|---|---|
+| 프런트 `vitest run` | 62 files / 453 tests | **62 files / 466 tests**(+13) |
+| 백엔드 `jest`/e2e | 변경 없음 | 변경 없음(파일 자체가 0건) |
+| `tsc -b`, `npm run build` | 통과 | 통과 |
+| `rm -rf node_modules && npm ci && npm run build`(클린 설치 재현, 7번) | — | **통과**. 경고는 `canvas`(pdfjs-dist의 Node용 optionalDependency, 브라우저 렌더링엔 안 씀) 전이 의존성의 **지원 종료(deprecated) 경고 6건**(`inflight`/`npmlog`/`rimraf`/`glob`/`are-we-there-yet`/`gauge`) — `npm audit` 기준은 PR-200 때와 동일(high 6·critical 0, `tar` override가 `npm ci`에도 그대로 적용됨). |
+
+### 구현 내용
+
+1. **형식 오류 저장 확인창** — `collectFormatConfirmItems`는 `STYLE_NO_FORMAT`이 있고 `STYLE_NO_LAST_DIGIT`은 없는 항목만 뽑는다. 개별 저장·일괄 저장 모두 저장 직전에 `window.confirm("스타일번호 형식이 맞지 않습니다 — 그대로 저장할까요? (…)")`를 띄우고, 취소하면 저장하지 않는다. `STYLE_NO_LAST_DIGIT`(저장 버튼 비활성)은 그대로 — 애초에 버튼을 못 누르므로 확인창 분기에 도달하지 않는다. 칩으로 고쳐 경고가 사라지면(현재 `overview.warnings`에 없음) 자연히 빈 목록이 된다.
+2. **원본 패널 sticky** — 패널 바깥쪽 div에 `sticky top-0 z-10`을 추가했다. 이 패널이 들어가는 결과 카드(`<div className="border rounded-lg p-4 space-y-3 ...">`)는 `overflow`를 걸지 않은 일반 블록이고, 실제 스크롤 조상은 모달 본문의 `p-6 overflow-y-auto flex-1 min-h-0`뿐이라 **중간에 sticky를 막는 `overflow:hidden` 조상이 없다** — 구조상 sticky가 그대로 먹을 것으로 판단했다(실제 브라우저 확인 필요, 아래 참고). 높이는 작게(25vh)/보통(40vh, 기본)/크게(60vh) 버튼으로 고르고, 좁은 화면(1024px 미만, `window.matchMedia` 감지)에서는 고른 값과 40vh 중 작은 쪽을 쓴다(인라인 `style.maxHeight`로 적용 — Tailwind 동적 클래스는 빌드 시 문자열이 고정돼 있어야 해서 쓰지 않음).
+3. **쪽 번호 불일치 안내** — `pageMismatchNotice(resultCount, pageCount)`는 PDF 로드 후 알게 된 총 쪽수가 AI 결과 건수와 다를 때만 문구를 돌려준다(같으면 `null`, 이미지 업로드처럼 `pageCount`를 모르면 `null`). `clampPage`로 요청한 쪽이 총 쪽수를 넘으면 마지막 쪽으로만 보정하고, 추측해서 다른 쪽을 고르는 로직은 없다.
+
+### 남아 있는 단순화(정직하게 표시)
+- **sticky 실제 동작 미확인**: 구조상 막는 조상이 없다고 코드로 판단했지만, 이 코드베이스엔 jsdom/testing-library가 없어(HsCodeManager.test.tsx 관례) 스크롤 동작 자체를 vitest로 재현할 수 없다 — 실제 브라우저 확인이 필요하다(아래 체크리스트 ②).
+- **확인창은 `window.confirm`** — PR-198의 기존 "비슷한 스타일" 확인창과 같은 방식(네이티브 브라우저 확인창)이라 디자인은 안 맞지만 동작은 일관된다. 커스텀 모달로 바꾸는 건 범위 밖으로 남겨 둔다.
+- **쪽 번호는 여전히 추정** — 불일치를 "알려주기"만 하고 고쳐주지는 않는다(지시서 요구사항 그대로).
+
+### 화면에서 확인할 것
+① 형식 오류 스타일번호(끝 글자 숫자 아님)로 저장을 누르면 확인창이 뜨고, 취소하면 저장되지 않는지 — 끝 글자 숫자인 경우는 그대로 저장 버튼이 비활성인지
+② 자재명세 표를 스크롤해도 원본 패널이 화면 위쪽에 붙어 있는지, "작게/보통/크게" 버튼이 높이를 바꾸는지, 좁은 창(1024px 미만)에서 40vh를 넘지 않는지
+③ AI 결과 건수와 PDF 실제 쪽수가 다를 때 패널에 "쪽 번호가 맞지 않을 수 있습니다" 안내가 뜨고, 같을 때는 안 뜨는지(이미지 업로드는 항상 안 뜸)
+
+### 브랜치·SHA
+브랜치만 push, main 병합 안 함. 커밋 SHA는 push 직후 아래에 기록.

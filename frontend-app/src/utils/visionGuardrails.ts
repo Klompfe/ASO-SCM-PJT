@@ -66,3 +66,33 @@ export function applyKeepOnlyThisRow(group: number[], keepIndex: number, exclude
   for (const idx of group) if (idx !== keepIndex) next.add(idx);
   return next;
 }
+
+export interface FormatConfirmItem {
+  index: number;
+  styleNo: string | null;
+}
+
+// PR-200b: STYLE_NO_FORMAT(끝 글자가 숫자는 아니지만 형식이 안 맞는 경우)가 있는 저장
+// 대상만 뽑는다 — 저장 직전 확인창에 쓴다. STYLE_NO_LAST_DIGIT(이미 저장 차단 대상)은
+// 빼고, 사람이 칩으로 값을 고쳐 경고가 사라진 행도 빠진다(경고가 그 시점 overview에
+// 그대로 남아 있을 때만 포함 — 호출자는 항상 "지금" overview를 넘긴다).
+export function collectFormatConfirmItems(
+  items: { index: number; overview: Pick<AiOverview, 'styleNo' | 'warnings'> }[],
+): FormatConfirmItem[] {
+  return items
+    .filter(({ overview }) => hasWarning(overview.warnings, 'STYLE_NO_FORMAT') && !hasWarning(overview.warnings, 'STYLE_NO_LAST_DIGIT'))
+    .map(({ index, overview }) => ({ index, styleNo: overview.styleNo }));
+}
+
+// PR-200b: results[index]를 PDF의 (index+1)쪽으로 보는 모드 A 관례가 실제 쪽수와
+// 다를 때 한 줄 안내. pageCount를 모르면(이미지 업로드 등) 안내하지 않는다.
+export function pageMismatchNotice(resultCount: number, pageCount: number | null): string | null {
+  if (pageCount == null || resultCount === pageCount) return null;
+  return `AI 결과 ${resultCount}건 / PDF ${pageCount}쪽 — 쪽 번호가 맞지 않을 수 있습니다. ◀▶ 로 직접 찾아 주세요.`;
+}
+
+// PR-200b: 요청한 쪽이 총 쪽수를 넘으면 마지막 쪽으로 보정한다(그 외 추측 로직 없음).
+export function clampPage(requestedPage: number, pageCount: number | null): number {
+  if (pageCount == null || pageCount <= 0) return requestedPage;
+  return Math.min(Math.max(1, requestedPage), pageCount);
+}
