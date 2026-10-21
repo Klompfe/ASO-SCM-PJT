@@ -20,6 +20,14 @@ import { getAllItems } from '../api/items.service';
 import { buildUploadFailureInfo, resolveUploadFailureToastMessage, type UploadFailureInfo } from '../utils/salesOrderUploadError';
 import { getSimilarMasterStyles } from '../api/styles.service';
 import { findSimilarStyleNos } from '../utils/styleNoSimilarity';
+import {
+  shouldBlockSaveForStyleNo,
+  summarizeWarnings,
+  groupDuplicateIndexes,
+  applyKeepOnlyThisRow,
+  findWarning,
+} from '../utils/visionGuardrails';
+import { OriginalPagePreview } from './OriginalPagePreview';
 
 interface Props {
   isOpen: boolean;
@@ -68,6 +76,8 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   // PR-198: 작지 AI가 읽은 스타일번호가 기존 스타일과 "끝 글자만 다른" 경우의 후보 목록
   // (결과 인덱스별) — 자동 변경하지 않고 버튼을 눌러야 입력칸 값이 바뀐다.
   const [similarStyleCandidates, setSimilarStyleCandidates] = useState<Map<number, string[]>>(new Map());
+  // PR-200: 항목별 원본 페이지 미리보기 토글(기본 숨김 — 필요할 때만 넓게 쓸 수 있게).
+  const [showOriginal, setShowOriginal] = useState<Set<number>>(new Set());
 
   const refreshSimilarStyleCandidates = async (index: number, styleNo: string | null) => {
     if (!styleNo) {
@@ -208,6 +218,12 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       toast.error('목업 데이터는 저장할 수 없습니다.');
       return;
     }
+    // PR-200: 끝 글자가 숫자인 스타일번호는 사람이 영문자로 고치기 전까지 저장을 막는다
+    // (사용자가 확정한 사실 — 끝 글자는 숫자가 될 수 없음, 유일한 저장 차단 규칙).
+    if (shouldBlockSaveForStyleNo(results[index].overview)) {
+      toast.error('스타일번호 끝 글자가 숫자로 읽혔습니다 — 원본과 대조해 영문자로 고친 뒤 저장해 주세요.');
+      return;
+    }
     // PR-198: 저장 직전에도 한 번 더 확인 — 비슷한 스타일이 있는데 번호가 다르면
     // "새 스타일로 만들까요?"로 한 번 더 묻는다(자동 변경 없음, 사람이 계속 진행을 선택).
     const styleNo = results[index].overview.styleNo;
@@ -262,6 +278,11 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     for (const { result: rawResult, index } of targets) {
       const result = buildCommitResult(rawResult, excludedBomIndexes.get(index) ?? new Set());
       const label = result.overview.styleNo ?? `#${index + 1}`;
+      if (shouldBlockSaveForStyleNo(rawResult.overview)) {
+        failures.push({ label, reason: '스타일번호 끝 글자가 숫자로 읽혔습니다 — 원본과 대조해 영문자로 고친 뒤 저장해 주세요.' });
+        setBulkProgress((p) => p + 1);
+        continue;
+      }
       if (hasBlankMaterialName(result.bomItems)) {
         failures.push({ label, reason: '자재명이 빈 행이 있습니다 — 자재명을 채우거나 그 행을 제외해 주세요.' });
         setBulkProgress((p) => p + 1);
@@ -411,14 +432,45 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                         >자재명세 보기</button>
                       )}
                       <button
+                        type="button"
+                        onClick={() => setShowOriginal((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(index)) next.delete(index); else next.add(index);
+                          return next;
+                        })}
+                        className="px-3 py-2 rounded text-sm font-medium border border-gray-300 hover:bg-gray-50"
+                        data-testid={`toggle-original-${index}`}
+                      >
+                        {showOriginal.has(index) ? '원본 숨기기' : '원본 보기'}
+                      </button>
+                      <button
                         onClick={() => handleSave(index)}
-                        disabled={savingIndex === index || savedIndexes.has(index) || isMock}
+                        disabled={savingIndex === index || savedIndexes.has(index) || isMock || shouldBlockSaveForStyleNo(result.overview)}
+                        title={shouldBlockSaveForStyleNo(result.overview) ? '스타일번호 끝 글자가 숫자로 읽혔습니다 — 영문자로 고쳐야 저장할 수 있습니다' : undefined}
                         className={`px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50 ${savedIndexes.has(index) ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
                       >
                         {savedIndexes.has(index) ? '저장됨' : savingIndex === index ? '저장 중...' : '저장'}
                       </button>
                     </div>
                   </div>
+
+                  {(() => {
+                    const summary = summarizeWarnings([result]);
+                    if (summary.totalCount === 0) return null;
+                    return (
+                      <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-1" data-testid={`warning-summary-${index}`}>
+                        확인 필요 {summary.totalCount}건 — {Object.entries(summary.byCode).map(([code, count]) => `${code} ${count}`).join(', ')}
+                      </div>
+                    );
+                  })()}
+
+                  {showOriginal.has(index) && (
+                    <div className="lg:max-w-md">
+                      {/* PR-200: 모드 A 관례상 results[index]는 업로드 PDF의 (index+1)번째
+                          쪽과 1:1 대응한다(실제로 안 맞으면 컴포넌트 안의 ◀▶로 옆 쪽을 본다). */}
+                      <OriginalPagePreview file={file} page={index + 1} />
+                    </div>
+                  )}
 
                   <div>
                     <h5 className="text-sm font-semibold text-gray-700 mb-1">1) 오더개요 (저장 전 직접 수정 가능)</h5>
@@ -446,6 +498,37 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                             ))}
                           </div>
                         )}
+                        {/* PR-200: 끝 글자가 숫자거나 형식이 안 맞으면 후보 칩(어느 것도
+                            미리 선택 안 됨 — 클릭해야 값이 채워지고 저장이 풀린다). */}
+                        {(() => {
+                          const lastDigit = findWarning(result.overview.warnings, 'STYLE_NO_LAST_DIGIT');
+                          const format = findWarning(result.overview.warnings, 'STYLE_NO_FORMAT');
+                          const rare = findWarning(result.overview.warnings, 'STYLE_NO_RARE_SUFFIX');
+                          const warning = lastDigit ?? format ?? rare;
+                          if (!warning) return null;
+                          const isBlocking = warning.code === 'STYLE_NO_LAST_DIGIT';
+                          return (
+                            <div
+                              className={`mt-0.5 rounded px-1.5 py-1 text-xs ${isBlocking ? 'bg-red-50 border border-red-300 text-red-800' : 'bg-yellow-50 border border-yellow-200 text-yellow-800'}`}
+                              data-testid={`style-no-format-warning-${index}`}
+                            >
+                              {warning.message}
+                              {result.overview.rawStyleNo && <div className="text-[10px] text-gray-500">읽은 원문: {result.overview.rawStyleNo}</div>}
+                              {(warning.suggestions ?? []).length > 0 && (
+                                <div className="mt-0.5 flex flex-wrap gap-1">
+                                  {(warning.suggestions ?? []).map((candidate) => (
+                                    <button
+                                      key={candidate}
+                                      type="button"
+                                      onClick={() => updateOverviewField(index, 'styleNo', candidate)}
+                                      className="px-1.5 py-0.5 rounded bg-white border border-gray-300 hover:bg-gray-50 font-mono"
+                                    >{candidate}</button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </label>
                       <label className="flex flex-col">
                         <span className="text-gray-500 text-xs">스타일명</span>
@@ -575,6 +658,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                       const excluded = excludedBomIndexes.get(index) ?? new Set<number>();
                       const edited = editedBomIndexes.get(index) ?? new Set<number>();
                       const badges = computeBomRowBadges(result.bomItems, result.overview.totalQty, existingMaterialNames);
+                      const duplicateGroups = groupDuplicateIndexes(result.bomItems);
                       return (
                         <>
                           <h5 className="text-sm font-semibold text-gray-700 mb-1">
@@ -583,7 +667,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           <p className="text-xs text-gray-400 mb-1">AI가 읽은 값이므로 작업지시서 원본과 대조해 주세요 — 잘못된 행은 수정하거나 제외할 수 있습니다.</p>
                           <div className="overflow-x-auto max-h-96 overflow-y-auto">
                             <table className="border text-sm">
-                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1">제외</th><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">비고</th><th className="border p-1">실/테이프 종류</th><th className="border p-1">확인 필요</th></tr></thead>
+                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1">제외</th><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">공급사</th><th className="border p-1">비고</th><th className="border p-1">실/테이프 종류</th><th className="border p-1">확인 필요</th></tr></thead>
                               <tbody>
                                 {result.bomItems.map((item, i) => {
                                   const candidate = item.materialSubTypeCandidate ?? null;
@@ -592,8 +676,15 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                   const isExcluded = excluded.has(i);
                                   const isEdited = edited.has(i);
                                   const rowBadges = badges[i];
+                                  const unknownName = findWarning(item.warnings, 'UNKNOWN_NAME');
+                                  const yocheokMismatch = findWarning(item.warnings, 'YOCHEOK_QTY_MISMATCH');
+                                  const duplicateWarning = findWarning(item.warnings, 'POSSIBLE_DUPLICATE');
+                                  const supplierSplit = findWarning(item.warnings, 'SUPPLIER_NAME_SPLIT');
+                                  const unknownSupplier = findWarning(item.warnings, 'UNKNOWN_SUPPLIER');
+                                  const duplicateGroup = duplicateGroups.find((g) => g.includes(i));
+                                  const hasServerWarning = (item.warnings ?? []).length > 0;
                                   return (
-                                    <tr key={i} className={isExcluded ? 'opacity-40' : undefined}>
+                                    <tr key={i} className={isExcluded ? 'opacity-40' : hasServerWarning ? 'bg-yellow-50' : undefined}>
                                       <td className="border p-1 text-center">
                                         <input
                                           type="checkbox"
@@ -639,6 +730,44 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           disabled={isExcluded}
                                           onChange={(e) => updateBomItemField(index, i, 'consumption', e.target.value === '' ? null : Number(e.target.value))}
                                         />
+                                        {/* PR-200: 손글씨 숫자를 AI가 확신하지 못했을 때만(uncertain)
+                                            후보 칩을 보여준다 — 클릭해야 값이 바뀐다. */}
+                                        {item.uncertain && (item.consumptionCandidates ?? []).length > 0 && (
+                                          <div className="mt-0.5 flex flex-wrap gap-1 justify-end" data-testid={`consumption-candidates-${index}-${i}`}>
+                                            {(item.consumptionCandidates ?? []).map((c) => (
+                                              <button
+                                                key={c}
+                                                type="button"
+                                                onClick={() => updateBomItemField(index, i, 'consumption', c)}
+                                                className="px-1 py-0.5 rounded bg-yellow-100 border border-yellow-300 text-[10px] hover:bg-yellow-200"
+                                              >{c}</button>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="border p-1">
+                                        <input
+                                          className="border rounded px-1 py-0.5 w-20 text-xs"
+                                          data-testid={`bom-supplier-${index}-${i}`}
+                                          value={item.supplier ?? ''}
+                                          disabled={isExcluded}
+                                          onChange={(e) => updateBomItemField(index, i, 'supplier', e.target.value || null)}
+                                        />
+                                        {/* PR-200: "공급사)자재명"을 서버가 분리했으면 후보로
+                                            보여준다 — 적용해야 기존 공급사 칸에 복사된다. */}
+                                        {supplierSplit && item.supplierName && item.supplierName !== item.supplier && (
+                                          <div className="mt-0.5 bg-sky-50 border border-sky-200 rounded px-1 py-0.5 text-[10px] text-sky-800">
+                                            원문: {item.rawItemName}
+                                            <button
+                                              type="button"
+                                              onClick={() => updateBomItemField(index, i, 'supplier', item.supplierName ?? null)}
+                                              className="ml-1 px-1 rounded bg-sky-600 text-white hover:bg-sky-700"
+                                            >"{item.supplierName}" 적용</button>
+                                          </div>
+                                        )}
+                                        {unknownSupplier && (
+                                          <div className="mt-0.5 text-[10px] text-sky-700">{unknownSupplier.message}</div>
+                                        )}
                                       </td>
                                       <td className="border p-1">{item.remarks ?? '-'}</td>
                                       <td className="border p-1">
@@ -679,6 +808,38 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                         )}
                                         {rowBadges.duplicateLooking && (
                                           <div className="bg-purple-50 border border-purple-200 text-purple-800 rounded px-1 py-0.5">이름만 다르고 소요량이 같은 행입니다 — 작업지시서와 대조해 주세요</div>
+                                        )}
+                                        {/* PR-200: 서버 후처리 경고(UNKNOWN_NAME/요척 불일치/중복 묶음) —
+                                            위 배지(PR-197)와 별도로 표시한다(둘 다 서로 다른 로직). */}
+                                        {unknownName && (
+                                          <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded px-1 py-0.5">
+                                            {unknownName.message}
+                                            {(unknownName.suggestions ?? []).map((s) => (
+                                              <button key={s} type="button" onClick={() => updateBomItemField(index, i, 'itemName', s)} className="ml-1 px-1 rounded bg-sky-600 text-white hover:bg-sky-700">{s}로 바꾸기</button>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {yocheokMismatch && (
+                                          <div className="bg-orange-50 border border-orange-200 text-orange-800 rounded px-1 py-0.5">
+                                            {yocheokMismatch.message}
+                                            {(yocheokMismatch.suggestions ?? []).map((s) => (
+                                              <button key={s} type="button" onClick={() => updateBomItemField(index, i, 'consumption', Number(s))} className="ml-1 px-1 rounded bg-orange-600 text-white hover:bg-orange-700">요척 {s}로</button>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {duplicateWarning && duplicateGroup && (
+                                          <div className="bg-purple-50 border border-purple-200 text-purple-800 rounded px-1 py-0.5" data-testid={`duplicate-group-${index}-${i}`}>
+                                            {duplicateWarning.message}(행 {duplicateGroup.map((g) => g + 1).join(', ')})
+                                            <button
+                                              type="button"
+                                              onClick={() => setExcludedBomIndexes((prev) => {
+                                                const next = new Map(prev);
+                                                next.set(index, applyKeepOnlyThisRow(duplicateGroup, i, next.get(index) ?? new Set()));
+                                                return next;
+                                              })}
+                                              className="ml-1 px-1 rounded bg-purple-600 text-white hover:bg-purple-700"
+                                            >이 행만 남기기</button>
+                                          </div>
                                         )}
                                       </td>
                                     </tr>

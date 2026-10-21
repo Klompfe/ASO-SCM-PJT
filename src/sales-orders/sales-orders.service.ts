@@ -1,8 +1,10 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { VisionService } from './vision.service';
+import { VisionService, type VisionGuardrailContext } from './vision.service';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Contract, ContractStatus } from '../styles/entities/contract.entity';
+import { Item } from '../items/entities/item.entity';
+import { Supplier } from '../suppliers/entities/supplier.entity';
 import { MappingCommitService } from '../mapping/services/mapping-commit.service';
 import { AiSalesOrderResultDto } from './dto/ai-analysis.dto';
 import { SalesOrderSpecsService } from './sales-order-specs.service';
@@ -22,7 +24,8 @@ export class SalesOrdersService {
   ) {}
 
   async analyzeImage(file: Express.Multer.File, userId: number) {
-    const { results, usage, isMock, modelUsed, fallbackUsed } = await this.visionService.analyzeSalesOrder(file);
+    const context = await this.buildGuardrailContext();
+    const { results, usage, isMock, modelUsed, fallbackUsed } = await this.visionService.analyzeSalesOrder(file, context);
     // 목업 응답(usage.pageCount === 0)은 실제 API 비용이 없으므로 과금 로그를 남기지 않는다.
     let chargedAmountKrw = 0;
     if (usage.pageCount > 0) {
@@ -31,6 +34,27 @@ export class SalesOrdersService {
     }
     // PR-192: 폴백 모델로 처리된 경우 화면에 "대체 모델로 분석했습니다" 안내를 보여주기 위함.
     return { results, chargedAmountKrw, isMock, modelUsed, fallbackUsed };
+  }
+
+  // PR-200: 서버 검증(스타일번호 형식·자재명 마스터 대조)에 쓸 참고 목록을 모아 온다.
+  // VisionService는 DB에 접근하지 않으므로 여기서 조회해 평범한 배열로 넘긴다. 조회가
+  // 실패해도 분석 자체는 계속돼야 하므로(안전장치가 없어도 기존 분석은 그대로 동작해야
+  // 함) 실패 시 빈 컨텍스트로 조용히 넘어간다.
+  private async buildGuardrailContext(): Promise<VisionGuardrailContext> {
+    try {
+      const [items, suppliers, styles] = await Promise.all([
+        this.dataSource.getRepository(Item).find({ select: ['name'] }),
+        this.dataSource.getRepository(Supplier).find({ select: ['name'] }),
+        this.dataSource.getRepository(MasterStyle).find({ select: ['styleNo'] }),
+      ]);
+      return {
+        masterItemNames: items.map((i) => i.name),
+        supplierNames: suppliers.map((s) => s.name),
+        knownStyleNos: styles.map((s) => s.styleNo),
+      };
+    } catch {
+      return {};
+    }
   }
 
   async getAiUsageForUser(userId: number) {

@@ -68,13 +68,103 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
     // PR-158: analyzeSalesOrder()가 응답을 받은 뒤 targetRddSuspicious를 계산해 덧붙인다.
     // PR-168: handwrittenCmtPriceCandidate/cmtPrice 가드도 항상 적용된다(바이어가
     // null이라 미도로 인정되지 않으므로 candidate는 null, cmtPrice는 항상 null로 초기화).
+    // PR-200: 'REAL-STYLE'은 실제 스타일번호 형식(MB|MBS|LB|VB...)이 아니라 서버 후처리가
+    // STYLE_NO_FORMAT 경고를 붙인다(후보는 접두를 못 찾아 빈 배열 — 값 자체는 안 바뀜).
     expect(outcome.results).toEqual([
       {
         ...fakeParsedResult[0],
-        overview: { ...fakeParsedResult[0].overview, targetRddYearAdjusted: false, targetRddOriginal: null, targetRddSuspicious: false, handwrittenCmtPriceCandidate: null, handwrittenCmtPriceMemo: null, cmtPrice: null },
+        overview: {
+          ...fakeParsedResult[0].overview,
+          targetRddYearAdjusted: false, targetRddOriginal: null, targetRddSuspicious: false,
+          handwrittenCmtPriceCandidate: null, handwrittenCmtPriceMemo: null, cmtPrice: null,
+          warnings: [{ code: 'STYLE_NO_FORMAT', message: '스타일번호 형식이 맞지 않습니다 — 원본과 대조해 주세요', suggestions: [] }],
+        },
       },
     ]);
     expect(outcome.usage).toEqual({ pageCount: 1, promptTokens: 100, outputTokens: 200 });
+  });
+});
+
+// PR-200: 작지 AI 판독 안전장치 — vision-guardrails.util.ts의 순수 함수들이
+// analyzeSalesOrder 파이프라인에 실제로 연결돼 있는지(가짜 Gemini 응답으로 확인).
+describe('VisionService.analyzeSalesOrder — PR-200 안전장치', () => {
+  const buildServiceWithFakeResponse = async (parsedResult: any[], context?: any) => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [VisionService, { provide: ConfigService, useValue: { get: jest.fn(() => 'fake-api-key') } }],
+    }).compile();
+    const service: VisionService = module.get(VisionService);
+    const fakeGenerateContent = jest.fn().mockResolvedValue({
+      response: {
+        candidates: [{ finishReason: 'STOP' }],
+        text: () => JSON.stringify(parsedResult),
+        usageMetadata: { promptTokenCount: 10, totalTokenCount: 20 },
+      },
+    });
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent: fakeGenerateContent })) };
+    return service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any, context);
+  };
+
+  const baseOverview = { styleNo: 'MB00AAA000Z', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: 80, targetRdd: null, documentDate: null };
+
+  it('공급사)자재명 형식을 분리하고 원문을 rawItemName에 남긴다(값을 지어내지 않음)', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      { overview: baseOverview, bomItems: [{ category: null, itemName: '르카이)KL-R114', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ]);
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('KL-R114');
+    expect(item.supplierName).toBe('르카이');
+    expect(item.rawItemName).toBe('르카이)KL-R114');
+  });
+
+  it('마스터에 없는 자재명이면 UNKNOWN_NAME + 한 글자 차이 후보를 붙인다', async () => {
+    const outcome = await buildServiceWithFakeResponse(
+      [{ overview: baseOverview, bomItems: [{ category: null, itemName: 'KL-R326', spec: null, colorCode: null, consumption: 1.5, requiredQty: null, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null }],
+      { masterItemNames: ['KL-R926'] },
+    );
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('KL-R326'); // 자동 교체 없음
+    expect(item.warnings).toEqual([{ code: 'UNKNOWN_NAME', message: expect.any(String), suggestions: ['KL-R926'] }]);
+  });
+
+  it('같은 구분·규격·요척 행이 3개면 POSSIBLE_DUPLICATE로 묶는다', async () => {
+    const dupItem = (name: string) => ({ category: '봉사', itemName: name, spec: null, colorCode: null, consumption: 20, requiredQty: null, supplier: null, remarks: null });
+    const outcome = await buildServiceWithFakeResponse(
+      [{ overview: baseOverview, bomItems: [dupItem('스쿠이사'), dupItem('스판사'), dupItem('스팽사')], sizeSpecs: [], workNotes: null }],
+      { masterItemNames: ['스쿠이사', '스판사', '스팽사'] },
+    );
+    const items = outcome.results[0].bomItems as any[];
+    for (const item of items) {
+      expect(item.warnings?.some((w: any) => w.code === 'POSSIBLE_DUPLICATE')).toBe(true);
+    }
+  });
+
+  it('요척×수량이 출고량과 안 맞으면 경고와 역산 후보를 붙인다(수량 탓으로 단정 안 함)', async () => {
+    const outcome = await buildServiceWithFakeResponse(
+      [{ overview: baseOverview, bomItems: [{ category: null, itemName: '가짜자재', spec: null, colorCode: null, consumption: 1.24, requiredQty: 97, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null }],
+      { masterItemNames: ['가짜자재'] },
+    );
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.warnings[0].code).toBe('YOCHEOK_QTY_MISMATCH');
+    expect(item.warnings[0].message).not.toContain('수량이 다릅니다');
+    expect(item.warnings[0].suggestions).toEqual(['1.21']);
+  });
+
+  it('스타일번호 끝 글자가 숫자면 저장 전 확인용 경고가 overview에 붙는다(값은 안 바뀜)', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      { overview: { ...baseOverview, styleNo: 'MB00AAA0002' }, bomItems: [], sizeSpecs: [], workNotes: null },
+    ]);
+    const overview = outcome.results[0].overview as any;
+    expect(overview.styleNo).toBe('MB00AAA0002');
+    expect(overview.warnings[0].code).toBe('STYLE_NO_LAST_DIGIT');
+  });
+
+  it('정상 값들은 경고가 붙지 않는다(오탐 방지)', async () => {
+    const outcome = await buildServiceWithFakeResponse(
+      [{ overview: baseOverview, bomItems: [{ category: null, itemName: '정상자재', spec: null, colorCode: null, consumption: 1.2, requiredQty: null, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null }],
+      { masterItemNames: ['정상자재'] },
+    );
+    expect((outcome.results[0].overview as any).warnings).toBeUndefined();
+    expect((outcome.results[0].bomItems[0] as any).warnings).toBeUndefined();
   });
 });
 

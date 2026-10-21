@@ -31,6 +31,18 @@ export interface AiOverview {
   cmtPrice?: number | null;
   // PR-181: cmtPrice의 근거 코멘트 — 저장되는 값(계약 cmtPriceNote까지 전달됨).
   cmtPriceNote?: string | null;
+  // PR-200: 서버가 계산해 내려주는 값(AI가 채우는 필드 아님) — 스타일번호가 대소문자만
+  // 틀려 서버가 대문자로 정리했을 때만 원문이 담긴다.
+  rawStyleNo?: string | null;
+  // PR-200: 서버 후처리 경고(저장 대상 아님, 검토 화면 표시용).
+  warnings?: AiWarning[] | null;
+}
+
+// PR-200: 작지 AI 판독 안전장치 — 서버 후처리 경고 하나(code/message + 선택적 후보값).
+export interface AiWarning {
+  code: string;
+  message: string;
+  suggestions?: string[];
 }
 
 export interface AiBomItem {
@@ -47,6 +59,17 @@ export interface AiBomItem {
   // 사람이 검토 화면에서 확정한 최종값(저장 대상). AI가 직접 채우지 않는다.
   threadType?: string | null;
   tapeType?: string | null;
+  // PR-200: 전부 AI 후보/서버 후처리 필드다 — commitSalesOrderAnalysis로 그대로
+  // 보내도 서버 commitAnalysis는 이 필드들을 읽지 않는다(저장 대상 아님).
+  itemNameCandidates?: string[] | null;
+  consumptionCandidates?: number[] | null;
+  uncertain?: boolean | null;
+  uncertainReason?: string | null;
+  // "공급사)자재명"을 서버가 분리했을 때만 채워진다(형식 해석). 화면에서 사람이
+  // 확인하면 기존 supplier 칸으로 복사해야 저장된다(이 필드 자체는 저장 대상 아님).
+  supplierName?: string | null;
+  rawItemName?: string | null;
+  warnings?: AiWarning[] | null;
 }
 
 export interface AiSizeSpecRow {

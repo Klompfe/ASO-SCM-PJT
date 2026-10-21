@@ -12,6 +12,15 @@ import { AiSalesOrderResultDto } from './dto/ai-analysis.dto';
 import { isSuspiciousTargetRdd } from './utils/target-rdd-validation.util';
 import { rolloverTargetRddYear } from './utils/target-rdd-year-rollover.util';
 import { isMidoBuyer } from './utils/mido-buyer.util';
+import {
+  checkStyleNo,
+  splitSupplierItemName,
+  checkUnknownName,
+  findDuplicateGroups,
+  checkDocumentDateSuspicious,
+  checkYocheokMismatch,
+  type VisionWarning,
+} from './utils/vision-guardrails.util';
 
 // PR-190 보강: "오늘" 기준 납기 연도 보정/의심 판정은 반드시 한국시간(KST, UTC+9) 날짜여야
 // 한다 — new Date().toISOString()은 UTC라 한국 00:00~09:00 사이에는 하루 전 날짜가 되어
@@ -24,6 +33,14 @@ export interface AiAnalysisUsage {
   pageCount: number;
   promptTokens: number;
   outputTokens: number; // candidatesTokenCount + thoughtsTokenCount
+}
+
+// PR-200: 서버 검증 후처리에 쓰는 참고 목록 — DB 조회는 호출자(SalesOrdersService)가
+// 하고 VisionService는 평범한 배열만 받는다(VisionService를 DB 비의존으로 유지).
+export interface VisionGuardrailContext {
+  masterItemNames?: string[];
+  supplierNames?: string[];
+  knownStyleNos?: string[];
 }
 
 export interface AiAnalysisOutcome {
@@ -85,6 +102,12 @@ export const RESPONSE_SCHEMA = {
               enum: ['코아사', '오바사', '지누이도', '다데', '암홀'],
               description: '실/테이프 종류 후보 — 자재명/규격에 명확한 단서가 있을 때만, 확신 없으면 null',
             },
+            // PR-200: 추가만(required에 안 넣음) — 한 줄을 여러 이름 후보로 중복 출력하는
+            // 대신 가장 가능성 높은 이름 하나는 itemName에, 나머지 후보는 여기로.
+            itemNameCandidates: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, nullable: true },
+            consumptionCandidates: { type: SchemaType.ARRAY, items: { type: SchemaType.NUMBER }, nullable: true },
+            uncertain: { type: SchemaType.BOOLEAN, nullable: true },
+            uncertainReason: { type: SchemaType.STRING, nullable: true },
           },
           required: ['itemName'],
         },
@@ -130,7 +153,17 @@ materialSubTypeCandidate: 실(THREAD)이나 테이프류 자재 행에서만, �
 
 4. workNotes(작업명세 - 지시사항): 옷 스케치 주변에 손글씨로 적힌 봉제 방식, 라벨 위치, 후가공 지시, 특이사항 등을 사람이 읽을 수 있는 자유 텍스트로 요약하세요. 구조화하지 말고 문단/목록 형태의 텍스트로 반환하세요.
 
-읽을 수 없거나 문서에 없는 값은 null로 두고, 절대 지어내지 마세요.`;
+읽을 수 없거나 문서에 없는 값은 null로 두고, 절대 지어내지 마세요.
+
+판독 규칙(실제 오독 사례로 확인된 패턴, PR-200):
+- 스타일번호(styleNo) 형식은 "MB|MBS|LB|VB" + 영숫자 2자 + 영문 3자(품목코드) + 숫자 3자리 + 끝 영문 1자입니다(예: MB00AAA000Z). 끝 글자를 빠뜨리지 마세요. 끝 글자는 절대 숫자가 아닙니다 — Z(약 80%)·A·R·K(합쳐 약 10%)·D(약 5%)·P(약 3%)·C·F(각 약 1%) 중 하나입니다. 손글씨 Z는 2·3·7처럼, A는 4처럼 보일 수 있으니 숫자처럼 보여도 영문자로 읽어 위 글자 중 가장 가까운 것을 쓰세요(확신이 안 서면 overview가 아니라 해당 bomItem에 uncertain=true와 uncertainReason을 채우세요). 스타일번호는 영문 대문자와 숫자로만 이루어지고 하이픈·공백·소문자가 들어가지 않습니다. 영문자가 와야 할 자리(접두·품목코드 3자·끝 글자)에서 숫자 0처럼 보이는 글자는 영문 O일 수 있습니다(예: 품목코드 "OPM"을 "0PM"으로 읽지 마세요).
+- 헤더의 "소재/소재명"은 겉감을 뜻합니다. 공급사의 소재코드·소재명을 따로 항목으로 만들지 말고 그 행의 구분은 "겉감"으로 하세요. 규격·요척·색상·사이즈별 수량 같은 핵심 값은 정확히 읽으세요.
+- "공급사)자재명" 형식: ")" 앞은 공급사명, 뒤는 자재명입니다(예: "르카이)KL-R114" → 공급사 르카이, 자재명 KL-R114). ")"를 지우거나 두 이름을 붙여 쓰지 마세요.
+- 한 줄 = 한 항목입니다. 같은 줄을 다른 이름 후보로 여러 행 출력하지 마세요. 읽기 어려운 이름은 가장 가능성 높은 이름 하나를 itemName에, 나머지 후보는 itemNameCandidates에 넣으세요.
+- 빈 칸은 null입니다. 위·아래 줄의 값을 복사하지 마세요(소재표에서 색상 줄이 비어 있어도 다른 색상의 요척을 쓰지 마세요).
+- 새 항목은 표에서만 만드세요. 스케치·손글씨 메모의 글자로 새 자재 행을 만들지 마세요(메모는 workNotes로).
+- 숫자: 손글씨 요척·소요량에서 7↔9, 2↔3, 3↔9, 1↔7, 4↔9가 특히 헷갈리니 칸 안에서 다시 확인하고, 확신이 없으면 uncertain=true와 consumptionCandidates에 가능한 값을 모두 적으세요.
+- 날짜: 작성일은 "YY년 M월 D일"의 월·일 숫자를 그대로 옮기세요(7월을 1월로 바꾸지 마세요).`;
 
 const DEFAULT_MODEL = 'gemini-3.6-flash';
 // PR-192 실측(Render 로그, 2026-10-13): gemini-3.6-flash가 503 과부하 상태일 때 2번째
@@ -161,7 +194,7 @@ export class VisionService {
     }
   }
 
-  async analyzeSalesOrder(file: Express.Multer.File): Promise<AiAnalysisOutcome> {
+  async analyzeSalesOrder(file: Express.Multer.File, context: VisionGuardrailContext = {}): Promise<AiAnalysisOutcome> {
     if (!this.genAI) {
       // 목업 응답은 실제 API 비용이 없으므로 pageCount=0으로 반환해 과금 로그를 남기지 않는다.
       return {
@@ -246,6 +279,7 @@ export class VisionService {
 
     this.applyTargetRddValidation(parsed);
     this.applyMidoCmtPriceGuard(parsed);
+    this.applyGuardrails(parsed, context, todayKstIso());
 
     // 페이지 수 = 결과 배열 길이(스타일 1개 = 페이지 1개)로 근사한다 — 실측 검증 완료
     // (6페이지 파일→6건, 16페이지 파일→16건 정확히 일치, PR-055 참고).
@@ -378,6 +412,62 @@ export class VisionService {
         result.overview.handwrittenCmtPriceMemo = null;
       }
       result.overview.cmtPrice = null;
+    }
+  }
+
+  // PR-200: AI 응답에 경고만 붙인다(값은 바꾸지 않음 — 예외: 스타일번호 대소문자 정리,
+  // "공급사)자재명" 분리는 추측이 아니라 형식 해석이라 허용한다). 저장 경로
+  // (commitAnalysis → mapping-commit)는 이 메서드가 채운 필드를 읽지 않는다(DTO에서
+  // 매핑하지 않음 — 사람이 확정한 값만 저장).
+  private applyGuardrails(results: AiSalesOrderResultDto[], context: VisionGuardrailContext, today: string): void {
+    const knownStyleNos = context.knownStyleNos ?? [];
+
+    for (const result of results) {
+      const overviewWarnings: VisionWarning[] = [];
+
+      const styleCheck = checkStyleNo(result.overview.styleNo, knownStyleNos);
+      result.overview.styleNo = styleCheck.styleNo;
+      if (styleCheck.rawStyleNo) result.overview.rawStyleNo = styleCheck.rawStyleNo;
+      overviewWarnings.push(...styleCheck.warnings);
+
+      const dateWarning = checkDocumentDateSuspicious(result.overview.documentDate, today);
+      if (dateWarning) overviewWarnings.push(dateWarning);
+      if (overviewWarnings.length > 0) result.overview.warnings = overviewWarnings;
+
+      for (const item of result.bomItems) {
+        const warnings: VisionWarning[] = [];
+
+        const split = splitSupplierItemName(item.itemName);
+        if (split) {
+          item.rawItemName = item.itemName;
+          item.supplierName = split.supplierName;
+          item.itemName = split.itemName;
+          warnings.push({ code: 'SUPPLIER_NAME_SPLIT', message: `공급사/자재명을 분리했습니다(원문: ${item.rawItemName})` });
+
+          const unknownSupplier = checkUnknownName(item.supplierName, context.supplierNames ?? [], 'UNKNOWN_SUPPLIER');
+          if (unknownSupplier) warnings.push(unknownSupplier);
+        }
+
+        const unknownName = checkUnknownName(item.itemName, context.masterItemNames ?? []);
+        if (unknownName) warnings.push(unknownName);
+
+        const yocheokWarning = checkYocheokMismatch(item.consumption, result.overview.totalQty, item.requiredQty);
+        if (yocheokWarning) warnings.push(yocheokWarning);
+
+        if (warnings.length > 0) item.warnings = warnings;
+      }
+
+      for (const group of findDuplicateGroups(result.bomItems)) {
+        const warning: VisionWarning = {
+          code: 'POSSIBLE_DUPLICATE',
+          message: '같은 줄이 다른 이름으로 중복 인식됐을 수 있습니다',
+          suggestions: group.map(String),
+        };
+        for (const idx of group) {
+          const item = result.bomItems[idx];
+          item.warnings = [...(item.warnings ?? []), warning];
+        }
+      }
     }
   }
 
