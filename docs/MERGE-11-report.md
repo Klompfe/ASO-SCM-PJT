@@ -435,4 +435,49 @@ PR-191 보고서의 0단계에서 `origin/main`(당시 `8ee5125`, PR-196·PR-194
 
 ---
 
-**다음 입력 필요**: Render 배포 확인 후 `배포확인: PR-199c` 줄을 붙여 다시 보내 주세요.
+## 단계 8 · PR-200(+PR-200b, PR-200c) — 작지 AI 판독 안전장치: 프롬프트 규칙·후보 필드·서버 검증·원본 대조 화면
+
+- 브랜치: `feat/vision-guardrails`
+- 병합 전 main SHA: `cbbcf3d`(PR-199c 보고서 커밋 직후)
+- 병합 후 main SHA: `50fcd47`
+- 선행 단계: 단계 2(PR-192)·3(PR-197)·6(PR-198)·7(PR-199) — 전부 main에 있음 확인
+
+### 변경 파일 (origin/main...origin/feat/vision-guardrails, 16개)
+- `src/sales-orders/utils/vision-guardrails.util.ts`(신규)·`.spec.ts`(신규) — 스타일번호 형식/끝 글자/혼동 문자 치환, 공급사 분리(+내부 코드 오분리 방지), 마스터 한 글자 차이 후보, 중복 묶음(+코드형 토큰 재분할), 작성일 의심, 요척 불일치
+- `src/sales-orders/vision.service.ts`·`.spec.ts` — PROMPT 판독 규칙 추가(기존 문장 삭제 없음), RESPONSE_SCHEMA 선택 필드 추가, `applyGuardrails()` 후처리
+- `src/sales-orders/dto/ai-analysis.dto.ts` — 후보/경고 선택 필드 추가(저장 경로 미사용, 테스트로 확인)
+- `src/sales-orders/sales-orders.service.ts`·`.spec.ts` — `buildGuardrailContext()`(자재/공급업체/스타일 목록 조회, 실패해도 안전하게 계속)
+- `frontend-app/src/utils/visionGuardrails.ts`(신규)·`.test.ts`(신규) — 경고 표시·저장 차단·확인창·쪽 불일치·대조 체크 판정용 순수 함수
+- `frontend-app/src/components/OriginalPagePreview.tsx`(신규) — pdfjs-dist 원본 쪽 렌더링(확대/축소·쪽이동·sticky·높이 선택)
+- `frontend-app/src/components/SalesOrderUploadModal.tsx`·`SalesOrderUploadModal.test.tsx`(신규) — 위 기능 전부 연결(스타일번호 대조 체크박스, 1·7·9 강조, 형식오류 확인창, 공급사 칸, 중복 "이 행만 남기기", 불확실 후보 칩)
+- `frontend-app/package.json`/`package-lock.json` — **새 의존성 `pdfjs-dist` 4.6.82(exact 고정) + `overrides.tar` 7.5.22**(canvas의 전이 의존성 critical 취약점 패치, 이 둘 외 변경 없음을 diff로 확인)
+- `prompt-reports/PR-200-report.md`(신규, PR-200/200b/200c 보완 3절 전부 포함)
+
+`src/migrations/` 변경 0건. 실제 업무 데이터·엑셀·작지·`vision-eval-out/` 저장소에 없음(테스트는 전부 익명 합성 데이터). `commitAnalysis`가 후보/경고 필드를 저장 경로로 넘기지 않는지 전용 테스트로 확인됨.
+
+### 충돌 해결 내역
+`git merge origin/main`(PR-192·197·198·199 반영분 포함) — **충돌 없음**. 브랜치가 이미 main 최신을 전부 포함하고 있어 "Already up to date"로 끝남(dry-run `merge-tree`도 충돌 0건 확인, fast-forward 후 트리 해시도 게이트 B 검증 트리와 동일함을 확인).
+
+### 테스트 숫자
+
+| 항목 | 하한(지시서 기준) | 이번 게이트 B 검증 |
+|---|---|---|
+| 백엔드 `jest` 전체 | 70 suites / 977 tests | **70 suites / 977 tests** |
+| 백엔드 e2e(`--maxWorkers=2`) | 69 suites / 555 tests | **69 suites / 555 tests**(재실행 중 작업 실수로 54건 일시 실패 — 무관한 stash가 실수로 pop되어 4개 파일이 충돌 마커 상태였던 것, 즉시 복구 후 재실행해 통과 확인. 해당 stash는 다른 브랜치 소속이라 그대로 보존함) |
+| 프런트 `vitest run` | 62 files / 473 tests | **62 files / 473 tests** |
+| 백엔드/프런트 `tsc` · `build` | 통과 | 통과(`npm ci`로 `pdfjs-dist`/`tar` override 설치 재현 확인) |
+
+숫자 전부 하한과 정확히 일치(선행 단계가 이미 분기 시점에 포함돼 있어 추가 증가 없음) — 실패 0건(위 일시적 사고 제외).
+
+### PILOT-6 측정 결과(병합 전 브랜치에서 이미 완료, 재측정 없음) — 합격 기준 판정
+① 스타일번호 끝 글자 누락 0 — **충족** ② 끝 글자 숫자 저장 차단 — 하네스로 측정 불가, **화면 확인 필요** ③ 공급사 분리 오류 — 측정 당시 106건 중 38건(36%) 오류, PR-200c로 보정(오프라인 재생: 106→68건, **화면 확인 필요**) ④ `EXTRA_DUPLICATE` 3→5 — **미충족**(AI 출력 쪽 변동, 후처리로는 안 바뀜) ⑤ 조용한 오류 — 형식 오류 스타일번호는 사라졌으나 형식이 맞는 틀린 값 10건/42회가 조용함 → PR-200c의 "원본 대조 체크박스"로 사람이 확인하는 구조로 보완. 한계: 표본 작음(PDF 4개, 한 사용자 정답).
+
+### 배포 안내
+이 PR은 마이그레이션이 없으므로 Render 배포 로그에서 `No migrations are pending`과 Live 상태만 확인하면 된다. **Cloudflare 빌드가 `pdfjs-dist`/`tar` override로 깨지지 않았는지도 함께 확인한다**(로컬 `npm ci && npm run build` 재현 통과 확인됨).
+
+### 사용자가 화면에서 확인할 것(작지를 올려 분석 결과만 보면 됨 — 저장은 안 눌러도 됨)
+① 원본 페이지 패널이 보이고 표를 스크롤해도 위에 고정되며 높이 버튼(작게/보통/크게)이 동작 ② 쪽 수가 AI 결과 건수와 다를 때 안내 문구 ③ 스타일번호 "원본 페이지와 대조했습니다" 체크박스 — 해제 시 저장 버튼 비활성, 켜면 활성, 일괄 저장에서 미대조 항목만 빠지고 안내됨, 스타일번호를 직접 고치면 대조 완료로 바뀜(후보 칩 클릭은 안 바뀜) ④ 스타일번호의 1·7·9 강조 ⑤ 형식 오류(끝 글자 숫자 아님) 스타일번호 저장 시 확인창 ⑥ 공급사 칸이 `MB72-014-0(PND` 같은 조각으로 채워지지 않음 ⑦ 중복 의심 묶음과 "이 행만 남기기"(이름이 전혀 다른 코드는 더는 안 묶임) ⑧ 불확실 숫자 후보 칩.
+
+---
+
+**다음 입력 필요**: Render/Cloudflare 배포 확인 후 `배포확인: PR-200` 줄을 붙여 다시 보내 주세요.
