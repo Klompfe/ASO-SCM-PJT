@@ -12,8 +12,11 @@ export interface VisionWarning {
 // (품목코드) + 숫자 3자리 + 끝 영문 1자. 끝에 "-숫자"(옵션 구분)가 붙을 수 있다.
 export const STYLE_NO_FORMAT_REGEX = /^(MBS?|LB|VB)[0-9A-Z]{2}[A-Z]{3}\d{3}[A-Z](-\d+)?$/;
 // 끝 글자가 숫자인 경우(끝 영문자가 통째로 숫자로 오독된 경우) — 사용자 확인: 끝 글자는
-// 절대 숫자가 아니다. 이 패턴은 "-숫자" 옵션 구분자가 없는 기본형만 본다.
-export const STYLE_NO_LAST_DIGIT_REGEX = /^(MBS?|LB|VB)[0-9A-Z]{2}[A-Z]{3}\d{4}$/;
+// 절대 숫자가 아니다. PR-200c: 처음엔 "-숫자" 접미가 없는 기본형만 봤는데, 그러면 본체가
+// 숫자로 끝나고 접미가 붙은 값(MB6YHMP1022-1)이 이 정규식에도 STYLE_NO_FORMAT_REGEX에도
+// 안 걸려 차단(LAST_DIGIT)이 아니라 확인창(FORMAT)으로 새어 나갔다 — 접미를 똑같이
+// 허용해 본체 끝 글자만 본다(본체가 영문자로 끝나는 MB6YHMP102Z-1은 여전히 안 걸림).
+export const STYLE_NO_LAST_DIGIT_REGEX = /^(MBS?|LB|VB)[0-9A-Z]{2}[A-Z]{3}\d{4}(-\d+)?$/;
 // 사용자 추산 빈도순(Z 약 80%, A·R·K 합쳐 약 10%, D 약 5%, P 약 3%, C·F 각 약 1%).
 export const STYLE_NO_SUFFIX_LETTERS = ['Z', 'A', 'R', 'K', 'D', 'P', 'C', 'F'] as const;
 
@@ -153,13 +156,35 @@ export function checkStyleNo(raw: string | null, knownStyleNos: string[] = []): 
   return { styleNo, rawStyleNo, warnings };
 }
 
-// "공급사)자재명" 형식 분리(형식 해석 — 값을 지어내지 않고 원문을 그대로 나눔).
+// PR-200c(PILOT-6 실측): 정상 공급사명(르카이·DDM·올리브 등)은 전부 10자 이내였고,
+// "MB72-014-0(PND) 2504"처럼 내부 코드가 섞인 오분리 사례만 비정상적으로 길거나
+// 괄호·스타일번호 접두·숫자-하이픈 패턴을 포함했다 — 그 경계를 20자로 둔다.
+const SUPPLIER_NAME_MAX_LENGTH = 20;
+const SUPPLIER_NAME_CODE_PREFIX_REGEX = /^(MB|LB|VB)/i;
+const DIGIT_HYPHEN_DIGIT_REGEX = /\d-\d/;
+
+// ")" 앞부분이 진짜 공급사명이 아니라 스타일번호·내부 코드 조각으로 보이면 true.
+// PR-200c(PILOT-6에서 확인): 106건 중 38건이 이 패턴이었다(괄호 안 닫힘, 스타일번호
+// 접두, 숫자-하이픈 코드, 숫자만, 비정상적으로 긴 문자열).
+function looksLikeInternalCode(candidate: string): boolean {
+  if (candidate.includes('(')) return true; // 괄호가 안 닫힘/중첩("MB99-001-0(XYZ) 1234" 류)
+  if (SUPPLIER_NAME_CODE_PREFIX_REGEX.test(candidate)) return true; // 스타일번호류 접두(MB/LB/VB)
+  if (DIGIT_HYPHEN_DIGIT_REGEX.test(candidate)) return true; // 숫자-하이픈-숫자 내부 코드
+  if (/^\d+$/.test(candidate)) return true; // 숫자만
+  if (candidate.length > SUPPLIER_NAME_MAX_LENGTH) return true; // 비정상적으로 길다
+  return false;
+}
+
+// "공급사)자재명" 형식 분리(형식 해석 — 값을 지어내지 않고 원문을 그대로 나눔). 다만
+// ")" 앞부분이 공급사명으로 보이지 않으면(내부 코드·스타일번호 조각) 분리하지 않고
+// 원문을 그대로 둔다 — 분리는 경고가 아니라 값을 바꾸는 동작이라 오판 비용이 크다.
 export function splitSupplierItemName(raw: string): { supplierName: string; itemName: string } | null {
   const match = /^([^)]+)\)\s*(.+)$/.exec((raw ?? '').trim());
   if (!match) return null;
   const supplierName = match[1].trim();
   const itemName = match[2].trim();
   if (!supplierName || !itemName) return null;
+  if (looksLikeInternalCode(supplierName)) return null;
   return { supplierName, itemName };
 }
 
@@ -194,18 +219,64 @@ export function checkUnknownName(name: string | null, masterNames: string[], cod
   };
 }
 
+// PR-200c(PILOT-6 실측): category+spec+consumption만으로 묶으면 이름이 전혀 다른 행
+// (예: "KL-R130" ↔ "9748")이 소요량만 같다는 이유로 중복 의심에 섞였다(29묶음 중
+// 14묶음이 이런 헛경보였다). "코드형 토큰"(숫자가 들어간 3자 이상 영숫자·하이픈 조각)을
+// 양쪽 다 가지고 있는데 겹치는 게 없으면 다른 자재로 본다 — 한쪽이라도 코드형 토큰이
+// 없으면(한글 이름만 등) 판단할 수단이 없으므로 기존 규칙을 그대로 쓴다.
+const CODE_TOKEN_REGEX = /[A-Za-z0-9-]{3,}/g;
+
+function extractCodeTokens(name: string | null): Set<string> {
+  const matches = (name ?? '').toUpperCase().match(CODE_TOKEN_REGEX) ?? [];
+  return new Set(matches.filter((t) => /\d/.test(t)));
+}
+
+function codeTokensCompatible(a: Set<string>, b: Set<string>): boolean {
+  if (a.size === 0 || b.size === 0) return true; // 판단 수단 없음 — 기존 규칙(같은 키)만으로 묶음 유지
+  for (const t of a) if (b.has(t)) return true;
+  return false; // 둘 다 코드형 토큰이 있는데 안 겹침 — 다른 자재로 보고 안 묶음
+}
+
 // 같은 구분·규격·요척(0 초과, 1 제외)인 행이 2개 이상이면 그 행들의 인덱스를 묶어 돌려준다
-// (한 줄이 여러 이름으로 중복 출력되는 패턴, PR-200 배경 1번).
+// (한 줄이 여러 이름으로 중복 출력되는 패턴, PR-200 배경 1번). 묶음 안에서도 코드형
+// 토큰이 서로 안 겹치는 행끼리는 더 쪼갠다(위 설명 참고) — 나머지(호환되는 것들)는
+// 연결된 성분으로 계속 하나의 묶음이다.
 export function findDuplicateGroups(
-  bomItems: { category: string | null; spec: string | null; consumption: number | null }[],
+  bomItems: { itemName?: string; category: string | null; spec: string | null; consumption: number | null }[],
 ): number[][] {
-  const groups = new Map<string, number[]>();
+  const keyGroups = new Map<string, number[]>();
   bomItems.forEach((b, i) => {
     if (b.consumption == null || b.consumption <= 0 || b.consumption === 1) return;
     const key = `${b.category ?? ''}\u0000${b.spec ?? ''}\u0000${b.consumption}`;
-    groups.set(key, [...(groups.get(key) ?? []), i]);
+    keyGroups.set(key, [...(keyGroups.get(key) ?? []), i]);
   });
-  return [...groups.values()].filter((idx) => idx.length >= 2);
+
+  const result: number[][] = [];
+  for (const indices of keyGroups.values()) {
+    if (indices.length < 2) continue;
+    const tokenSets = indices.map((i) => extractCodeTokens(bomItems[i].itemName ?? null));
+    const n = indices.length;
+    const visited = new Array(n).fill(false);
+    for (let start = 0; start < n; start++) {
+      if (visited[start]) continue;
+      visited[start] = true;
+      const component = [start];
+      const queue = [start];
+      while (queue.length > 0) {
+        const cur = queue.shift() as number;
+        for (let j = 0; j < n; j++) {
+          if (visited[j]) continue;
+          if (codeTokensCompatible(tokenSets[cur], tokenSets[j])) {
+            visited[j] = true;
+            component.push(j);
+            queue.push(j);
+          }
+        }
+      }
+      if (component.length >= 2) result.push(component.map((idx) => indices[idx]));
+    }
+  }
+  return result;
 }
 
 // 작성일이 미래이거나 18개월 넘게 과거면 의심 — targetRdd 연도보정(PR-190)과는 독립이고

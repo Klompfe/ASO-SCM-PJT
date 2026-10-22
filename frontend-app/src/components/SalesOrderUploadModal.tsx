@@ -27,6 +27,8 @@ import {
   applyKeepOnlyThisRow,
   findWarning,
   collectFormatConfirmItems,
+  collectUnverifiedStyleItems,
+  splitStyleNoForDisplay,
 } from '../utils/visionGuardrails';
 import { OriginalPagePreview } from './OriginalPagePreview';
 
@@ -79,6 +81,10 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   const [similarStyleCandidates, setSimilarStyleCandidates] = useState<Map<number, string[]>>(new Map());
   // PR-200: 항목별 원본 페이지 미리보기 토글(기본 숨김 — 필요할 때만 넓게 쓸 수 있게).
   const [showOriginal, setShowOriginal] = useState<Set<number>>(new Set());
+  // PR-200c: 스타일번호를 원본 페이지와 대조했는지(결과 인덱스 기준) — 기본 해제.
+  // 형식이 맞고 반복 읽기가 일치해도 숫자 1개 오독은 가드레일로 못 잡는다(A4/PILOT-6) —
+  // 경고와 별개로 사람이 직접 확인했는지만 보는 관문이다.
+  const [verifiedStyleNo, setVerifiedStyleNo] = useState<Set<number>>(new Set());
 
   const refreshSimilarStyleCandidates = async (index: number, styleNo: string | null) => {
     if (!styleNo) {
@@ -189,6 +195,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     if (field === 'styleNo') void refreshSimilarStyleCandidates(index, (value as string | null) ?? null);
   };
 
+  // PR-200c: 스타일번호 입력칸에 "사람이 직접" 타이핑했을 때만 쓴다(= 원본을 보고 입력한
+  // 것으로 간주해 자동으로 대조 완료 처리). 후보 칩 클릭은 updateOverviewField를 그대로
+  // 쓰고 이 함수를 거치지 않는다 — 칩은 AI 후보일 뿐 사람이 원본을 본 게 아니다.
+  const handleStyleNoManualEdit = (index: number, value: string | null) => {
+    updateOverviewField(index, 'styleNo', value);
+    setVerifiedStyleNo((prev) => new Set(prev).add(index));
+  };
+
   // PR-197: 체크하면 저장 요청에서 빠진다(되돌릴 수 있음 — 체크 해제로 복원).
   const toggleExcludeBomItem = (index: number, bomIndex: number) => {
     setExcludedBomIndexes((prev) => {
@@ -223,6 +237,11 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     // (사용자가 확정한 사실 — 끝 글자는 숫자가 될 수 없음, 유일한 저장 차단 규칙).
     if (shouldBlockSaveForStyleNo(results[index].overview)) {
       toast.error('스타일번호 끝 글자가 숫자로 읽혔습니다 — 원본과 대조해 영문자로 고친 뒤 저장해 주세요.');
+      return;
+    }
+    // PR-200c: 경고 여부와 무관하게 "원본과 대조했다"는 확인이 없으면 저장하지 않는다.
+    if (!verifiedStyleNo.has(index)) {
+      toast.error('스타일번호를 원본 페이지와 대조했는지 체크해 주세요.');
       return;
     }
     // PR-198: 저장 직전에도 한 번 더 확인 — 비슷한 스타일이 있는데 번호가 다르면
@@ -271,12 +290,30 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       toast.error('목업 데이터는 저장할 수 없습니다.');
       return;
     }
-    const targets = results
+    const candidateTargets = results
       .map((result, index) => ({ result, index }))
       .filter(({ result, index }) => !!result.overview.styleNo && !savedIndexes.has(index));
 
-    if (targets.length === 0) {
+    if (candidateTargets.length === 0) {
       toast.error('일괄 저장할 대상이 없습니다(Style No. 인식 실패 또는 이미 저장됨은 제외됩니다).');
+      return;
+    }
+
+    // PR-200c: 대조하지 않은 항목은 안내하고 그 항목만 빼고 저장한다(나머지는 그대로 진행).
+    const unverified = collectUnverifiedStyleItems(
+      candidateTargets.map(({ result, index }) => ({ index, styleNo: result.overview.styleNo })),
+      verifiedStyleNo,
+    );
+    if (unverified.length > 0) {
+      toast.error(
+        `스타일번호를 원본과 대조하지 않은 항목은 저장하지 않습니다: ${unverified.map((u) => u.styleNo ?? `#${u.index + 1}`).join(', ')}`,
+      );
+    }
+    const unverifiedIndexes = new Set(unverified.map((u) => u.index));
+    const targets = candidateTargets.filter(({ index }) => !unverifiedIndexes.has(index));
+
+    if (targets.length === 0) {
+      toast.error('대조 확인이 끝난 저장 대상이 없습니다.');
       return;
     }
 
@@ -441,7 +478,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                   )}
                   <div className="flex justify-between items-center">
                     <h4 className="font-bold">
-                      {index + 1}. {result.overview.styleNo ?? '(Style No. 인식 실패)'}
+                      {index + 1}.{' '}
+                      {result.overview.styleNo ? (
+                        <span title="숫자 1·7·9는 작성자가 손글씨에서 자주 혼동합니다 — 원본과 확인하세요">
+                          {splitStyleNoForDisplay(result.overview.styleNo).map((seg, si) => (
+                            <span key={si} className={seg.highlight ? 'text-red-600 font-extrabold' : undefined}>{seg.text}</span>
+                          ))}
+                        </span>
+                      ) : '(Style No. 인식 실패)'}
                       {result.overview.styleName ? ` — ${result.overview.styleName}` : ''}
                     </h4>
                     <div className="flex gap-2">
@@ -465,8 +509,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                       </button>
                       <button
                         onClick={() => handleSave(index)}
-                        disabled={savingIndex === index || savedIndexes.has(index) || isMock || shouldBlockSaveForStyleNo(result.overview)}
-                        title={shouldBlockSaveForStyleNo(result.overview) ? '스타일번호 끝 글자가 숫자로 읽혔습니다 — 영문자로 고쳐야 저장할 수 있습니다' : undefined}
+                        disabled={savingIndex === index || savedIndexes.has(index) || isMock || shouldBlockSaveForStyleNo(result.overview) || !verifiedStyleNo.has(index)}
+                        title={
+                          shouldBlockSaveForStyleNo(result.overview)
+                            ? '스타일번호 끝 글자가 숫자로 읽혔습니다 — 영문자로 고쳐야 저장할 수 있습니다'
+                            : !verifiedStyleNo.has(index)
+                              ? '스타일번호를 원본 페이지와 대조했는지 체크해 주세요'
+                              : undefined
+                        }
                         className={`px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50 ${savedIndexes.has(index) ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
                       >
                         {savedIndexes.has(index) ? '저장됨' : savingIndex === index ? '저장 중...' : '저장'}
@@ -501,8 +551,23 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           className="border rounded px-2 py-1"
                           data-testid={`style-no-input-${index}`}
                           value={result.overview.styleNo ?? ''}
-                          onChange={(e) => updateOverviewField(index, 'styleNo', e.target.value || null)}
+                          onChange={(e) => handleStyleNoManualEdit(index, e.target.value || null)}
                         />
+                        {/* PR-200c: 경고와 별개인 확인 관문 — 원본과 대조하기 전엔 저장 불가.
+                            직접 수정하면 자동으로 체크된다(칩 클릭은 자동 체크 안 함). */}
+                        <label className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-600">
+                          <input
+                            type="checkbox"
+                            data-testid={`style-no-verified-${index}`}
+                            checked={verifiedStyleNo.has(index)}
+                            onChange={() => setVerifiedStyleNo((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(index)) next.delete(index); else next.add(index);
+                              return next;
+                            })}
+                          />
+                          스타일번호를 원본 페이지와 대조했습니다
+                        </label>
                         {/* PR-198: 끝 글자만 다른 기존 스타일이 있으면 알려준다 — 자동으로
                             바꾸지 않고 버튼을 눌러야 입력칸 값이 바뀐다. */}
                         {(similarStyleCandidates.get(index) ?? []).length > 0 && (

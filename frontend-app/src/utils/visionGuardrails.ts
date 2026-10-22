@@ -96,3 +96,39 @@ export function clampPage(requestedPage: number, pageCount: number | null): numb
   if (pageCount == null || pageCount <= 0) return requestedPage;
   return Math.min(Math.max(1, requestedPage), pageCount);
 }
+
+export interface UnverifiedStyleItem {
+  index: number;
+  styleNo: string | null;
+}
+
+// PR-200c: 스타일번호를 원본과 대조했는지는 경고와 무관한 별도의 확인 관문이다(A4 —
+// 형식이 맞고 반복 읽기가 일치해도 숫자 1개 오독은 가드레일로 못 잡는다, PILOT-6 10/10
+// 사례). verified에 없는 인덱스만 "미대조"로 뽑는다 — 호출자가 직접 수정/칩 클릭에
+// 따라 verified를 갱신해 넘긴다(이 함수는 그 Set을 들여다보기만 함).
+export function collectUnverifiedStyleItems(
+  items: { index: number; styleNo: string | null }[],
+  verified: Set<number>,
+): UnverifiedStyleItem[] {
+  return items.filter((item) => !verified.has(item.index));
+}
+
+export interface StyleNoDisplaySegment {
+  text: string;
+  highlight: boolean;
+}
+
+// PR-200c(A4): 작성자의 7·1·9는 서로 혼동되기 쉽다(2↔7, 1↔7, 1↔4, 4↔9, 7↔9 등 여러
+// 혼동쌍에 걸쳐 있음) — 스타일번호를 표시할 때 이 세 숫자만 눈에 띄게 강조한다. 값
+// 자체는 바꾸지 않는다(표시용 분할일 뿐).
+export function splitStyleNoForDisplay(styleNo: string | null | undefined): StyleNoDisplaySegment[] {
+  const value = styleNo ?? '';
+  const segments: StyleNoDisplaySegment[] = [];
+  for (const ch of value) {
+    const highlight = ch === '1' || ch === '7' || ch === '9';
+    const last = segments[segments.length - 1];
+    if (last && last.highlight === highlight) last.text += ch;
+    else segments.push({ text: ch, highlight });
+  }
+  return segments;
+}

@@ -36,6 +36,21 @@ describe('checkStyleNo (PR-200)', () => {
     expect(result.warnings[0].suggestions?.[0]).toBe('LB00ABC191A');
   });
 
+  // PR-200c: "-숫자" 접미가 있어도 본체 끝 글자가 숫자면 여전히 STYLE_NO_LAST_DIGIT으로
+  // 잡혀야 한다(이전엔 접미 때문에 LAST_DIGIT_REGEX가 안 맞아 FORMAT으로 샜다).
+  it('접미가 붙어도 본체 끝 글자가 숫자면 STYLE_NO_LAST_DIGIT으로 잡힌다', () => {
+    const result = checkStyleNo('MB6YHMP1022-1');
+    expect(result.warnings[0].code).toBe('STYLE_NO_LAST_DIGIT');
+  });
+
+  it('본체가 영문자로 끝나면 접미가 있어도 여전히 통과(경고 없음)', () => {
+    expect(checkStyleNo('MB6YHMP102Z-1').warnings).toEqual([]);
+  });
+
+  it('접미가 없는 기존 끝 글자 숫자 사례는 그대로 동작한다', () => {
+    expect(checkStyleNo('MB6YHMP1022').warnings[0].code).toBe('STYLE_NO_LAST_DIGIT');
+  });
+
   it('형식에 맞는 끝 글자(Z/A/R/K/D/P/C/F)는 경고 없음', () => {
     for (const letter of ['Z', 'A', 'R', 'K', 'D', 'P', 'C', 'F']) {
       expect(checkStyleNo(`LB00ABC191${letter}`).warnings).toEqual([]);
@@ -127,6 +142,32 @@ describe('splitSupplierItemName (PR-200) — "공급사)자재명" 분리', () =
   });
 });
 
+describe('splitSupplierItemName (PR-200c) — 내부 코드·스타일번호 조각은 분리하지 않음', () => {
+  it('")" 앞에 괄호가 안 닫힌 내부 코드면 분리하지 않는다(실사례: MB99-001-0(XYZ) 1234)', () => {
+    expect(splitSupplierItemName('MB99-001-0(XYZ) 1234')).toBeNull();
+  });
+
+  it('")" 앞이 숫자-하이픈-숫자 내부 코드면 분리하지 않는다', () => {
+    expect(splitSupplierItemName('MB12-017-0 DDM) 2504')).toBeNull();
+  });
+
+  it('")" 앞이 MB/LB/VB로 시작하면(스타일번호류 접두) 분리하지 않는다', () => {
+    expect(splitSupplierItemName('MB123) 자재명')).toBeNull();
+  });
+
+  it('")" 앞이 숫자만이면 분리하지 않는다', () => {
+    expect(splitSupplierItemName('12345) 자재명')).toBeNull();
+  });
+
+  it('")" 앞이 비정상적으로 길면(20자 초과) 분리하지 않는다', () => {
+    expect(splitSupplierItemName('가짜공급사이름이십자를넘는긴문자열입니다12) 자재명')).toBeNull();
+  });
+
+  it('정상 분리(짧고 괄호·내부코드 없음)는 그대로 동작한다', () => {
+    expect(splitSupplierItemName('거래처A)C679')).toEqual({ supplierName: '거래처A', itemName: 'C679' });
+  });
+});
+
 describe('findOneCharDiffCandidates / checkUnknownName (PR-200)', () => {
   const master = ['KL-R926', 'KL-R114', '코아사'];
 
@@ -171,6 +212,40 @@ describe('findDuplicateGroups (PR-200)', () => {
       { category: '지퍼', spec: null, consumption: 1 },
     ];
     expect(findDuplicateGroups(bomItems)).toEqual([]);
+  });
+});
+
+describe('findDuplicateGroups (PR-200c) — 코드형 토큰이 다르면 헛경보로 안 묶는다(실사례: KL-R130 ↔ 9748)', () => {
+  it('둘 다 코드형 토큰이 있는데 서로 다르면 묶지 않는다', () => {
+    const bomItems = [
+      { itemName: 'KL-R130', category: '겉감', spec: null, consumption: 2.21 },
+      { itemName: '9748', category: '겉감', spec: null, consumption: 2.21 },
+    ];
+    expect(findDuplicateGroups(bomItems)).toEqual([]);
+  });
+
+  it('코드형 토큰이 같으면(색상 변형 등) 그대로 묶는다', () => {
+    const bomItems = [
+      { itemName: 'KL-R130 BEIGE', category: '겉감', spec: null, consumption: 2.21 },
+      { itemName: 'KL-R130 BLACK', category: '겉감', spec: null, consumption: 2.21 },
+    ];
+    expect(findDuplicateGroups(bomItems)).toEqual([[0, 1]]);
+  });
+
+  it('한쪽만 코드형 토큰이 있으면(한글 이름만 등) 기존 규칙대로 묶는다', () => {
+    const bomItems = [
+      { itemName: 'KL-R144', category: '겉감', spec: null, consumption: 2.1 },
+      { itemName: 'BK', category: '겉감', spec: null, consumption: 2.1 },
+    ];
+    expect(findDuplicateGroups(bomItems)).toEqual([[0, 1]]);
+  });
+
+  it('둘 다 코드형 토큰이 없으면(전부 한글 이름) 기존 규칙대로 묶는다', () => {
+    const bomItems = [
+      { itemName: '단추', category: '단추', spec: null, consumption: 2 },
+      { itemName: '마블단추', category: '단추', spec: null, consumption: 2 },
+    ];
+    expect(findDuplicateGroups(bomItems)).toEqual([[0, 1]]);
   });
 });
 

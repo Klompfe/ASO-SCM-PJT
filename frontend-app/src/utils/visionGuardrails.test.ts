@@ -7,6 +7,8 @@ import {
   collectFormatConfirmItems,
   pageMismatchNotice,
   clampPage,
+  collectUnverifiedStyleItems,
+  splitStyleNoForDisplay,
 } from './visionGuardrails';
 
 describe('shouldBlockSaveForStyleNo (PR-200)', () => {
@@ -148,5 +150,52 @@ describe('clampPage (PR-200b)', () => {
 
   it('쪽수를 모르면 요청한 값을 그대로 돌려준다(추측 안 함)', () => {
     expect(clampPage(3, null)).toBe(3);
+  });
+});
+
+describe('collectUnverifiedStyleItems (PR-200c)', () => {
+  const items = [
+    { index: 0, styleNo: 'MB00AAA000Z' },
+    { index: 1, styleNo: 'MB00BBB000Z' },
+    { index: 2, styleNo: 'MB00CCC000Z' },
+  ];
+
+  it('모두 대조됐으면 빈 목록', () => {
+    expect(collectUnverifiedStyleItems(items, new Set([0, 1, 2]))).toEqual([]);
+  });
+
+  it('일부만 대조됐으면 미대조 항목만 돌려준다', () => {
+    expect(collectUnverifiedStyleItems(items, new Set([0]))).toEqual([
+      { index: 1, styleNo: 'MB00BBB000Z' },
+      { index: 2, styleNo: 'MB00CCC000Z' },
+    ]);
+  });
+
+  it('하나도 대조 안 됐으면 전부 미대조', () => {
+    expect(collectUnverifiedStyleItems(items, new Set())).toEqual(items);
+  });
+});
+
+describe('splitStyleNoForDisplay (PR-200c) — 1·7·9 강조', () => {
+  it('1·7·9가 들어간 자리만 강조 세그먼트로 분리한다', () => {
+    expect(splitStyleNoForDisplay('MB719AAA000Z')).toEqual([
+      { text: 'MB', highlight: false },
+      { text: '719', highlight: true },
+      { text: 'AAA000Z', highlight: false },
+    ]);
+  });
+
+  it('강조 숫자가 없으면 세그먼트 하나', () => {
+    expect(splitStyleNoForDisplay('MB00AAA000Z')).toEqual([{ text: 'MB00AAA000Z', highlight: false }]);
+  });
+
+  it('빈 값/null은 빈 배열', () => {
+    expect(splitStyleNoForDisplay(null)).toEqual([]);
+    expect(splitStyleNoForDisplay('')).toEqual([]);
+  });
+
+  it('값 자체를 바꾸지 않는다(이어붙이면 원문과 같음)', () => {
+    const segments = splitStyleNoForDisplay('LB719197Z');
+    expect(segments.map((s) => s.text).join('')).toBe('LB719197Z');
   });
 });
