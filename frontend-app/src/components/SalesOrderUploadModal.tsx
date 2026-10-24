@@ -29,6 +29,7 @@ import {
   collectFormatConfirmItems,
   collectUnverifiedStyleItems,
   splitStyleNoForDisplay,
+  getSaveGateInfo,
 } from '../utils/visionGuardrails';
 import { OriginalPagePreview } from './OriginalPagePreview';
 
@@ -507,22 +508,48 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                       >
                         {showOriginal.has(index) ? '원본 숨기기' : '원본 보기'}
                       </button>
+                      {/* PR-201(운영 화면 확인): 저장 비활성 이유가 툴팁(마우스를 올려야만
+                          보임)으로만 나와 있어 한눈에 알기 어려웠다 — 체크박스와 이유 문장을
+                          저장 버튼 바로 옆(같은 줄)에 항상 보이게 옮긴다. PR-200c의 대조 규칙
+                          자체(체크 전 저장 비활성, 직접 수정 시 자동 체크, 일괄 저장 시 미대조
+                          제외)는 그대로 — 안내만 고친다. */}
+                      {!shouldBlockSaveForStyleNo(result.overview) && (
+                        verifiedStyleNo.has(index) ? (
+                          <span className="text-xs text-green-700" data-testid={`style-no-verified-badge-${index}`}>
+                            ✓ 스타일번호 대조 완료
+                          </span>
+                        ) : (
+                          <label className="flex items-center gap-1 text-xs text-gray-700">
+                            <input
+                              type="checkbox"
+                              data-testid={`style-no-verified-${index}`}
+                              checked={verifiedStyleNo.has(index)}
+                              onChange={() => setVerifiedStyleNo((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(index)) next.delete(index); else next.add(index);
+                                return next;
+                              })}
+                            />
+                            스타일번호 원본 대조
+                          </label>
+                        )
+                      )}
                       <button
                         onClick={() => handleSave(index)}
-                        disabled={savingIndex === index || savedIndexes.has(index) || isMock || shouldBlockSaveForStyleNo(result.overview) || !verifiedStyleNo.has(index)}
-                        title={
-                          shouldBlockSaveForStyleNo(result.overview)
-                            ? '스타일번호 끝 글자가 숫자로 읽혔습니다 — 영문자로 고쳐야 저장할 수 있습니다'
-                            : !verifiedStyleNo.has(index)
-                              ? '스타일번호를 원본 페이지와 대조했는지 체크해 주세요'
-                              : undefined
-                        }
+                        disabled={savingIndex === index || savedIndexes.has(index) || isMock || getSaveGateInfo(result.overview, verifiedStyleNo.has(index)).disabled}
                         className={`px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50 ${savedIndexes.has(index) ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
                       >
                         {savedIndexes.has(index) ? '저장됨' : savingIndex === index ? '저장 중...' : '저장'}
                       </button>
                     </div>
                   </div>
+                  {/* 비활성 이유 — 툴팁이 아니라 항상 보이는 문장(체크·형식 확정으로
+                      활성화되면, 또는 이미 저장됐으면 사라진다). */}
+                  {!savedIndexes.has(index) && getSaveGateInfo(result.overview, verifiedStyleNo.has(index)).reason && (
+                    <div className="text-xs text-red-600 -mt-2" data-testid={`save-disabled-reason-${index}`}>
+                      {getSaveGateInfo(result.overview, verifiedStyleNo.has(index)).reason}
+                    </div>
+                  )}
 
                   {(() => {
                     const summary = summarizeWarnings([result]);
@@ -553,21 +580,10 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           value={result.overview.styleNo ?? ''}
                           onChange={(e) => handleStyleNoManualEdit(index, e.target.value || null)}
                         />
-                        {/* PR-200c: 경고와 별개인 확인 관문 — 원본과 대조하기 전엔 저장 불가.
-                            직접 수정하면 자동으로 체크된다(칩 클릭은 자동 체크 안 함). */}
-                        <label className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-600">
-                          <input
-                            type="checkbox"
-                            data-testid={`style-no-verified-${index}`}
-                            checked={verifiedStyleNo.has(index)}
-                            onChange={() => setVerifiedStyleNo((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(index)) next.delete(index); else next.add(index);
-                              return next;
-                            })}
-                          />
-                          스타일번호를 원본 페이지와 대조했습니다
-                        </label>
+                        {/* PR-200c: 경고와 별개인 확인 관문 — 원본과 대조하기 전엔 저장 불가
+                            (직접 수정하면 자동으로 체크된다, 칩 클릭은 자동 체크 안 함). 체크박스
+                            자체는 PR-201부터 저장 버튼 바로 옆(화면 위쪽 버튼 줄)에 있다 — 이
+                            입력칸과 멀리 떨어져 있으면 무엇을 눌러야 하는지 알기 어렵다는 지적. */}
                         {/* PR-198: 끝 글자만 다른 기존 스타일이 있으면 알려준다 — 자동으로
                             바꾸지 않고 버튼을 눌러야 입력칸 값이 바뀐다. */}
                         {(similarStyleCandidates.get(index) ?? []).length > 0 && (
@@ -689,13 +705,15 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           value={result.overview.targetRdd ?? ''}
                           onChange={(e) => updateOverviewField(index, 'targetRdd', e.target.value || null)}
                         />
-                        {/* PR-190 보강: 기준이 "작성일"에서 "오늘(한국시간)"로 바뀌었다 — 자동
-                            확정이 아니라 초안 보정임을 알리는 안내. 빨간 경고와는 다른 색(파란)으로
-                            구분한다. 사용자가 납기를 직접 고치면 사라진다(updateOverviewField가
-                            targetRddYearAdjusted를 함께 지운다). */}
+                        {/* PR-201: 기준이 "항상 오늘"에서 "작성일(신뢰 가능하면)·아니면 오늘"로
+                            바뀌어, 어느 기준으로 보정했는지에 따라 문구를 바꾼다(작성일이
+                            과거인 작지는 납기도 오늘보다 과거일 수 있어 혼동을 줄이기 위함).
+                            자동 확정이 아니라 초안 보정임을 알리는 안내 — 빨간 경고와는 다른
+                            색(파란)으로 구분한다. 사용자가 납기를 직접 고치면 사라진다
+                            (updateOverviewField가 targetRddYearAdjusted를 함께 지운다). */}
                         {result.overview.targetRddYearAdjusted && (
                           <span className="text-xs text-blue-600 mt-0.5" data-testid={`target-rdd-year-adjusted-${index}`}>
-                            납기가 오늘(한국시간)보다 이른 날짜로 인식되어 연도를 다음 해로 자동 보정했습니다(원래 인식값: {result.overview.targetRddOriginal}) — 확인해주세요
+                            납기가 {result.overview.targetRddAdjustBasis === 'DOCUMENT_DATE' ? '작성일' : '오늘(한국시간)'}보다 이른 날짜로 인식되어 연도를 다음 해로 자동 보정했습니다(원래 인식값: {result.overview.targetRddOriginal}) — 확인해주세요
                           </span>
                         )}
                         {result.overview.targetRddSuspicious && (

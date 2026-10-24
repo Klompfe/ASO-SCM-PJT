@@ -19,6 +19,26 @@ export function shouldBlockSaveForStyleNo(overview: Pick<AiOverview, 'warnings'>
   return hasWarning(overview.warnings, 'STYLE_NO_LAST_DIGIT');
 }
 
+export interface SaveGateInfo {
+  // 저장 버튼을 비활성으로 둬야 하는지(PR-200c의 두 관문 — 끝 글자 숫자 / 원본 대조 미확인).
+  disabled: boolean;
+  // 비활성일 때 버튼 옆에 항상 보이는 안내문(툴팁이 아니라 본문 텍스트로 쓴다) — 활성이면 null.
+  reason: string | null;
+}
+
+// PR-201(운영 화면 확인): 저장 버튼이 비활성일 때 이유가 툴팁(마우스를 올려야만 보임)
+// 으로만 나와 사용자가 무엇을 눌러야 하는지 한눈에 알기 어려웠다 — 이 함수는 "항상
+// 보이는 안내문"을 계산만 한다(PR-200c의 대조 규칙 자체는 그대로, 안내만 고침).
+export function getSaveGateInfo(overview: Pick<AiOverview, 'warnings'>, verified: boolean): SaveGateInfo {
+  if (shouldBlockSaveForStyleNo(overview)) {
+    return { disabled: true, reason: '스타일번호 끝 글자가 숫자로 읽혔습니다 — 영문자로 고쳐야 저장할 수 있습니다' };
+  }
+  if (!verified) {
+    return { disabled: true, reason: '저장하려면 스타일번호를 원본 페이지와 대조한 뒤 오른쪽 체크박스를 켜세요' };
+  }
+  return { disabled: false, reason: null };
+}
+
 export interface WarningSummary {
   totalCount: number;
   byCode: Record<string, number>;

@@ -9,6 +9,7 @@ import {
   clampPage,
   collectUnverifiedStyleItems,
   splitStyleNoForDisplay,
+  getSaveGateInfo,
 } from './visionGuardrails';
 
 describe('shouldBlockSaveForStyleNo (PR-200)', () => {
@@ -22,6 +23,28 @@ describe('shouldBlockSaveForStyleNo (PR-200)', () => {
 
   it('경고가 없으면 막지 않는다', () => {
     expect(shouldBlockSaveForStyleNo({ warnings: undefined })).toBe(false);
+  });
+});
+
+// PR-201(운영 화면 확인): 저장 버튼 옆에 항상 보이는 안내문 — 대조 전 / 체크 후 /
+// 끝 글자 숫자(형식 차단)의 세 상태를 구분한다.
+describe('getSaveGateInfo (PR-201)', () => {
+  it('대조 전이면 비활성 + 체크박스를 켜라는 안내문', () => {
+    const info = getSaveGateInfo({ warnings: undefined }, false);
+    expect(info.disabled).toBe(true);
+    expect(info.reason).toContain('체크박스');
+  });
+
+  it('체크한 뒤(verified=true)면 활성 + 안내문 없음', () => {
+    const info = getSaveGateInfo({ warnings: undefined }, true);
+    expect(info.disabled).toBe(false);
+    expect(info.reason).toBeNull();
+  });
+
+  it('끝 글자 숫자 차단이면 체크 여부와 무관하게 비활성 + 형식 안내문(체크박스 안내보다 우선)', () => {
+    const info = getSaveGateInfo({ warnings: [{ code: 'STYLE_NO_LAST_DIGIT', message: 'x' }] }, true);
+    expect(info.disabled).toBe(true);
+    expect(info.reason).toContain('숫자로 읽혔습니다');
   });
 });
 
