@@ -138,7 +138,7 @@ describe('VisionService.analyzeSalesOrder — PR-200 안전장치', () => {
     }
   });
 
-  it('요척×수량이 출고량과 안 맞으면 경고와 역산 후보를 붙인다(수량 탓으로 단정 안 함)', async () => {
+  it('요척×수량이 출고량과 안 맞으면 경고를 붙이지만(PR-201c부터) 역산 제안은 만들지 않는다(요척 탓으로 단정 안 함)', async () => {
     const outcome = await buildServiceWithFakeResponse(
       [{ overview: baseOverview, bomItems: [{ category: null, itemName: '가짜자재', spec: null, colorCode: null, consumption: 1.24, requiredQty: 97, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null }],
       { masterItemNames: ['가짜자재'] },
@@ -146,7 +146,7 @@ describe('VisionService.analyzeSalesOrder — PR-200 안전장치', () => {
     const item = outcome.results[0].bomItems[0] as any;
     expect(item.warnings[0].code).toBe('YOCHEOK_QTY_MISMATCH');
     expect(item.warnings[0].message).not.toContain('수량이 다릅니다');
-    expect(item.warnings[0].suggestions).toEqual(['1.21']);
+    expect(item.warnings[0].suggestions).toBeUndefined();
   });
 
   it('스타일번호 끝 글자가 숫자면 저장 전 확인용 경고가 overview에 붙는다(값은 안 바뀜)', async () => {

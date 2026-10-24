@@ -270,11 +270,11 @@ describe('checkDocumentDateSuspicious (PR-200)', () => {
 });
 
 describe('checkYocheokMismatch (PR-200) — 배경 사례(1.24 오독 → 실제 1.21)', () => {
-  it('불일치면 경고 + 역산한 요척 후보', () => {
+  it('불일치면 경고가 붙지만(PR-201c부터) 역산 제안은 만들지 않는다', () => {
     const result = checkYocheokMismatch(1.24, 80, 97);
     expect(result?.code).toBe('YOCHEOK_QTY_MISMATCH');
     expect(result?.message).not.toContain('수량이 다릅니다');
-    expect(result?.suggestions).toEqual(['1.21']);
+    expect(result?.suggestions).toBeUndefined();
   });
 
   it('올림/반올림으로 맞으면(1.21×80=96.8↔97) 경고 없음', () => {

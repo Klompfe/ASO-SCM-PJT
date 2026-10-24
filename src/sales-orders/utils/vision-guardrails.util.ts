@@ -298,8 +298,14 @@ export function checkDocumentDateSuspicious(documentDate: string | null, todayIs
 }
 
 // 요척×수량과 출고량(requiredQty) 비교 — 출고량은 올림/반올림된 값일 수 있어 그 경우는
-// 일치로 본다. 불일치면 "역산한 요척"이 출고량과 올림·반올림으로 맞으면 요척 후보로 준다.
-// 문구는 수량이 틀렸다고 단정하지 않는다(요척 또는 수량 둘 다 의심 대상으로 표시).
+// 일치로 본다. 문구는 무엇이 틀렸다고 단정하지 않는다(요척·수량·출고량 셋 다 의심 대상).
+// PR-201c: "역산한 요척" 제안(suggestions)은 더 이상 만들지 않는다 — 불일치 원인이
+// 요척 오독만이 아니라 총수량 오독·색상 행 분할·출고량 칸에 벌 수가 들어간 경우 등
+// 여러 가지인데, 제안은 항상 "요척"만 바꾸라고 해서 실제로는 맞는 요척을 틀리게
+// 바꾸는 사례가 운영에서 확인됐다(다색 묶음뿐 아니라, 색상이 자재명에 붙어 묶이지
+// 않는 단일 행에서도 재현됨 — 예: 710÷총수량=0.395를 "요척 0.395로" 제안했지만 실제
+// 요척은 1.24였음). VisionWarning.suggestions 필드 자체는 다른 경고(UNKNOWN_NAME 등)가
+// 계속 쓰므로 그대로 두되, 이 경고에서는 값을 넣지 않는다.
 export function checkYocheokMismatch(consumption: number | null, totalQty: number | null, requiredQty: number | null): VisionWarning | null {
   if (consumption == null || totalQty == null || totalQty <= 0 || requiredQty == null) return null;
   const expected = consumption * totalQty;
@@ -312,14 +318,9 @@ export function checkYocheokMismatch(consumption: number | null, totalQty: numbe
   const pctDiff = Math.abs(expected - requiredQty) / Math.abs(expected);
   if (pctDiff <= 0.01) return null;
 
-  const impliedConsumption = Math.round((requiredQty / totalQty) * 100) / 100;
-  const impliedExpected = impliedConsumption * totalQty;
-  const suggestions = roundMatches(impliedExpected) ? [String(impliedConsumption)] : undefined;
-
   return {
     code: 'YOCHEOK_QTY_MISMATCH',
-    message: `요척 × 수량 = ${expected.toFixed(2)} 이(가) 출고량 ${requiredQty} 와 다릅니다 — 요척 또는 수량을 잘못 읽었을 수 있습니다`,
-    suggestions,
+    message: `요척 × 수량 = ${expected.toFixed(2)} 이(가) 출고량 ${requiredQty} 와 다릅니다 — 요척, 수량(총수량), 출고량 중 어느 것을 잘못 읽었을 수 있습니다`,
   };
 }
 

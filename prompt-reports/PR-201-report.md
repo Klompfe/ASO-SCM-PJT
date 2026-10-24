@@ -127,3 +127,65 @@ Written for: 이 저장소를 관리하는 개발자(변경 요약/테스트 결
 - `checkYocheokMismatchBundle`의 "벌 수 의심" 문구는 단일 행(묶음 크기 1)에는 적용하지 않았다 — 지시서가 "단일 행 동작은 바꾸지 않는다"를 명시해 기존 `checkYocheokMismatch`를 그대로 뒀다(이 경우 단일 행에 같은 검사를 추가하면 기존 동작이 바뀜).
 - (a) 조사에서 발견한 "DB 테이블과 프런트 하드코딩 드롭다운이 분리돼 있다"는 구조적 문제는 이번 PR에서 고치지 않았다(조사만 지시됨).
 - `--max-pages` 인자가 파싱만 되고 쓰이지 않는 것(PILOT-7d/7e에서 이미 확인됨)은 이번 PR과 무관해 손대지 않았다.
+
+---
+
+## PR-201c 보완: "요척 N로" 제안 버튼 제거 + 병합 전 확인 자료 2건
+
+**브랜치**: `feat/pr-201-review-screen-fixes`(시작 시점 HEAD `70ec89b`, `origin/main`과 그 자손 관계 확인). **main에 병합하지 않음.**
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `src/sales-orders/utils/vision-guardrails.util.ts` | `checkYocheokMismatch`가 `impliedConsumption` 역산·`suggestions` 생성을 더 이상 하지 않음. 메시지에 "출고량"을 포함하도록 최소 수정 |
+| `frontend-app/src/components/SalesOrderUploadModal.tsx` | `yocheokMismatch.suggestions`를 매핑해 그리던 "요척 N로" 버튼 삭제(메시지 텍스트는 그대로 표시) |
+| `src/sales-orders/utils/vision-guardrails.util.spec.ts`, `src/sales-orders/vision.service.spec.ts` | 제거된 `suggestions` 기대값을 `toBeUndefined()`로 수정(테스트 삭제 없음, 기대값만 변경) |
+
+### 테스트 숫자(전/후)
+
+| | 전(PR-201 완료 시점) | 후 |
+|---|---|---|
+| 백엔드 단위(jest) | 994 | **994**(동일 — 테스트 삭제 없이 기대값만 수정) |
+| e2e | 555 | **555**(동일) |
+| 프런트(vitest) | 485 | **485**(동일) |
+
+전부 실패 0. 빌드 둘 다 성공. `git diff origin/main --stat -- src/migrations package.json package-lock.json frontend-app/package.json frontend-app/package-lock.json` — 출력 없음(변경 0건).
+
+### 1번 — 제안 생성 방식(3줄)
+
+백엔드 `checkYocheokMismatch`(수정 전)가 `impliedConsumption = Math.round((requiredQty / totalQty) * 100) / 100`로 "역산한 요척"을 계산해 `suggestions: [String(impliedConsumption)]`로 돌려줬다. 프런트 `SalesOrderUploadModal.tsx`(수정 전 927-930행 부근)가 `yocheokMismatch.suggestions`를 그대로 매핑해 "요척 {s}로" 버튼을 그렸고, 클릭하면 `updateBomItemField(index, i, 'consumption', Number(s))`로 그 요척 값을 바로 덮어썼다. **API 형식은 유지**했다(`VisionWarning.suggestions` 필드는 타입에 그대로 두고, 다른 경고(`UNKNOWN_NAME`, `STYLE_NO_LAST_DIGIT` 등)는 계속 이 필드를 쓴다 — `checkYocheokMismatch`/`checkYocheokMismatchBundle`만 이제 이 필드를 채우지 않는다).
+
+**사람이 화면에서 확인할 것**: ① 불일치 경고가 있는 행에 "요척 N로" 버튼이 더 이상 나타나지 않는다 ② 경고 문구는 그대로 나온다.
+
+### 3(a). PR-190 테스트 변경 확인 자료
+
+**바뀐 테스트**(파일·이름·전/후 기대값):
+1. `src/sales-orders/utils/vision-guardrails.util.spec.ts` — `checkYocheokMismatch (PR-200) — 배경 사례`의 "불일치면 경고 + 역산한 요척 후보" → PR-201c에서 "불일치면 경고가 붙지만(PR-201c부터) 역산 제안은 만들지 않는다"로 이름·기대값 변경(`expect(result?.suggestions).toEqual(['1.21'])` → `toBeUndefined()`).
+2. `src/sales-orders/vision.service.spec.ts` — "요척×수량이 출고량과 안 맞으면 경고와 역산 후보를 붙인다" → "경고를 붙이지만 역산 제안은 만들지 않는다"로 이름·기대값 변경(같은 패턴).
+(PR-201 2번에서 이미 바뀐 `target-rdd-year-rollover.util.spec.ts`/`vision.service.spec.ts`의 날짜 테스트는 이번 커밋에서 추가로 손대지 않았다.)
+
+**PR-190이 "항상 오늘"로 바꾼 이유 — 커밋 `1c69206`(`fix(PR-190-보강): 납기 연도 보정 기준을 작성일에서 오늘(한국시간)로 단순화`) 메시지 그대로 인용**:
+> 작성일 자체가 신뢰할 수 없는 값으로 인식된 사례(MB74BLM107: 작성일 2026-01-01, 납기 2026-02-17)에서는 "납기 < 작성일" 기준이 전혀 보정하지 못하는 사각지대가 있었다. 기준을 "오늘(KST) 날짜"로 단순화한다 — 작성일 값은 절대 건드리지 않고, PR-158의 "작성일을 납기로 잘못 인식한" 예외(targetRdd === documentDate)만 그대로 둔다. … 의도된 동작 변화: 납기가 아직 미래인데 작성일보다 이르기만 한 경우는 더 이상 보정하지 않는다(빨간 의심 경고만 유지).
+
+`prompt-reports/PR-190-report.md`(61-62행)도 같은 사례를 다음과 같이 적었다(그대로 인용):
+> 작지(MB74BLM107)를 다시 올려보니 작성일(참고) 2026-01-01, 납기 2026-02-17로 나왔는데도 빨간 의심 경고만 뜨고 보정되지 않았다. 최초 버전은 `targetRdd < documentDate`일 때만 보정했는데, 이 사례는 작성일 자체가 2026-01-01로(납기 2026-02-17보다 더 이른 값으로) 인식돼 있어 보정 조건(납기 < 작성일)에 걸리지 않았다 — 하지만 오늘(조회 시점 2026-10-14) 기준으로는 납기가 이미 8개월 넘게 지난 날짜였다.
+
+→ 그 테스트가 보호하던 시나리오: **작성일이 납기보다 이른(정상적으로 보이는) 값으로 읽혔는데, 그 결과 생긴 납기(연도 없이 작성일 연도를 붙인 값)가 "오늘" 기준으로는 이미 지나버린 경우** — 당시 규칙(납기<작성일 비교)으로는 이런 경우를 전혀 못 잡았다.
+
+**PR-201 새 기준이 이 시나리오를 여전히 막는지 — 합성 입력 3개, 인라인 계산(오늘=2026-10-24, 판단 없이 값만)**:
+
+1. **① 작성일 정상(2026-01-01), 납기가 작성일 이후(2026-12-30)**: `rolloverTargetRddYear('2026-12-30','2026-01-01','2026-10-24')` → `{targetRdd:'2026-12-30', adjusted:false, basis:null}` (보정 불필요한 정상 케이스, 보정 안 함 — 문제 없음)
+2. **② 작성일이 의심 날짜로 읽힘(2021-01-01, 4~5년 전), 납기 2021-02-17**: `rolloverTargetRddYear('2021-02-17','2021-01-01','2026-10-24')` → `{targetRdd:'2021-02-17', adjusted:false, basis:null}` — basis는 TODAY로 잡히지만(작성일이 18개월 초과 과거라 의심스러움), **+1년(2022-02-17)을 해도 여전히 오늘(2026-10-24) 이전**이라 "2년 이상 보정 금지" 규칙에 걸려 보정되지 않음.
+3. **③ 작성일이 한 해 앞서 잘못 읽힘(실제 2026-09인데 2025-09-01로 읽힘), 납기 2026-03-17**: `rolloverTargetRddYear('2026-03-17','2025-09-01','2026-10-24')` → `{targetRdd:'2026-03-17', adjusted:false, basis:null}` — documentDate(2025-09-01)가 18개월 초과 과거가 아니라 "신뢰 가능"으로 판정돼 **basis=DOCUMENT_DATE**가 되고, 납기(2026-03-17)가 그 작성일보다 뒤라 **보정이 일어나지 않는다**. **이 입력에서는 보정이 빠진다** — 값만 보고, 맞다/틀리다는 판단하지 않음.
+
+### 3(b). PR-189·195 존재 확인 — 실행한 명령과 결과
+
+1. `git branch -a` / `git ls-remote --heads origin` — 두 명령의 전체 브랜치 목록에 `189`·`195`·`pr-189`·`pr-195` 계열 이름이 **없음**(위 결과 그대로, PR-188 계열인 `feat/mido-price-table-admin`만 있음).
+2. `git log --all --oneline --grep="PR-189"` → 결과 1건, 이번에 작성한 `c320b26`(PR-201 조사 보고서 커밋, "PR-189"라는 문자열을 보고서 본문에 **인용**한 것)뿐 — 실제 PR-189 커밋은 없음.
+3. `git log --all --oneline --grep="PR-195"` → 위와 동일하게 `c320b26` 1건뿐(인용일 뿐).
+4. `git log --all --oneline --grep="PR-188"` → `c320b26`(인용) + `a0fee26 feat(PR-188): 미도 단가표 관리 + ...` — PR-188은 실제로 존재.
+5. `git log --all --diff-filter=A --name-only -- 'src/migrations/179*'` → 추가된 적 있는 모든 `179*` 마이그레이션 파일 18개 전부 나열(가장 큰 번호 `1791900000000-AddBrandTableCodeAndFabricLineUnit.ts`) — **`1792000000000`으로 시작하는 파일은 결과에 없음.**
+6. `git stash list`(읽기만) → `stash@{0}: On fix/items-upload-double-unwrap: PR-026.1/026/029 미완료 작업 (Stage A 검증 동안 임시 보관)` — 이전부터 있던 것과 동일, 건드리지 않음.
+
+→ **결론**: 위 명령들로 전체 브랜치(`origin`에 있는 모든 ref 포함)와 전체 커밋 역사, 마이그레이션 파일명을 다 뒤졌지만 PR-189·PR-195·마이그레이션 `1792000000000`은 어디에도 없었다. 더 못 찾은 이유는 없음 — "존재하지 않는다"로 결론.

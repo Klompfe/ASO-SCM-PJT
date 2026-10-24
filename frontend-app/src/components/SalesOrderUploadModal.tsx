@@ -922,12 +922,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                             ))}
                                           </div>
                                         )}
+                                        {/* PR-201c: "요척 N로" 제안 버튼을 없앴다 — 불일치 원인이
+                                            요척 오독만이 아니라(총수량 오독·색상 행 분할·출고량
+                                            칸에 벌 수가 들어간 경우 등) 여러 가지인데, 버튼은
+                                            항상 요척만 바꿔 실제로는 맞는 요척을 틀리게 바꾸는
+                                            사례가 운영에서 확인됐다. 경고 문구만 그대로 둔다. */}
                                         {yocheokMismatch && (
                                           <div className="bg-orange-50 border border-orange-200 text-orange-800 rounded px-1 py-0.5">
                                             {yocheokMismatch.message}
-                                            {(yocheokMismatch.suggestions ?? []).map((s) => (
-                                              <button key={s} type="button" onClick={() => updateBomItemField(index, i, 'consumption', Number(s))} className="ml-1 px-1 rounded bg-orange-600 text-white hover:bg-orange-700">요척 {s}로</button>
-                                            ))}
                                           </div>
                                         )}
                                         {duplicateWarning && duplicateGroup && (
