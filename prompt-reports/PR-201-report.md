@@ -81,9 +81,17 @@ Written for: 이 저장소를 관리하는 개발자(변경 요약/테스트 결
 
 `feat/mido-price-table-admin`(PR-188) 커밋(`a0fee26`)을 `git show`로 확인한 결과 `material_packaging_unit_rules`의 값이나 다데/암홀 단위를 바꾸는 변경은 **없음**(미도 단가표 관리 화면·빈폴/에잇세컨즈 겉감 단위(M) 관련 다른 테이블 추가일 뿐). **PR-189("테이프 단위", 마이그레이션 `1792000000000`)와 PR-195는 `git log --all`(전체 브랜치) 어디에도 존재하지 않는다** — 커밋도, 그 번호의 마이그레이션 파일도 이 저장소 역사 전체에서 찾지 못했다(모든 브랜치의 `src/migrations/` 파일명을 대조해도 `1792000000000`은 없음, 가장 가까운 건 main의 `1791900000000`과 다음 PR의 `1792xxxxxxxxx`대 번호가 비어 있음). 추측하지 않고 "존재하지 않음"으로 보고한다.
 
+**사용자 확정값 반영**: 다데테이프 50M/롤은 현재 값과 일치하지만, **암홀테이프는 100M/롤이 맞고 지금 화면·DB 둘 다 50M/롤로 틀려 있다.** 값이 틀린 지점은 정확히 둘이다(코드는 바꾸지 않음, 위치만 적음):
+1. `src/migrations/1791100000000-AddMaterialPackagingUnitRulesAndTapeType.ts:38` — 시드 INSERT문의 `('AMHOL', '암홀', '롤', 50, ...)`에서 `50`이 `100`이어야 함.
+2. `frontend-app/src/components/SalesOrderUploadModal.tsx:902` — 하드코딩된 `<option value="AMHOL">암홀 (50M/롤)</option>`에서 `50M`이 `100M`이어야 함.
+
+**고치는 방법(마이그레이션 필요 여부)**: 이미 적용된 마이그레이션 파일(1번)은 그대로 두고 **새 마이그레이션을 추가해 `UPDATE "material_packaging_unit_rules" SET "unitLengthM" = 100 WHERE "materialSubType" = 'AMHOL'`를 실행**하는 것이 정석이다(이미 배포된 마이그레이션 파일 자체를 고치면 이미 그 마이그레이션을 실행한 환경에는 반영되지 않음). 다만 이 테이블에는 이미 CRUD API(`PATCH /material-packaging-unit-rules/:id`, `frontend-app/src/api/materialPackagingUnitRules.service.ts`의 `updateMaterialPackagingUnitRule`)와 그 관리 화면이 있어, **새 마이그레이션 없이 그 관리 화면에서 값을 100으로 고치는 것만으로도 DB 쪽은 바로 고쳐진다**(마이그레이션은 "최초 시드값이 틀렸었다"는 사실을 남기고 싶을 때만 필요). 어느 쪽을 택하든 2번(프런트 하드코딩)은 별도로 고쳐야 한다 — DB 값을 고쳐도 이 드롭다운은 안 바뀐다(위에서 이미 확인한 "두 소스가 분리된 구조" 문제).
+
 ### (b) CMT단가 "수기 초안 — 계약 승인 시 확정 필요"
 
 값(예: 4600)의 출처는 **AI 응답의 `overview.handwrittenCmtPriceCandidate` 필드**다. `vision.service.ts`의 `PROMPT`가 "미도 바이어로 명확히 인식된 문서에서만, 문서 상단에 **손으로 적힌** 비교적 큰 글씨 숫자"만 추출하도록 지시하고(146행), `applyMidoCmtPriceGuard`(408-416행)가 바이어가 미도가 아니면 이 필드를 서버에서 강제로 null로 덮어쓴다. 화면에서는 `prefillHandwrittenCmtDraft`(`salesOrderOverviewEdit.ts` 79-92행)가 `cmtPrice`가 아직 비어 있을 때만 이 candidate 값을 `cmtPrice` 입력칸에 그대로 복사해 넣고, `cmtPriceNote`에는 손글씨 원문(`handwrittenCmtPriceMemo`)을 넣는다. 배지는 `SalesOrderUploadModal.tsx` 731-734행에서 `handwrittenCmtPriceCandidate != null`일 때만 뜬다. **AI가 작지에 안 적힌 단가를 마스터·거래처 기본값·이전 발주에서 가져와 채우는 경로는 없음**(코드 확인 — 전부 이 한 필드, 이 한 경로뿐).
+
+**"두 칸에 같은 값(4600)" 확인**: `SalesOrderUploadModal.tsx`를 전부 훑어도 오더개요 머리 영역 안에 CMT단가 관련 입력은 `cmtPrice` 입력칸(727-744행, 입력값) 하나와 `cmtPriceNote` 코멘트 칸(746-753행, 손글씨 원문 텍스트, 숫자가 아님) **둘뿐이며 같은 값을 숫자로 두 번 보여주는 지점은 이 파일에 없다.** `results`는 분석된 쪽(스타일)마다 하나씩 배열로 렌더링되므로, "두 칸에 같은 값"은 **서로 다른 두 결과 카드(예: 같은 작업지시서의 다른 두 쪽)가 각자 자기 `handwrittenCmtPriceCandidate`로 독립적으로 프리필된 것**일 가능성이 코드 구조상 가장 유력하다(각 카드가 서로를 보지 않고 독립적으로 `prefillHandwrittenCmtDraft`를 적용받음). 원본에 단가가 실제로 없었는지는 이미지를 보지 않아 **확인하지 못했다** — 사실이라면 AI가 손글씨 숫자 자체를 잘못 인식(환각)한 것이고, 그 원인(어떤 다른 숫자를 CMT단가로 오해했는지 등)은 이미지 없이는 코드만으로 알 수 없다.
 
 ### (c) 포장내역 표준양식 검증
 
