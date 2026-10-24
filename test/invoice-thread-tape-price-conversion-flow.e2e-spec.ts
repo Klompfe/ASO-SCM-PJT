@@ -13,6 +13,7 @@ import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
 import { MidoPriceItem } from '../src/mido-price-table/entities/mido-price-item.entity';
+import { User, UserRole } from '../src/users/entities/user.entity';
 
 // PR-182: 수출 INVOICE — 실/테이프 미터단가를 콘/롤단가로 환산. material_packaging_unit_rules
 // (PR-175)와 mido_price_items 시드(마이그레이션)가 실제로 DB에 있어야 하는 e2e라 sqlite에
@@ -35,6 +36,9 @@ describe('수출 INVOICE 실/테이프 미터단가 → 콘/롤단가 환산 (PR
 
     const email = `invoice-thread-tape-e2e-${tag}@test.com`;
     await request(app.getHttpServer()).post('/auth/register').send({ email, password: 'password123!', name: 'Thread Tape E2E' });
+    // PR-203: 포장단위 규칙 등록이 MANAGER/ADMIN 전용으로 바뀌어, 시드 등록에 쓸 이 테스트
+    // 사용자도 MANAGER로 올려둔다(이 describe는 RBAC 자체를 검증하는 게 아니라 환산 로직을 검증한다).
+    await dataSource.getRepository(User).update({ email }, { role: UserRole.MANAGER });
     token = (await request(app.getHttpServer()).post('/auth/login').send({ email, password: 'password123!' }).expect(201)).body.data.accessToken;
 
     // material_packaging_unit_rules 시드(PR-175 마이그레이션과 동일한 값).

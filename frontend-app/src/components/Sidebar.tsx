@@ -82,7 +82,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // PR-111: 스타일번호 접두사 → 브랜드 매핑 마스터.
       { id: 'brands', label: '브랜드 관리' },
       // PR-175: 실/테이프 자재 종류별 포장단위(콘/롤) 환산 기준 마스터.
-      { id: 'materialPackagingUnitRules', label: '자재 포장단위' },
+      // PR-203: 발주 롤수·수출단가 환산에 쓰이는 값이라 MANAGER/ADMIN 전용으로 숨긴다.
+      { id: 'materialPackagingUnitRules', label: '자재 포장단위', adminOnly: true },
       // PR-186: 실/테이프 종류를 자재(Item) 단위로 지정하는 일괄 적용 화면.
       { id: 'threadTapeClassification', label: '실/테이프 종류 지정' },
       // PR-184: 관세청 주간환율(수출/수입) 수동 입력 마스터.
@@ -289,6 +290,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (item.id === 'users') return canManageUsers;
     if (item.id === 'exportShipmentDefaults') return isManagerOrAdmin;
     if (item.id === 'statusCodes') return isManagerOrAdmin;
+    if (item.id === 'materialPackagingUnitRules') return isManagerOrAdmin;
     return true;
   };
 
