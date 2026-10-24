@@ -75,7 +75,7 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
         ...fakeParsedResult[0],
         overview: {
           ...fakeParsedResult[0].overview,
-          targetRddYearAdjusted: false, targetRddOriginal: null, targetRddSuspicious: false,
+          targetRddYearAdjusted: false, targetRddOriginal: null, targetRddAdjustBasis: null, targetRddSuspicious: false,
           handwrittenCmtPriceCandidate: null, handwrittenCmtPriceMemo: null, cmtPrice: null,
           warnings: [{ code: 'STYLE_NO_FORMAT', message: '스타일번호 형식이 맞지 않습니다 — 원본과 대조해 주세요', suggestions: [] }],
         },
@@ -219,11 +219,12 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
     expect(outcome.results[0].overview.targetRddSuspicious).toBe(false);
   });
 
-  // PR-190 보강 실사례: MB74BLM107 — 작성일이 2026-01-01로 인식되고 납기가 연도 없이
-  // "2/17"로 적혀 있어 2026-02-17로 인식됐다. 기준이 "오늘(한국시간)"으로 바뀌었으므로
-  // 시스템 시각을 2026-10-14(KST)로 고정해 검증한다 — 작성일이 납기보다 더 이르더라도
-  // (이전 버전이면 보정 대상이 아니었다) 오늘 기준으로 지난 날짜면 보정된다.
-  it('납기에 연도가 없어 오늘(한국시간)보다 이전으로 인식되면 다음 해로 보정하고 targetRddYearAdjusted:true, targetRddSuspicious:false로 내려온다 — 작성일 값은 그대로 유지', async () => {
+  // PR-190 실사례(MB74BLM107)였던 테스트 — PR-201에서 기준을 "오늘"에서 "작성일(신뢰
+  // 가능하면)"로 되돌렸다. 작성일 2026-01-01이 의심스럽지 않은(미래/18개월초과과거 아님)
+  // 날짜이므로 이제는 작성일을 기준으로 삼고, 납기 2026-02-17은 작성일보다 뒤라 보정하지
+  // 않는다(조회 시점이 2026-10-14라서 "오늘보다 과거"였을 뿐, 문서 자체로는 정상인
+  // 근거리 납기였다 — PR-201 배경의 "작성일이 과거인 작지" 패턴과 구조가 같다).
+  it('작성일이 의심스럽지 않고 납기가 작성일보다 뒤면 — 조회 시점이 나중이라도 보정하지 않는다(PR-201, 기준 작성일로 변경)', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-14T03:00:00Z')); // KST 2026-10-14 12:00
     try {
       const service = await buildServiceWithFakeResponse({
@@ -231,11 +232,44 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
         targetRdd: '2026-02-17', documentDate: '2026-01-01',
       });
       const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+      expect(outcome.results[0].overview.targetRdd).toBe('2026-02-17');
+      expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
+      expect(outcome.results[0].overview.targetRddOriginal).toBeNull();
+      expect(outcome.results[0].overview.documentDate).toBe('2026-01-01'); // 작성일은 절대 건드리지 않는다
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // PR-201 배경 실사례: 작성일이 과거(보관/시험 문서)인 작지는 납기도 오늘보다 과거일 수
+  // 있다 — 작성일 기준으로는 보정이 필요 없는데 "오늘" 기준으로만 보면 틀리게 보정된다.
+  it('작성일이 과거이고 납기가 작성일보다 뒤·오늘보다 앞이면 보정하지 않는다(PR-201 배경 실사례 패턴)', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-23T03:00:00Z'));
+    try {
+      const service = await buildServiceWithFakeResponse({
+        styleNo: 'S', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null,
+        targetRdd: '2026-03-17', documentDate: '2025-09-08',
+      });
+      const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+      expect(outcome.results[0].overview.targetRdd).toBe('2026-03-17');
+      expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
+      expect(outcome.results[0].overview.targetRddAdjustBasis).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('작성일이 의심스러운 날짜(18개월 초과 과거)이면 여전히 오늘을 기준으로 보정한다', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-14T03:00:00Z'));
+    try {
+      const service = await buildServiceWithFakeResponse({
+        styleNo: 'S', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null,
+        targetRdd: '2026-02-17', documentDate: '2020-01-01', // 18개월 넘게 과거 — 신뢰 불가
+      });
+      const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
       expect(outcome.results[0].overview.targetRdd).toBe('2027-02-17');
       expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(true);
-      expect(outcome.results[0].overview.targetRddOriginal).toBe('2026-02-17');
-      expect(outcome.results[0].overview.targetRddSuspicious).toBe(false);
-      expect(outcome.results[0].overview.documentDate).toBe('2026-01-01'); // 작성일은 절대 건드리지 않는다
+      expect(outcome.results[0].overview.targetRddAdjustBasis).toBe('TODAY');
     } finally {
       jest.useRealTimers();
     }

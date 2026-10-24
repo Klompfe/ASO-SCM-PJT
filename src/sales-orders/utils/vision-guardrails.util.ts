@@ -322,3 +322,58 @@ export function checkYocheokMismatch(consumption: number | null, totalQty: numbe
     suggestions,
   };
 }
+
+// PR-201(PILOT-7f 실측 확인): 같은 겉감 자재가 색상별로 행이 나뉘어 있으면 출고량
+// (requiredQty)도 색상별 값이라, 행 하나씩 "요척×총수량"과 비교하면 오탐이 난다(실측:
+// 요척 1.19, 색상 2행 출고량 760/825 — 합 1585가 1583.89와 0.07% 차이로 사실상 일치인데
+// 행 단위로는 둘 다 불일치로 잡히고 "요척 0.62로" 제안까지 뜬다 — 0.62=825÷총수량이라
+// 누르면 요척이 틀리게 바뀐다). 묶음 키는 구분+자재명(공백 제거·대문자 통일)+요척 —
+// 규격은 넣지 않는다(규격 칸에 요척이 섞여 읽히는 사례가 있어 불안정하다).
+export function groupBomItemsForYocheok(
+  items: { category: string | null; itemName: string | null; consumption: number | null }[],
+): number[][] {
+  const groups = new Map<string, number[]>();
+  items.forEach((item, idx) => {
+    if (item.consumption == null) return;
+    const key = `${item.category ?? ''}\u0000${(item.itemName ?? '').replace(/\s+/g, '').toUpperCase()}\u0000${item.consumption}`;
+    groups.set(key, [...(groups.get(key) ?? []), idx]);
+  });
+  return [...groups.values()];
+}
+
+// 묶음(2행 이상) 전용 검사 — 단일 행은 이 함수를 쓰지 않고 checkYocheokMismatch를 그대로
+// 쓴다(기존 동작 유지). 합의 허용 오차는 행마다 반올림이 쌓일 수 있어 "±1 × 묶음 행 수"로
+// 늘린다. 묶음 안에 requiredQty가 없는 행이 하나라도 있으면 비교하지 않는다(경고 없음).
+// 제안(suggestions)은 절대 만들지 않는다 — 다색 묶음에서 "요척 N으로" 버튼을 누르면
+// 한 색상의 출고량만으로 역산한 틀린 요척이 적용되기 때문이다.
+export function checkYocheokMismatchBundle(
+  items: { consumption: number | null; requiredQty: number | null }[],
+  totalQty: number | null,
+): VisionWarning | null {
+  if (totalQty == null || totalQty <= 0) return null;
+  if (items.length === 0 || items.some((i) => i.requiredQty == null)) return null;
+  const consumption = items[0].consumption;
+  if (consumption == null) return null;
+  const expected = consumption * totalQty;
+  if (expected === 0) return null;
+
+  const n = items.length;
+  const sum = items.reduce((s, i) => s + (i.requiredQty as number), 0);
+  const diff = Math.abs(expected - sum);
+  const pctDiff = diff / Math.abs(expected);
+  if (diff <= n || pctDiff <= 0.01) return null;
+
+  // 벌 수 오독 의심: 합이 "미터"가 아니라 스타일 총수량(벌 수)에 가까우면.
+  const qtyPctDiff = Math.abs(sum - totalQty) / Math.abs(totalQty);
+  if (qtyPctDiff <= 0.01) {
+    return {
+      code: 'YOCHEOK_QTY_MISMATCH',
+      message: '출고량이 미터가 아니라 수량(벌)으로 읽혔을 수 있습니다 — 원본과 확인해 주세요',
+    };
+  }
+
+  return {
+    code: 'YOCHEOK_QTY_MISMATCH',
+    message: `같은 자재 ${n}개 색상 행의 출고량 합 ${sum} 이(가) 요척 × 수량 = ${expected.toFixed(2)} 와 다릅니다 — 색상별 출고량 또는 요척·수량을 확인해 주세요`,
+  };
+}

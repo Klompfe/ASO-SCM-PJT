@@ -51,6 +51,7 @@ export function isNewMaterialName(itemName: string | null | undefined, existingN
 
 // "요척 × 수량이 작지의 출고량(필요량)과 다름" — AI가 requiredQty를 읽었을 때만
 // 비교한다(없으면 비교 안 함, 값은 절대 바꾸지 않는다). 1% 넘게 다르면 의심.
+// 단일 행(묶음 크기 1)에만 쓴다 — 다색 묶음은 아래 hasRequiredQtyBundleMismatch를 쓴다.
 export function hasRequiredQtyMismatch(
   item: Pick<AiBomItem, 'consumption' | 'requiredQty'>,
   totalQty: number | null | undefined,
@@ -59,6 +60,41 @@ export function hasRequiredQtyMismatch(
   const expected = item.consumption * totalQty;
   if (expected === 0) return false;
   return Math.abs(expected - item.requiredQty) / Math.abs(expected) > 0.01;
+}
+
+// PR-201(운영 화면 확인): 같은 겉감 자재가 색상별로 행이 나뉘어 있으면 출고량도
+// 색상별 값이라 행 하나씩 비교하면 오탐이 난다 — 백엔드 vision-guardrails.util.ts의
+// groupBomItemsForYocheok/checkYocheokMismatchBundle과 같은 규칙(구분+자재명(공백
+// 제거·대소문자 무시)+요척)을 프런트에도 둔다(양쪽이 같은 결과를 내야 한다).
+export function groupBomItemsForYocheok(
+  items: Pick<AiBomItem, 'category' | 'itemName' | 'consumption'>[],
+): number[][] {
+  const groups = new Map<string, number[]>();
+  items.forEach((item, idx) => {
+    if (item.consumption == null) return;
+    const key = `${item.category ?? ''}\u0000${(item.itemName ?? '').replace(/\s+/g, '').toUpperCase()}\u0000${item.consumption}`;
+    groups.set(key, [...(groups.get(key) ?? []), idx]);
+  });
+  return [...groups.values()];
+}
+
+// 묶음(2행 이상) 전용 — 합의 허용 오차는 "±1 × 묶음 행 수"로 늘린다(백엔드와 동일 규칙).
+// 묶음 안에 requiredQty가 없는 행이 하나라도 있으면 비교하지 않는다(뱃지 없음).
+export function hasRequiredQtyBundleMismatch(
+  items: Pick<AiBomItem, 'consumption' | 'requiredQty'>[],
+  totalQty: number | null | undefined,
+): boolean {
+  if (totalQty == null || totalQty <= 0) return false;
+  if (items.length === 0 || items.some((i) => i.requiredQty == null)) return false;
+  const consumption = items[0].consumption;
+  if (consumption == null) return false;
+  const expected = consumption * totalQty;
+  if (expected === 0) return false;
+  const n = items.length;
+  const sum = items.reduce((s, i) => s + (i.requiredQty as number), 0);
+  const diff = Math.abs(expected - sum);
+  if (diff <= n) return false;
+  return diff / Math.abs(expected) > 0.01;
 }
 
 // "같은 구분·같은 소요량 중복" — ① 같은 category 안에서 소요량이 완전히 같은 행이
@@ -104,9 +140,23 @@ export function computeBomRowBadges(
   existingNormalizedNames: Set<string>,
 ): BomRowBadges[] {
   const duplicateFlags = computeDuplicateLookingRows(bomItems);
+
+  const mismatchFlags = new Array(bomItems.length).fill(false);
+  for (const group of groupBomItemsForYocheok(bomItems)) {
+    if (group.length >= 2) {
+      const mismatch = hasRequiredQtyBundleMismatch(group.map((i) => bomItems[i]), totalQty);
+      group.forEach((i) => {
+        mismatchFlags[i] = mismatch;
+      });
+    } else {
+      const idx = group[0];
+      mismatchFlags[idx] = hasRequiredQtyMismatch(bomItems[idx], totalQty);
+    }
+  }
+
   return bomItems.map((item, i) => ({
     isNewMaterial: isNewMaterialName(item.itemName, existingNormalizedNames),
-    requiredQtyMismatch: hasRequiredQtyMismatch(item, totalQty),
+    requiredQtyMismatch: mismatchFlags[i],
     duplicateLooking: duplicateFlags[i],
   }));
 }

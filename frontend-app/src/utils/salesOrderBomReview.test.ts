@@ -7,6 +7,8 @@ import {
   normalizeMaterialName,
   isNewMaterialName,
   hasRequiredQtyMismatch,
+  groupBomItemsForYocheok,
+  hasRequiredQtyBundleMismatch,
   computeDuplicateLookingRows,
   computeBomRowBadges,
 } from './salesOrderBomReview';
@@ -118,6 +120,79 @@ describe('hasRequiredQtyMismatch (PR-197) — 요척 오인식 교차검증(값�
 
   it('총수량이 없으면 비교하지 않는다', () => {
     expect(hasRequiredQtyMismatch({ consumption: 2.7, requiredQty: 2842 }, null)).toBe(false);
+  });
+});
+
+// PR-201(운영 화면 확인): 같은 겉감 자재가 색상별로 행이 나뉘어 있으면 출고량도
+// 색상별 값이라 행 하나씩 비교하면 오탐이 난다 — 백엔드 vision-guardrails.util.ts와
+// 같은 규칙(구분+자재명(공백 제거·대소문자 무시)+요척)을 프런트에도 둔다. 숫자는 전부
+// 익명 합성값.
+describe('groupBomItemsForYocheok (PR-201)', () => {
+  it('⑥ 자재명이 공백·대소문자만 다르면 같은 묶음', () => {
+    const items = [
+      bomItem({ itemName: ' code-a ', consumption: 1.2 }),
+      bomItem({ itemName: 'CODE-A', consumption: 1.2 }),
+    ];
+    expect(groupBomItemsForYocheok(items)).toEqual([[0, 1]]);
+  });
+
+  it('⑦ 이름이 같아도 요척이 다르면 다른 묶음', () => {
+    const items = [
+      bomItem({ itemName: 'CODE-A', consumption: 1.2 }),
+      bomItem({ itemName: 'CODE-A', consumption: 1.3 }),
+    ];
+    expect(groupBomItemsForYocheok(items).filter((g) => g.length > 1)).toEqual([]);
+  });
+});
+
+describe('hasRequiredQtyBundleMismatch (PR-201) — 익명 합성값', () => {
+  it('① 두 색상 행(요척1.00, 총수량1000, 출고량400/600) — 합이 맞으면 false', () => {
+    const items = [bomItem({ consumption: 1.0, requiredQty: 400 }), bomItem({ consumption: 1.0, requiredQty: 600 })];
+    expect(hasRequiredQtyBundleMismatch(items, 1000)).toBe(false);
+  });
+
+  it('② 요척1.20·총수량1000·출고량400/600(합1000=총수량, 기대값1200) — true(벌 수 의심이어도 뱃지는 뜬다)', () => {
+    const items = [bomItem({ consumption: 1.2, requiredQty: 400 }), bomItem({ consumption: 1.2, requiredQty: 600 })];
+    expect(hasRequiredQtyBundleMismatch(items, 1000)).toBe(true);
+  });
+
+  it('③ 합이 크게 다르면 true', () => {
+    const items = [bomItem({ consumption: 1.0, requiredQty: 100 }), bomItem({ consumption: 1.0, requiredQty: 100 })];
+    expect(hasRequiredQtyBundleMismatch(items, 1000)).toBe(true);
+  });
+
+  it('④ 묶음 안에 requiredQty가 null인 행이 하나라도 있으면 false', () => {
+    const items = [bomItem({ consumption: 1.2, requiredQty: 400 }), bomItem({ consumption: 1.2, requiredQty: null })];
+    expect(hasRequiredQtyBundleMismatch(items, 1000)).toBe(false);
+  });
+
+  it('⑨ 3색 묶음(710/710/810 구조와 같은 비율의 임의 숫자)이 허용 오차 안에서 false', () => {
+    const items = [
+      bomItem({ consumption: 1.0, requiredQty: 318 }),
+      bomItem({ consumption: 1.0, requiredQty: 318 }),
+      bomItem({ consumption: 1.0, requiredQty: 364 }),
+    ];
+    expect(hasRequiredQtyBundleMismatch(items, 1000)).toBe(false);
+  });
+});
+
+describe('computeBomRowBadges (PR-201) — 다색 묶음은 합으로, 단일 행은 기존대로', () => {
+  it('⑤ 단일 행의 기존 동작은 바뀌지 않는다(요척 오인식 사례, PR-197 그대로)', () => {
+    const items = [bomItem({ itemName: '단일자재', category: 'Y', consumption: 2.7, requiredQty: 2842 })];
+    const badges = computeBomRowBadges(items, 980, new Set());
+    expect(badges[0].requiredQtyMismatch).toBe(true);
+  });
+
+  it('⑧ 다색 묶음(요척·이름 같음, 2행)은 합으로 판정하고 개별 행 오탐을 없앤다', () => {
+    // 실사례 구조(요척 1.19, 색상 2행 출고량 760/825, 합 1585 ≈ 요척×수량)를 익명화.
+    const items = [
+      bomItem({ itemName: '겉감자재', category: '겉감', consumption: 1.19, requiredQty: 760, colorCode: 'CR' }),
+      bomItem({ itemName: '겉감자재', category: '겉감', consumption: 1.19, requiredQty: 825, colorCode: 'BL' }),
+    ];
+    const totalQty = Math.round(1585 / 1.19); // 요척×수량 ≈ 합(1585)이 되는 총수량
+    const badges = computeBomRowBadges(items, totalQty, new Set());
+    expect(badges[0].requiredQtyMismatch).toBe(false);
+    expect(badges[1].requiredQtyMismatch).toBe(false);
   });
 });
 

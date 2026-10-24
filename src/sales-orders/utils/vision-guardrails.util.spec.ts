@@ -9,6 +9,8 @@ import {
   findDuplicateGroups,
   checkDocumentDateSuspicious,
   checkYocheokMismatch,
+  groupBomItemsForYocheok,
+  checkYocheokMismatchBundle,
 } from './vision-guardrails.util';
 
 describe('STYLE_NO_FORMAT_REGEX — 완성 시트 118개 패턴(익명 합성값으로 대표 검증)', () => {
@@ -283,5 +285,114 @@ describe('checkYocheokMismatch (PR-200) — 배경 사례(1.24 오독 → 실제
     expect(checkYocheokMismatch(null, 80, 97)).toBeNull();
     expect(checkYocheokMismatch(1.21, 80, null)).toBeNull();
     expect(checkYocheokMismatch(1.21, null, 97)).toBeNull();
+  });
+});
+
+// PR-201(운영 화면 확인·PILOT-7f 실측 확인): 같은 겉감 자재가 색상별로 행이 나뉘어
+// 있으면 출고량도 색상별 값이라, 행 하나씩 비교하면 오탐이 난다(실사례: 요척 1.19,
+// 색상 2행 출고량 760/825 — 합 1585가 요척×수량 1583.89와 0.07% 차이로 거의 일치인데
+// 행 단위로는 둘 다 불일치, "요척 0.62로" 제안까지 떴다). 아래 숫자는 전부 익명 합성값.
+describe('groupBomItemsForYocheok (PR-201)', () => {
+  it('구분·요척이 같고 자재명이 똑같으면 한 묶음', () => {
+    const items = [
+      { category: '겉감', itemName: 'CODE-A', consumption: 1.2 },
+      { category: '겉감', itemName: 'CODE-A', consumption: 1.2 },
+    ];
+    expect(groupBomItemsForYocheok(items)).toEqual([[0, 1]]);
+  });
+
+  it('⑥ 자재명이 공백·대소문자만 다르면 같은 묶음', () => {
+    const items = [
+      { category: '겉감', itemName: ' code-a ', consumption: 1.2 },
+      { category: '겉감', itemName: 'CODE-A', consumption: 1.2 },
+    ];
+    expect(groupBomItemsForYocheok(items)).toEqual([[0, 1]]);
+  });
+
+  it('⑦ 이름이 같아도 요척이 다르면 다른 묶음', () => {
+    const items = [
+      { category: '겉감', itemName: 'CODE-A', consumption: 1.2 },
+      { category: '겉감', itemName: 'CODE-A', consumption: 1.3 },
+    ];
+    const groups = groupBomItemsForYocheok(items).filter((g) => g.length > 1);
+    expect(groups).toEqual([]);
+  });
+
+  it('요척이 없는 행은 어떤 묶음에도 들어가지 않는다', () => {
+    const items = [
+      { category: '겉감', itemName: 'CODE-A', consumption: null },
+      { category: '겉감', itemName: 'CODE-A', consumption: 1.2 },
+    ];
+    const groups = groupBomItemsForYocheok(items).filter((g) => g.length > 1);
+    expect(groups).toEqual([]);
+  });
+});
+
+describe('checkYocheokMismatchBundle (PR-201) — 익명 합성값', () => {
+  it('① 두 색상 행(요척1.00, 총수량1000, 출고량400/600) — 합이 정확히 맞으면 경고 없음', () => {
+    const result = checkYocheokMismatchBundle(
+      [{ consumption: 1.0, requiredQty: 400 }, { consumption: 1.0, requiredQty: 600 }],
+      1000,
+    );
+    expect(result).toBeNull();
+  });
+
+  it('② 요척1.20·총수량1000·출고량400/600(합1000=총수량, 기대값1200) — 벌 수 의심 문구', () => {
+    const result = checkYocheokMismatchBundle(
+      [{ consumption: 1.2, requiredQty: 400 }, { consumption: 1.2, requiredQty: 600 }],
+      1000,
+    );
+    expect(result?.code).toBe('YOCHEOK_QTY_MISMATCH');
+    expect(result?.message).toContain('벌');
+    expect(result?.suggestions).toBeUndefined();
+  });
+
+  it('③ 합이 크게 다르면 일반 불일치 문구(색상 N개·합·기대값 표기)', () => {
+    const result = checkYocheokMismatchBundle(
+      [{ consumption: 1.0, requiredQty: 100 }, { consumption: 1.0, requiredQty: 100 }],
+      1000,
+    );
+    expect(result?.code).toBe('YOCHEOK_QTY_MISMATCH');
+    expect(result?.message).toContain('2개');
+    expect(result?.message).toContain('200');
+    expect(result?.message).not.toContain('벌');
+  });
+
+  it('④ 묶음 안에 requiredQty가 null인 행이 하나라도 있으면 경고 없음', () => {
+    const result = checkYocheokMismatchBundle(
+      [{ consumption: 1.2, requiredQty: 400 }, { consumption: 1.2, requiredQty: null }],
+      1000,
+    );
+    expect(result).toBeNull();
+  });
+
+  it('⑧ 다색 묶음에는 제안(suggestions)이 절대 생기지 않는다 — 불일치여도', () => {
+    const result = checkYocheokMismatchBundle(
+      [{ consumption: 1.0, requiredQty: 100 }, { consumption: 1.0, requiredQty: 100 }],
+      1000,
+    );
+    expect(result?.suggestions).toBeUndefined();
+  });
+
+  it('⑨ 3색 묶음(710/710/810 구조와 같은 비율의 임의 숫자)이 허용 오차 안에서 통과', () => {
+    // 실사례 구조(두 색상이 같고 한 색상만 다름, 합=총수량)를 익명 숫자로 재현한다.
+    const result = checkYocheokMismatchBundle(
+      [{ consumption: 1.0, requiredQty: 318 }, { consumption: 1.0, requiredQty: 318 }, { consumption: 1.0, requiredQty: 364 }],
+      1000,
+    );
+    expect(result).toBeNull();
+  });
+
+  it('허용 차이는 묶음 행 수만큼 늘어난다(±1×N) — 3행이면 ±3까지 통과', () => {
+    const result = checkYocheokMismatchBundle(
+      [{ consumption: 1.0, requiredQty: 333 }, { consumption: 1.0, requiredQty: 333 }, { consumption: 1.0, requiredQty: 337 }],
+      1000, // 기대값 1000, 합 1003 → 차이 3 ≤ 3(행 수) → 통과
+    );
+    expect(result).toBeNull();
+  });
+
+  it('총수량이 없거나 요척이 없으면 비교하지 않음', () => {
+    expect(checkYocheokMismatchBundle([{ consumption: 1.0, requiredQty: 100 }], null)).toBeNull();
+    expect(checkYocheokMismatchBundle([{ consumption: null, requiredQty: 100 }], 1000)).toBeNull();
   });
 });

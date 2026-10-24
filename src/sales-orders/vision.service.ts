@@ -19,6 +19,8 @@ import {
   findDuplicateGroups,
   checkDocumentDateSuspicious,
   checkYocheokMismatch,
+  groupBomItemsForYocheok,
+  checkYocheokMismatchBundle,
   type VisionWarning,
 } from './utils/vision-guardrails.util';
 
@@ -391,6 +393,7 @@ export class VisionService {
       result.overview.targetRdd = rollover.targetRdd;
       result.overview.targetRddYearAdjusted = rollover.adjusted;
       result.overview.targetRddOriginal = rollover.adjusted ? rollover.original : null;
+      result.overview.targetRddAdjustBasis = rollover.adjusted ? rollover.basis : null;
 
       result.overview.targetRddSuspicious = isSuspiciousTargetRdd(
         result.overview.targetRdd,
@@ -434,8 +437,10 @@ export class VisionService {
       if (dateWarning) overviewWarnings.push(dateWarning);
       if (overviewWarnings.length > 0) result.overview.warnings = overviewWarnings;
 
-      for (const item of result.bomItems) {
-        const warnings: VisionWarning[] = [];
+      const perItemWarnings: VisionWarning[][] = result.bomItems.map(() => []);
+
+      result.bomItems.forEach((item, idx) => {
+        const warnings = perItemWarnings[idx];
 
         const split = splitSupplierItemName(item.itemName);
         if (split) {
@@ -450,12 +455,36 @@ export class VisionService {
 
         const unknownName = checkUnknownName(item.itemName, context.masterItemNames ?? []);
         if (unknownName) warnings.push(unknownName);
+      });
 
-        const yocheokWarning = checkYocheokMismatch(item.consumption, result.overview.totalQty, item.requiredQty);
-        if (yocheokWarning) warnings.push(yocheokWarning);
-
-        if (warnings.length > 0) item.warnings = warnings;
+      // PR-201(운영 화면 확인): 같은 겉감 자재가 색상별로 행이 나뉘어 있으면 출고량
+      // (requiredQty)도 색상별 값이라 행 하나씩 "요척×총수량"과 비교하면 오탐이 난다 —
+      // 공급사 분리가 끝난 뒤(최종 itemName 기준) 구분+자재명+요척이 같은 행을 묶어서,
+      // 묶음이 2행 이상이면 합으로 비교하고(제안 버튼은 만들지 않음), 1행이면 기존과
+      // 똑같이 행 하나로 비교한다(단일 행 동작은 바꾸지 않음).
+      const yocheokGroups = groupBomItemsForYocheok(
+        result.bomItems.map((b) => ({ category: b.category, itemName: b.itemName, consumption: b.consumption })),
+      );
+      for (const group of yocheokGroups) {
+        if (group.length >= 2) {
+          const bundleWarning = checkYocheokMismatchBundle(
+            group.map((idx) => result.bomItems[idx]),
+            result.overview.totalQty,
+          );
+          if (bundleWarning) {
+            for (const idx of group) perItemWarnings[idx].push(bundleWarning);
+          }
+        } else {
+          const idx = group[0];
+          const item = result.bomItems[idx];
+          const yocheokWarning = checkYocheokMismatch(item.consumption, result.overview.totalQty, item.requiredQty);
+          if (yocheokWarning) perItemWarnings[idx].push(yocheokWarning);
+        }
       }
+
+      result.bomItems.forEach((item, idx) => {
+        if (perItemWarnings[idx].length > 0) item.warnings = perItemWarnings[idx];
+      });
 
       for (const group of findDuplicateGroups(result.bomItems)) {
         const warning: VisionWarning = {
