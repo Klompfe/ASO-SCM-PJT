@@ -67,6 +67,7 @@ export function updateOverviewField<K extends keyof AiOverview>(
     if (field === 'targetRdd') {
       overview.targetRddYearAdjusted = false;
       overview.targetRddOriginal = null;
+      overview.targetRddAdjustBasis = null;
     }
     return { ...r, overview };
   });

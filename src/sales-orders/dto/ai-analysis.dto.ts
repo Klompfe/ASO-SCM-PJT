@@ -38,6 +38,12 @@ export class AiOverviewDto {
   @IsString()
   targetRddOriginal?: string | null;
 
+  // PR-201: 보정 기준(작성일 또는 오늘) — 화면 안내 문구를 기준에 맞게 바꾸는 데만 쓴다.
+  @ApiPropertyOptional({ description: '연도 보정 기준(DOCUMENT_DATE|TODAY, 보정했을 때만, 서버 계산)' })
+  @IsOptional()
+  @IsString()
+  targetRddAdjustBasis?: 'DOCUMENT_DATE' | 'TODAY' | null;
+
   // PR-168: 미도 전용 — 작업지시서 이미지 상단에 수기로 적힌 CMT단가 숫자(AI 후보일
   // 뿐, 그대로 저장되지 않는다). 미도가 아닌 바이어 건은 vision.service.ts가 결정적으로
   // null로 덮어쓴다(바이어 인식 자체를 AI 판단에만 맡기지 않음, PR-158과 동일한 원칙).

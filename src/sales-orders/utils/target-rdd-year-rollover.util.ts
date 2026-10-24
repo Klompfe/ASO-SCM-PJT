@@ -12,6 +12,11 @@
 // PR-158의 "작성일을 납기로 잘못 읽은" 패턴(targetRdd === documentDate)만 여전히
 // 예외로 남겨 보정하지 않는다(보정하면 그 오인식을 감추게 되므로).
 
+// PR-201: "오늘" 대신 작성일을 기준으로 쓸 수 있는지 판단하려면 작성일이 의심스러운
+// 날짜(미래/18개월 초과 과거)인지 알아야 한다 — vision-guardrails.util.ts의 판정을
+// 그대로 재사용한다(순수 함수, 순환 의존 없음).
+import { checkDocumentDateSuspicious } from './vision-guardrails.util';
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // 형식(YYYY-MM-DD)뿐 아니라 실제 달력에 존재하는 날짜인지도 확인한다(윤년 2/29 등) —
@@ -23,19 +28,36 @@ function isValidIsoDate(s: string): boolean {
   return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
 }
 
+export type TargetRddRolloverBasis = 'DOCUMENT_DATE' | 'TODAY';
+
 export interface TargetRddRolloverResult {
   // 보정이 적용됐으면 보정된 값, 아니면 입력받은 targetRdd 그대로(둘 다 null일 수 있음).
   targetRdd: string | null;
   adjusted: boolean;
   // 보정 전 원래 값 — adjusted=true일 때만 채워진다(화면 안내 "원래 인식값"에 쓰인다).
   original: string | null;
+  // 어느 기준으로 보정했는지(adjusted=true일 때만 의미있음, 화면 문구 선택용).
+  basis: TargetRddRolloverBasis | null;
 }
 
-const NO_CHANGE = (targetRdd: string | null): TargetRddRolloverResult => ({ targetRdd, adjusted: false, original: null });
+const NO_CHANGE = (targetRdd: string | null): TargetRddRolloverResult => ({
+  targetRdd,
+  adjusted: false,
+  original: null,
+  basis: null,
+});
 
 // today는 KST(한국시간) 기준 "오늘" 날짜(YYYY-MM-DD)를 호출자가 넘긴다(vision.service.ts의
 // todayKstIso) — 이 함수 자체는 시각을 읽지 않는다(순수 함수 유지, 테스트에서 임의의
 // "오늘"을 고정해 검증할 수 있게).
+//
+// PR-201(운영 화면 확인): 작성일이 과거인 작지(보관 문서 등)는 납기도 오늘보다 과거일 수
+// 있는데, 기준을 항상 "오늘"로 두면 이런 정상 문서의 납기를 잘못 다음 해로 밀어올린다
+// (실사례: 작성일 2025-09-08, 납기 2026-03-17로 읽힘 — 오늘(2026-10-*)보다 이르다는
+// 이유로 2027년으로 보정했으나, 작성일 기준으로는 보정이 필요 없었다). 작성일이 있고
+// 그 자체가 의심스러운 날짜(미래/18개월 초과 과거, checkDocumentDateSuspicious)가
+// 아니면 작성일을 기준으로 쓰고, 그렇지 않으면(작성일 없음/의심스러움) 기존처럼 오늘을
+// 기준으로 쓴다.
 export function rolloverTargetRddYear(
   targetRdd: string | null,
   documentDate: string | null,
@@ -46,11 +68,16 @@ export function rolloverTargetRddYear(
 
   // 예외: 납기 == 작성일은 "작성일을 납기로 잘못 인식"한 PR-158 실사례 패턴이므로
   // 절대 보정하지 않는다(보정하면 그 오인식을 더 그럴듯하게 감춰버린다) — 의심 경고로만
-  // 알린다. 작성일은 이 비교 하나에만 쓰이고, 값 자체는 절대 읽거나 바꾸지 않는다.
+  // 알린다.
   if (targetRdd === documentDate) return NO_CHANGE(targetRdd);
 
-  // 기준은 오늘(KST) — 납기가 오늘보다 이미 같거나 미래면 손대지 않는다(오늘 당일 포함).
-  if (targetRdd >= today) return NO_CHANGE(targetRdd);
+  const documentDateReliable =
+    documentDate != null && isValidIsoDate(documentDate) && checkDocumentDateSuspicious(documentDate, today) == null;
+  const basis: TargetRddRolloverBasis = documentDateReliable ? 'DOCUMENT_DATE' : 'TODAY';
+  const baseline = basis === 'DOCUMENT_DATE' ? (documentDate as string) : today;
+
+  // 기준(작성일 또는 오늘)보다 같거나 미래면 손대지 않는다(해당 날짜 당일 포함).
+  if (targetRdd >= baseline) return NO_CHANGE(targetRdd);
 
   const [y, m, d] = targetRdd.split('-').map(Number);
   const nextYear = y + 1;
@@ -59,9 +86,9 @@ export function rolloverTargetRddYear(
   // 보정은 +1년 한 번만 — 그래도 달력에 없으면(2/29 → 다음 해가 평년) 보정하지 않는다.
   if (!isValidIsoDate(candidate)) return NO_CHANGE(targetRdd);
 
-  // 보정은 +1년 한 번만 — 그래도 오늘 이후가 안 되면(원래 연도가 2년 이상 이전인 경우 등)
+  // 보정은 +1년 한 번만 — 그래도 기준 이후가 안 되면(원래 연도가 2년 이상 이전인 경우 등)
   // 억지로 더 보정하지 않고 그대로 둔다(의심 플래그로 계속 걸러진다).
-  if (candidate <= today) return NO_CHANGE(targetRdd);
+  if (candidate <= baseline) return NO_CHANGE(targetRdd);
 
-  return { targetRdd: candidate, adjusted: true, original: targetRdd };
+  return { targetRdd: candidate, adjusted: true, original: targetRdd, basis };
 }

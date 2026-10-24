@@ -23,6 +23,8 @@ export interface AiOverview {
   // 인식됐을 때 다음 해로 자동 보정했는지와, 보정했다면 원래 인식값(화면 안내용).
   targetRddYearAdjusted?: boolean;
   targetRddOriginal?: string | null;
+  // PR-201: 보정 기준(작성일 또는 오늘) — 화면 안내 문구를 기준에 맞게 바꾸는 데만 쓴다.
+  targetRddAdjustBasis?: 'DOCUMENT_DATE' | 'TODAY' | null;
   // PR-168: 미도 전용 — 작지 상단 수기 CMT단가. candidate는 AI 후보(읽기전용 참고용,
   // 미도가 아니면 항상 null), cmtPrice는 사람이 확인/수정한 최종값(이것만 저장된다).
   handwrittenCmtPriceCandidate?: number | null;
