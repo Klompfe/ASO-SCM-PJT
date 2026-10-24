@@ -913,7 +913,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           <option value="OBA_SA_SKU_I_SA">오바사·스쿠이사 (4000M/콘)</option>
                                           <option value="POLY_JINUIDO">폴리지누이도 (500M/콘)</option>
                                           <option value="DADE">다데 (50M/롤)</option>
-                                          <option value="AMHOL">암홀 (50M/롤)</option>
+                                          <option value="AMHOL">암홀 (100M/롤)</option>
                                         </select>
                                       </td>
                                       <td className="border p-1 text-xs space-y-0.5" data-testid={`bom-badges-${index}-${i}`}>

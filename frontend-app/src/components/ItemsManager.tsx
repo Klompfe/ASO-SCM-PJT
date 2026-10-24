@@ -770,7 +770,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                             <option value="OBA_SA_SKU_I_SA">오바사·스쿠이사 (4000M/콘)</option>
                             <option value="POLY_JINUIDO">폴리지누이도 (500M/콘)</option>
                             <option value="DADE">다데 (50M/롤)</option>
-                            <option value="AMHOL">암홀 (50M/롤)</option>
+                            <option value="AMHOL">암홀 (100M/롤)</option>
                           </select>
                         </td>
                         <td className="px-4 py-2 space-x-2 whitespace-nowrap">
