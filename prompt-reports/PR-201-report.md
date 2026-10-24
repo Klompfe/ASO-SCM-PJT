@@ -189,3 +189,57 @@ Written for: 이 저장소를 관리하는 개발자(변경 요약/테스트 결
 6. `git stash list`(읽기만) → `stash@{0}: On fix/items-upload-double-unwrap: PR-026.1/026/029 미완료 작업 (Stage A 검증 동안 임시 보관)` — 이전부터 있던 것과 동일, 건드리지 않음.
 
 → **결론**: 위 명령들로 전체 브랜치(`origin`에 있는 모든 ref 포함)와 전체 커밋 역사, 마이그레이션 파일명을 다 뒤졌지만 PR-189·PR-195·마이그레이션 `1792000000000`은 어디에도 없었다. 더 못 찾은 이유는 없음 — "존재하지 않는다"로 결론.
+
+---
+
+## PR-201d 보완: 납기가 오늘보다 과거일 때 "조용히 틀린 값"이 남지 않게
+
+**브랜치**: `feat/pr-201-review-screen-fixes`(시작 시점 HEAD `a9fd292`, `origin/main`의 자손 관계 확인). **main에 병합하지 않음.**
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `src/sales-orders/utils/target-rdd-year-rollover.util.ts` | `rolloverTargetRddYear`의 보정 판단 로직(`computeRollover`)은 그대로 두고, 그 결과를 감싸 최종값이 오늘보다 과거면 반드시 `notice`를 채우는 래퍼로 재구성. `TargetRddNotice` 타입(`'none'\|'past-kept'\|'bumped-today'\|'bumped-written'`) 추가 |
+| `src/sales-orders/vision.service.ts` | `applyTargetRddValidation`이 `rollover.notice`를 `overview.targetRddNotice`로 내려줌 |
+| `src/sales-orders/dto/ai-analysis.dto.ts` | `targetRddNotice` DTO 필드 추가 |
+| `src/sales-orders/utils/target-rdd-year-rollover.util.spec.ts`, `src/sales-orders/vision.service.spec.ts` | 전부 `notice` 포함하도록 갱신, PR-201d 전용 describe 블록(①~경계 전부) 추가 |
+| `frontend-app/src/api/salesOrders.service.ts` | `targetRddNotice` 타입 추가 |
+| `frontend-app/src/utils/salesOrderOverviewEdit.ts`(+test) | 납기 직접 수정 시 `targetRddNotice`도 `'none'`으로 함께 지움 |
+| `frontend-app/src/components/SalesOrderUploadModal.tsx` | `targetRddNotice==='past-kept'`일 때 주황색 안내(보정 안내의 파란색·의심 경고의 빨간색과 구분) 추가 |
+
+### 테스트 숫자(전/후)
+
+| | 전(PR-201c 완료 시점) | 후 |
+|---|---|---|
+| 백엔드 단위(jest) | 994 | **1002**(+8, 새 테스트 추가) |
+| e2e | 555 | **555**(동일) |
+| 프런트(vitest) | 485 | **485**(동일 — 기존 테스트에 assertion만 추가) |
+
+전부 실패 0. 빌드 둘 다 성공. 마이그레이션·package.json·락 파일 변경 0건.
+
+### 1. 현재 규칙과 PR-190 이유(5줄 이내) + 분기 표
+
+**분기 표**(d=납기, w=작성일, t=오늘, "신뢰"=w가 날짜로 해석되고 `DOCUMENT_DATE_SUSPICIOUS` 아님):
+
+| 입력 조건 | PR-201(이전) 동작 | PR-201d(이번) 동작 |
+|---|---|---|
+| d ≥ t | 변경 없음, 안내 없음 | 동일 |
+| w 신뢰 가능, d ≥ w, d < t | 변경 없음, **안내 없음(사각지대)** | 변경 없음, **`past-kept` 안내 추가** |
+| w 신뢰 가능, d < w | 작성일 기준 +1년 시도(성공 시 `bumped-written`) | 동일(실패해도 d<t면 `past-kept`로 안내) |
+| w 없음/신뢰 불가, d < t | 오늘 기준 +1년 시도(PR-190, 성공 시 `bumped-today`) | 동일(실패해도 `past-kept`로 안내) |
+| d === w(PR-158 패턴) | 변경 없음, 안내 없음(의심 경고는 별도) | 변경 없음, d<t면 **`past-kept` 안내 추가** |
+
+**PR-190이 보호하려던 시나리오(커밋 `1c69206` 인용, 2줄)**: "작성일 자체가 신뢰할 수 없는 값으로 인식된 사례(MB74BLM107: 작성일 2026-01-01, 납기 2026-02-17)에서는 '납기 < 작성일' 기준이 전혀 보정하지 못하는 사각지대가 있었다." → 즉 **작성일이 그대로는 "정상"으로 보이는데(신뢰 가능 판정을 통과), 조회 시점(오늘) 기준으로 납기가 이미 지나버린 경우**를 보호하려 했다.
+
+**PR-201d가 이 시나리오를 막는지(합성 입력, 오늘=2026-10-14)**: `rolloverTargetRddYear('2026-02-17','2026-01-01','2026-10-14')` → `{targetRdd:'2026-02-17', adjusted:false, notice:'past-kept'}`. **값은 PR-190처럼 2027로 올리지 않지만(PR-201의 의도적 변경 유지), 더 이상 "조용히" 넘어가지 않고 `past-kept` 안내가 뜬다** — PR-190의 "사각지대를 안내 없이 통과시키지 않는다"는 핵심 목적은 (값 변경이 아니라 안내로) 충족된다.
+
+### 3. 되돌린 테스트 여부
+
+`vision.service.spec.ts`의 MB74BLM107 테스트(PR-201에서 기대값을 바꿨던 그 테스트)를 PR-190의 원래 기대값(`adjusted:true, targetRdd:'2027-02-17'`)으로 돌려 **직접 확인**: 보정 판단 로직(`computeRollover`) 자체는 이번에 바꾸지 않았으므로 **여전히 `adjusted:false`다 — 원래 기대값으로 통과하지 않는다.** 따라서 **되돌리지 않고 PR-201의 기대값을 그대로 유지**했고, `targetRddNotice:'past-kept'` 한 줄만 추가했다(위 1번 표와 동일한 이유 — PR-201d는 "안내"로 해결하고 "값"은 PR-201 방식을 유지하는 설계이기 때문).
+
+### 사람이 화면에서 확인할 것
+
+1. 작성일이 과거인 작지(보관·시험 문서): 납기가 오늘보다 과거여도 값이 바뀌지 않고 "오늘보다 이른 날짜입니다" 주황 안내가 나온다(저장은 막지 않음).
+2. 새 작지(작성일이 최근): 납기가 미래이면 아무 안내도 없다.
+3. 납기가 작성일보다 이른 경우 기존처럼(파란 안내로) 연도가 보정된다.

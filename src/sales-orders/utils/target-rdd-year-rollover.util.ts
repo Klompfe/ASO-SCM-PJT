@@ -30,6 +30,12 @@ function isValidIsoDate(s: string): boolean {
 
 export type TargetRddRolloverBasis = 'DOCUMENT_DATE' | 'TODAY';
 
+// PR-201d: 값을 바꿨는지와 별개로, 화면에 어떤 안내를 띄울지 — 'none'=안내 없음,
+// 'past-kept'=납기가 오늘보다 과거인데 작성일 기준으로는 정상이라 값을 그대로 둠(또는
+// 보정을 시도했지만 끝내 오늘을 못 넘겨 과거로 남음), 'bumped-today'=오늘 기준으로
+// 연도 +1(PR-190 기존 동작), 'bumped-written'=작성일 기준으로 연도 +1(PR-201 동작).
+export type TargetRddNotice = 'none' | 'past-kept' | 'bumped-today' | 'bumped-written';
+
 export interface TargetRddRolloverResult {
   // 보정이 적용됐으면 보정된 값, 아니면 입력받은 targetRdd 그대로(둘 다 null일 수 있음).
   targetRdd: string | null;
@@ -38,31 +44,25 @@ export interface TargetRddRolloverResult {
   original: string | null;
   // 어느 기준으로 보정했는지(adjusted=true일 때만 의미있음, 화면 문구 선택용).
   basis: TargetRddRolloverBasis | null;
+  notice: TargetRddNotice;
 }
 
-const NO_CHANGE = (targetRdd: string | null): TargetRddRolloverResult => ({
+interface InnerResult {
+  targetRdd: string | null;
+  adjusted: boolean;
+  original: string | null;
+  basis: TargetRddRolloverBasis | null;
+}
+
+const NO_CHANGE = (targetRdd: string | null): InnerResult => ({
   targetRdd,
   adjusted: false,
   original: null,
   basis: null,
 });
 
-// today는 KST(한국시간) 기준 "오늘" 날짜(YYYY-MM-DD)를 호출자가 넘긴다(vision.service.ts의
-// todayKstIso) — 이 함수 자체는 시각을 읽지 않는다(순수 함수 유지, 테스트에서 임의의
-// "오늘"을 고정해 검증할 수 있게).
-//
-// PR-201(운영 화면 확인): 작성일이 과거인 작지(보관 문서 등)는 납기도 오늘보다 과거일 수
-// 있는데, 기준을 항상 "오늘"로 두면 이런 정상 문서의 납기를 잘못 다음 해로 밀어올린다
-// (실사례: 작성일 2025-09-08, 납기 2026-03-17로 읽힘 — 오늘(2026-10-*)보다 이르다는
-// 이유로 2027년으로 보정했으나, 작성일 기준으로는 보정이 필요 없었다). 작성일이 있고
-// 그 자체가 의심스러운 날짜(미래/18개월 초과 과거, checkDocumentDateSuspicious)가
-// 아니면 작성일을 기준으로 쓰고, 그렇지 않으면(작성일 없음/의심스러움) 기존처럼 오늘을
-// 기준으로 쓴다.
-export function rolloverTargetRddYear(
-  targetRdd: string | null,
-  documentDate: string | null,
-  today: string,
-): TargetRddRolloverResult {
+// 보정 자체(값을 바꿀지 말지)는 기존 PR-201 로직 그대로다 — 이 함수는 바뀌지 않는다.
+function computeRollover(targetRdd: string | null, documentDate: string | null, today: string): InnerResult {
   if (!targetRdd || !isValidIsoDate(targetRdd)) return NO_CHANGE(targetRdd);
   if (!today || !isValidIsoDate(today)) return NO_CHANGE(targetRdd);
 
@@ -91,4 +91,46 @@ export function rolloverTargetRddYear(
   if (candidate <= baseline) return NO_CHANGE(targetRdd);
 
   return { targetRdd: candidate, adjusted: true, original: targetRdd, basis };
+}
+
+// today는 KST(한국시간) 기준 "오늘" 날짜(YYYY-MM-DD)를 호출자가 넘긴다(vision.service.ts의
+// todayKstIso) — 이 함수 자체는 시각을 읽지 않는다(순수 함수 유지, 테스트에서 임의의
+// "오늘"을 고정해 검증할 수 있게).
+//
+// PR-201(운영 화면 확인): 작성일이 과거인 작지(보관 문서 등)는 납기도 오늘보다 과거일 수
+// 있는데, 기준을 항상 "오늘"로 두면 이런 정상 문서의 납기를 잘못 다음 해로 밀어올린다
+// (실사례: 작성일 2025-09-08, 납기 2026-03-17로 읽힘 — 오늘(2026-10-*)보다 이르다는
+// 이유로 2027년으로 보정했으나, 작성일 기준으로는 보정이 필요 없었다). 작성일이 있고
+// 그 자체가 의심스러운 날짜(미래/18개월 초과 과거, checkDocumentDateSuspicious)가
+// 아니면 작성일을 기준으로 쓰고, 그렇지 않으면(작성일 없음/의심스러움) 기존처럼 오늘을
+// 기준으로 쓴다.
+//
+// PR-201d(운영 화면 확인): 작성일 기준으로는 "정상"이라 값을 안 바꿨는데, 작성일 자체가
+// 한 해쯘 잘못 읽혀 있으면 납기가 오늘보다 과거인데도 아무 안내 없이 조용히 넘어가는
+// 사각지대가 있었다(PR-201c 합성 입력 ③에서 확인됨). "값을 바꿨는지"와 "오늘보다 과거인
+// 납기를 안내할지"를 분리한다 — 보정 로직(computeRollover)은 그대로 두고, 최종값이
+// 오늘보다 과거면(바뀌었든 안 바뀌었든) 반드시 notice를 채운다. 이렇게 하면 "d<오늘인데
+// 안내가 없는" 경우가 구조적으로 생기지 않는다(보정 시도가 실패해 그대로 과거로 남는
+// 경우까지 전부 포함).
+export function rolloverTargetRddYear(
+  targetRdd: string | null,
+  documentDate: string | null,
+  today: string,
+): TargetRddRolloverResult {
+  const inner = computeRollover(targetRdd, documentDate, today);
+
+  let notice: TargetRddNotice = 'none';
+  if (inner.adjusted) {
+    notice = inner.basis === 'DOCUMENT_DATE' ? 'bumped-written' : 'bumped-today';
+  } else if (
+    inner.targetRdd != null &&
+    isValidIsoDate(inner.targetRdd) &&
+    today &&
+    isValidIsoDate(today) &&
+    inner.targetRdd < today
+  ) {
+    notice = 'past-kept';
+  }
+
+  return { ...inner, notice };
 }

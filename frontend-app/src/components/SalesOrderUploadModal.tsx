@@ -716,6 +716,20 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                             납기가 {result.overview.targetRddAdjustBasis === 'DOCUMENT_DATE' ? '작성일' : '오늘(한국시간)'}보다 이른 날짜로 인식되어 연도를 다음 해로 자동 보정했습니다(원래 인식값: {result.overview.targetRddOriginal}) — 확인해주세요
                           </span>
                         )}
+                        {/* PR-201d: 값은 안 바꿨지만 납기가 오늘보다 과거면 반드시 안내한다
+                            (작성일 기준으로는 정상 — 또는 보정을 시도했지만 끝내 오늘을 못
+                            넘긴 경우 — 둘 다 "조용히 넘어가지" 않게 한다, PR-201c 합성 입력
+                            ③에서 확인된 사각지대). 보정 안내(파란)·의심 경고(빨강)와 구분되는
+                            색(주황)으로 표시한다. */}
+                        {result.overview.targetRddNotice === 'past-kept' && (
+                          <span className="text-xs text-amber-600 mt-0.5" data-testid={`target-rdd-past-kept-${index}`}>
+                            납기 {result.overview.targetRdd}가 오늘(한국시간)보다 이른 날짜입니다.{' '}
+                            {result.overview.documentDate
+                              ? `작성일(${result.overview.documentDate}) 이후라서 값을 바꾸지 않았습니다.`
+                              : '연도를 자동으로 보정하지 못했습니다.'}{' '}
+                            원본의 납기 연·월·일을 확인해 주세요.
+                          </span>
+                        )}
                         {result.overview.targetRddSuspicious && (
                           <span className="text-xs text-red-600 mt-0.5" data-testid={`target-rdd-warning-${index}`}>
                             ⚠ 납기가 문서 작성일보다 빠르거나 과거 날짜입니다 — 확인해주세요

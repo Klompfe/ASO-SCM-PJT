@@ -394,6 +394,9 @@ export class VisionService {
       result.overview.targetRddYearAdjusted = rollover.adjusted;
       result.overview.targetRddOriginal = rollover.adjusted ? rollover.original : null;
       result.overview.targetRddAdjustBasis = rollover.adjusted ? rollover.basis : null;
+      // PR-201d: 값을 안 바꿨어도 납기가 오늘보다 과거면 반드시 안내가 뜨게 한다
+      // (targetRddYearAdjusted만 보면 "값은 안 바꿨고 조용히 넘어간" 경우가 생겼었다).
+      result.overview.targetRddNotice = rollover.notice;
 
       result.overview.targetRddSuspicious = isSuspiciousTargetRdd(
         result.overview.targetRdd,

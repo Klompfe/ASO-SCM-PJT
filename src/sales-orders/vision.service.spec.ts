@@ -75,7 +75,7 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
         ...fakeParsedResult[0],
         overview: {
           ...fakeParsedResult[0].overview,
-          targetRddYearAdjusted: false, targetRddOriginal: null, targetRddAdjustBasis: null, targetRddSuspicious: false,
+          targetRddYearAdjusted: false, targetRddOriginal: null, targetRddAdjustBasis: null, targetRddNotice: 'none', targetRddSuspicious: false,
           handwrittenCmtPriceCandidate: null, handwrittenCmtPriceMemo: null, cmtPrice: null,
           warnings: [{ code: 'STYLE_NO_FORMAT', message: '스타일번호 형식이 맞지 않습니다 — 원본과 대조해 주세요', suggestions: [] }],
         },
@@ -235,6 +235,8 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
       expect(outcome.results[0].overview.targetRdd).toBe('2026-02-17');
       expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
       expect(outcome.results[0].overview.targetRddOriginal).toBeNull();
+      // PR-201d: 값은 안 바꿨지만 2026-02-17이 오늘(2026-10-14)보다 과거라 past-kept 안내.
+      expect(outcome.results[0].overview.targetRddNotice).toBe('past-kept');
       expect(outcome.results[0].overview.documentDate).toBe('2026-01-01'); // 작성일은 절대 건드리지 않는다
     } finally {
       jest.useRealTimers();
@@ -254,6 +256,9 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
       expect(outcome.results[0].overview.targetRdd).toBe('2026-03-17');
       expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
       expect(outcome.results[0].overview.targetRddAdjustBasis).toBeNull();
+      // PR-201d: 2026-03-17이 오늘(2026-10-23)보다 과거라 past-kept 안내(PR-201c ③에서
+      // 확인된 사각지대 — 값은 안 바꿔도 반드시 안내가 뜨게 한다).
+      expect(outcome.results[0].overview.targetRddNotice).toBe('past-kept');
     } finally {
       jest.useRealTimers();
     }
@@ -270,6 +275,7 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
       expect(outcome.results[0].overview.targetRdd).toBe('2027-02-17');
       expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(true);
       expect(outcome.results[0].overview.targetRddAdjustBasis).toBe('TODAY');
+      expect(outcome.results[0].overview.targetRddNotice).toBe('bumped-today');
     } finally {
       jest.useRealTimers();
     }
@@ -286,6 +292,8 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
       expect(outcome.results[0].overview.targetRdd).toBe('2026-12-30');
       expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
       expect(outcome.results[0].overview.targetRddOriginal).toBeNull();
+      // 2026-12-30은 오늘(2026-10-14)보다 미래라 안내 없음.
+      expect(outcome.results[0].overview.targetRddNotice).toBe('none');
     } finally {
       jest.useRealTimers();
     }

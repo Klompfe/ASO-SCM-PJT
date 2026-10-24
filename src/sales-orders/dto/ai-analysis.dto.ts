@@ -44,6 +44,13 @@ export class AiOverviewDto {
   @IsString()
   targetRddAdjustBasis?: 'DOCUMENT_DATE' | 'TODAY' | null;
 
+  // PR-201d: 값을 바꿨는지와 별개로 화면에 안내를 띄울지(서버 계산) — 'past-kept'면 납기가
+  // 오늘보다 과거인데 값은 그대로 둔 경우(보정 시도가 실패해 과거로 남은 경우 포함).
+  @ApiPropertyOptional({ description: '납기 안내 종류(none|past-kept|bumped-today|bumped-written, 서버 계산)' })
+  @IsOptional()
+  @IsString()
+  targetRddNotice?: 'none' | 'past-kept' | 'bumped-today' | 'bumped-written';
+
   // PR-168: 미도 전용 — 작업지시서 이미지 상단에 수기로 적힌 CMT단가 숫자(AI 후보일
   // 뿐, 그대로 저장되지 않는다). 미도가 아닌 바이어 건은 vision.service.ts가 결정적으로
   // null로 덮어쓴다(바이어 인식 자체를 AI 판단에만 맡기지 않음, PR-158과 동일한 원칙).
