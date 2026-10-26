@@ -11,6 +11,12 @@ describe('normalizeForFuzzyMatch (PR-198)', () => {
     expect(normalizeForFuzzyMatch(undefined)).toBe('');
     expect(normalizeForFuzzyMatch('')).toBe('');
   });
+
+  // PR-204: 꺾쇠(<>)도 다른 괄호류와 동일하게 제거한다(PILOT-9/10에서 확인된 실사례
+  // "암홀<실크>"/"다데<실크>" — 같은 자재의 다른 표기를 비슷하다고 판단하지 못하던 문제).
+  it('꺾쇠도 다른 괄호류와 동일하게 제거한다', () => {
+    expect(normalizeForFuzzyMatch('암홀<실크>')).toBe(normalizeForFuzzyMatch('암홀(실크)'));
+  });
 });
 
 describe('isSimilarMaterialName (PR-198) — 이름만 다른 중복 제안용 느슨한 비교', () => {

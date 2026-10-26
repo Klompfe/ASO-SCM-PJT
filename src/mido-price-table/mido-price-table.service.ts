@@ -36,6 +36,18 @@ export interface MidoPriceCandidateWithConversion extends MidoPriceItem {
 }
 
 const MISSING_SUBTYPE_WARNING = '실/테이프 종류 미지정 — 선택해 주세요';
+
+// PR-204: 자재명을 "단어" 토큰으로 쪼갠다 — 단가표 itemName과의 부분일치 비교에 쓴다.
+// 구분 문자로만 취급하는 집합을 이 한 곳에서만 관리한다(괄호류 전부 포함: "암홀<실크>"도
+// "암홀(실크)"와 같은 토큰으로 쪼개져야 한다). 전면적인 "문자/숫자 아니면 전부 구분자"로
+// 바꾸지 않는다 — "100%"처럼 하나로 남아야 하는 토큰이 부풀어 오매칭이 늘 위험이 있다.
+export function tokenizeMaterialName(materialName: string): string[] {
+  return materialName
+    .replace(/[()<>[\]{}"/,]/g, ' ')
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+}
 // PR-185: "이전 INVOICE는 TAPE 10MM을 $0.04로 일괄 청구함" 안내 문구는 실제로는 단가표
 // 기준(다데 $0.04/롤, 암홀 $0.50/롤)으로 각각 계산해야 하는데 과거 관행을 그대로 따르는
 // 것으로 오해할 수 있어 제거했다(제시님 결정) — 종류 미지정이어도 두 후보를 그대로 나열만 한다.
@@ -65,11 +77,7 @@ export class MidoPriceTableService {
     opts?: { lineUnit?: string; materialSubType?: string },
   ): Promise<MidoPriceCandidateWithConversion[]> {
     const all = await this.findAll();
-    const tokens = materialName
-      .replace(/[()"/,]/g, ' ')
-      .split(/\s+/)
-      .map((t) => t.trim())
-      .filter((t) => t.length >= 2);
+    const tokens = tokenizeMaterialName(materialName);
 
     if (tokens.length === 0) return [];
 

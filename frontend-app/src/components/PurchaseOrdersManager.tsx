@@ -555,6 +555,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         {item && (
           <PriceReferenceBlock
             itemId={item.id}
+            itemName={item.name}
             styleNo={styleSearch?.styleNo}
             brandName={styleSearch ? undefined : (brandOverride || undefined)}
             value={priceRef}

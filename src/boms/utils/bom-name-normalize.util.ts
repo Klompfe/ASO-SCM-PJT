@@ -6,7 +6,7 @@
 export function normalizeForFuzzyMatch(name: string | null | undefined): string {
   return (name ?? '')
     .toLowerCase()
-    .replace(/[\s()[\]{}\-_./,·"'`]/g, '')
+    .replace(/[\s()<>[\]{}\-_./,·"'`]/g, '')
     .trim();
 }
 

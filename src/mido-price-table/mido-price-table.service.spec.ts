@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MidoPriceTableService } from './mido-price-table.service';
+import { MidoPriceTableService, tokenizeMaterialName } from './mido-price-table.service';
 import { MidoPriceItem } from './entities/mido-price-item.entity';
 import { MaterialPackagingUnitRulesService } from '../material-packaging-unit-rules/material-packaging-unit-rules.service';
 
@@ -156,5 +156,28 @@ describe('MidoPriceTableService.findCandidates — 미터단가 콘/롤 환산 (
     const conv = result.find((r) => r.id === 3)!.conversion!;
     expect(conv.determined).toBe(false);
     expect(conv.options.length).toBeGreaterThan(0);
+  });
+
+  // PR-204: 자재명에 꺾쇠(<>)가 있으면("암홀<실크>") 토큰이 쪼개지지 않아 "테이프(TAPE) 암홀"과
+  // 매칭되지 않던 문제(PILOT-9). 구분 문자에 <>[]{}를 추가해 고친다 — "100%" 같은 토큰은
+  // 그대로 유지돼야 한다(오매칭 방지, 전면적인 "문자/숫자 아니면 구분자" 교체는 하지 않음).
+  it.each([
+    ['암홀<실크>', 1],
+    ['암홀(실크)', 1],
+    // "테이프"/"TAPE" 토큰이 다데·암홀 행 둘 다에 공통이라(기존 동작, PR-204 이전과 동일) 2건.
+    ['테이프(TAPE) 암홀', 2],
+    ['암홀 테이프', 2],
+    ['암홀', 1],
+    ['다데<실크>', 1],
+    ['다데(실크)', 1],
+    ['지퍼<금속>', 0],
+  ])('%s → 매칭 %i건', async (name, expectedCount) => {
+    const result = await service.findCandidates(name as string);
+    expect(result).toHaveLength(expectedCount as number);
+  });
+
+  it('"겉감<면> 100%"도 기존 "겉감"과 동일하게 매칭되고, "100%" 토큰은 쪼개지지 않는다(오매칭 방지 확인)', () => {
+    const tokens = tokenizeMaterialName('겉감<면> 100%');
+    expect(tokens).toEqual(['겉감', '100%']);
   });
 });
