@@ -9,6 +9,7 @@ import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/
 import { PackingReceipt } from '../purchase-orders/entities/packing-receipt.entity';
 import { ExportShipmentLine } from '../export-shipments/entities/export-shipment-line.entity';
 import { UpsertProcessStageDto } from './dto/upsert-process-stage.dto';
+import { buildItemStyleUsage, attributePo, poBelongsToStyle } from '../purchase-orders/utils/po-style-attribution.util';
 
 export interface ProcurementStatusRow {
   styleNo: string;
@@ -20,6 +21,14 @@ export interface ProcurementStatusRow {
   packed: boolean;
   packingPendingPurchaseOrderId: number | null;
   overallStatus: string;
+  // PR-196: 이 스타일의 BOM 자재 중 "모호한 미연결 발주"(같은 자재를 2개 이상 스타일이 써서
+  // 누구 몫인지 알 수 없는 발주)가 걸려 있는 발주 건수(중복 없이) — 화면이 주황 배지로 안내.
+  unlinkedPoCount: number;
+  // PR-196: 이 스타일 몫으로 "자동 귀속"된(미연결 발주인데 이 자재를 쓰는 스타일이 이것
+  // 하나뿐이라 모호함 없이 귀속된) 발주 건수.
+  autoAttributedPoCount: number;
+  targetRdd: string | null;
+  brand: string | null;
 }
 
 // PR-089: (poCreated, ready/total, exported) 조합을 종합상태 문자열로 매핑한다.
@@ -85,7 +94,10 @@ export class OrderProcessStagesService {
   }
 
   // 자재입고는 별도 입력 없이 BOM + 발주(PO) 데이터에서 자동 파생한다(PR-063 설계).
-  // 자재(품목) 단위로 "그 자재의 PO가 하나라도 있고 전부 RECEIVED면 준비완료"로 판단한다.
+  // 자재(품목) 단위로 "그 자재의, 이 스타일 몫 PO가 하나라도 있고 전부 RECEIVED면 준비완료"로
+  // 판단한다. PR-196: 품목(itemId)만 보고 발주를 찾으면 다른 스타일이 쓴 같은 자재까지
+  // "입고완료"로 섞여 버리는 버그가 있었다 — po-style-attribution.util로 스타일 귀속을
+  // 가린 뒤에만 센다(다른 스타일 연결 발주/모호한 미연결 발주는 제외).
   async getMaterialReadiness(styleNo: string): Promise<{ totalMaterials: number; readyMaterials: number }> {
     // 같은 style에 Bom이 여러 개면 pickActiveBom 규칙(활성 BOM 중 최신)으로 하나만 쓴다(PR-123).
     const styleBoms = await this.bomRepository.find({
@@ -98,9 +110,18 @@ export class OrderProcessStagesService {
     }
 
     const materialIds = [...new Set(bom.items.map((item) => item.material.id))];
+    // 귀속 판단(AUTO/AMBIGUOUS)에는 전체 스타일의 활성 BOM 목록이 필요하다 — 쿼리 1번으로
+    // 한 번에 읽는다(자재 개수만큼 반복 조회하지 않음 — N+1 금지).
+    const allBoms = await this.bomRepository.find({ relations: ['items', 'items.material', 'style'] });
+    const itemStyleUsage = buildItemStyleUsage(allBoms);
+
     let readyMaterials = 0;
     for (const materialId of materialIds) {
-      const purchaseOrders = await this.purchaseOrderRepository.find({ where: { itemId: materialId } });
+      // 기존처럼 자재 단위로 1번씩 조회한다(쿼리 수는 그대로 — 그 안에서 취소 제외 + 스타일
+      // 귀속 필터만 추가).
+      const purchaseOrders = (await this.purchaseOrderRepository.find({ where: { itemId: materialId } }))
+        .filter((po) => po.status !== PurchaseOrderStatus.CANCELLED)
+        .filter((po) => poBelongsToStyle(po, styleNo, itemStyleUsage));
       if (purchaseOrders.length > 0 && purchaseOrders.every((po) => po.status === PurchaseOrderStatus.RECEIVED)) {
         readyMaterials++;
       }
@@ -137,8 +158,13 @@ export class OrderProcessStagesService {
       if (picked) latestBomByStyle.set(styleNo, picked);
     }
 
+    // PR-196: 품목(itemId)만으로 묶으면 다른 스타일이 쓴 같은 자재의 발주까지 섞여 버린다
+    // (이번 버그의 원인) — po-style-attribution.util로 스타일 귀속을 가린다. boms는 이미
+    // 한 번에 전부 읽어 뒀으므로(위 Promise.all) 추가 쿼리 없이 itemStyleUsage를 만들 수 있다.
+    const itemStyleUsage = buildItemStyleUsage(boms);
+    const livePurchaseOrders = purchaseOrders.filter((po) => po.status !== PurchaseOrderStatus.CANCELLED);
     const posByItemId = new Map<number, PurchaseOrder[]>();
-    for (const po of purchaseOrders) {
+    for (const po of livePurchaseOrders) {
       const list = posByItemId.get(po.itemId) ?? [];
       list.push(po);
       posByItemId.set(po.itemId, list);
@@ -153,16 +179,28 @@ export class OrderProcessStagesService {
       let poCreated = false;
       let readyMaterials = 0;
       let packingPendingPurchaseOrderId: number | null = null;
+      const ambiguousPoIds = new Set<number>();
+      const autoAttributedPoIds = new Set<number>();
       for (const materialId of materialIds) {
         const posForMaterial = posByItemId.get(materialId) ?? [];
-        if (posForMaterial.length > 0) {
+        const ownPos = posForMaterial.filter((po) => poBelongsToStyle(po, style.styleNo, itemStyleUsage));
+        if (ownPos.length > 0) {
           poCreated = true;
-          if (posForMaterial.every((po) => po.status === PurchaseOrderStatus.RECEIVED)) {
+          if (ownPos.every((po) => po.status === PurchaseOrderStatus.RECEIVED)) {
             readyMaterials++;
           }
         }
-        // 입고된 발주인데 포장내역이 없는 것 — 이 발주가 "포장내역대기"의 대상이다.
         for (const po of posForMaterial) {
+          const attribution = attributePo(po, itemStyleUsage);
+          if (attribution.kind === 'AMBIGUOUS' && attribution.candidates.includes(style.styleNo)) {
+            ambiguousPoIds.add(po.id);
+          }
+          if (attribution.kind === 'AUTO' && attribution.styleNo === style.styleNo) {
+            autoAttributedPoIds.add(po.id);
+          }
+        }
+        // 입고된 발주인데 포장내역이 없는 것 — 이 발주가 "포장내역대기"의 대상이다(이 스타일 몫만).
+        for (const po of ownPos) {
           if (po.status === PurchaseOrderStatus.RECEIVED && !purchaseOrderIdsWithReceipt.has(po.id) && packingPendingPurchaseOrderId === null) {
             packingPendingPurchaseOrderId = po.id;
           }
@@ -182,6 +220,10 @@ export class OrderProcessStagesService {
         packed,
         packingPendingPurchaseOrderId,
         overallStatus: computeOverallStatus(poCreated, readyMaterials, materialIds.length, exported, packed),
+        unlinkedPoCount: ambiguousPoIds.size,
+        autoAttributedPoCount: autoAttributedPoIds.size,
+        targetRdd: style.overview?.targetRdd ? new Date(style.overview.targetRdd).toISOString().slice(0, 10) : null,
+        brand: style.overview?.brand ?? null,
       };
     });
   }

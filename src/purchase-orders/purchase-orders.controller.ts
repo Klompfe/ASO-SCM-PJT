@@ -17,8 +17,10 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderStatusDto } from './dto/update-purchase-order-status.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { BulkCreatePurchaseOrdersDto } from './dto/bulk-create-purchase-orders.dto';
+import { CombinedPurchaseOrderDocumentDto } from './dto/combined-purchase-order-document.dto';
 import { GetPurchaseOrdersFilterDto } from './dto/get-purchase-orders-filter.dto';
 import { GetPriceReferenceDto } from './dto/get-price-reference.dto';
+import { LinkPurchaseOrderStyleDto, BulkLinkPurchaseOrderStyleDto } from './dto/link-purchase-order-style.dto';
 import { PurchaseOrder } from './entities/purchase-order.entity';
 
 @ApiTags('Purchase Orders (구매 주문 관리)')
@@ -68,6 +70,14 @@ export class PurchaseOrdersController {
     return { filename, base64: buffer.toString('base64') };
   }
 
+  // PR-194: 다품번 일괄발주 — 여러 발주를 업체별로 묶은 발주서(업체당 1개)를 만든다.
+  @Post('documents/combined')
+  @ApiOperation({ summary: '여러 발주를 업체별로 묶은 합본 발주서 생성 — 업체마다 base64 파일 1개씩 반환' })
+  async combinedDocument(@Body() dto: CombinedPurchaseOrderDocumentDto) {
+    const results = await this.documentService.generateCombined(dto.poIds);
+    return results.map((r) => ({ supplierId: r.supplierId, supplierName: r.supplierName, filename: r.filename, base64: r.buffer.toString('base64') }));
+  }
+
   // PR-173: 고정 경로라 ':id'보다 먼저 선언해야 한다(안 그러면 ':id'가 "material-context"를
   // id로 먼저 가로채 ParseIntPipe에서 400이 난다 — boms.controller.ts의 'duplicates'와 동일한 이유).
   // PR-185: 단가표(미도 단가표/브랜드 전용가) 참고단가 — 고정 경로라 ':id'보다 먼저 선언.
@@ -84,6 +94,22 @@ export class PurchaseOrdersController {
     return this.poService.getMaterialProductionContext(itemId);
   }
 
+  // PR-196: "미연결 발주 정리" 화면 — 고정 경로라 ':id'보다 먼저 선언해야 한다.
+  @Get('unlinked')
+  @ApiOperation({ summary: '스타일 미연결(취소 제외) 발주 목록 — 후보 스타일/귀속 종류와 함께' })
+  findUnlinked() {
+    return this.poService.findUnlinked();
+  }
+
+  // PR-196: 일괄 확정 — 고정 경로(두 세그먼트)라 ':id'와 충돌하지 않지만, 'bulk' 계열
+  // 라우트끼리 모아 둔다(가독성).
+  @Post('style-link/bulk')
+  @ApiOperation({ summary: '미연결 발주 여러 건을 한 번에 스타일에 연결(all-or-nothing, 최대 100건)' })
+  @ApiResponse({ status: 201, type: [PurchaseOrder] })
+  linkStyleBulk(@Body() dto: BulkLinkPurchaseOrderStyleDto): Promise<PurchaseOrder[]> {
+    return this.poService.linkStyleBulk(dto.links);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: '구매 주문 상세 조회' })
   @ApiResponse({ status: 200, type: PurchaseOrder })
@@ -96,6 +122,15 @@ export class PurchaseOrdersController {
   @ApiResponse({ status: 200, type: PurchaseOrder })
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePurchaseOrderDto): Promise<PurchaseOrder & { warnings: string[] }> {
     return this.poService.update(id, dto);
+  }
+
+  // PR-196: 미연결 발주(styleNo IS NULL)에만 적용되는 스타일 연결 확정 — 이미 연결된
+  // 발주는 400(재연결은 지원하지 않음), 취소된 발주도 400. styleNo 외 필드는 바꾸지 않는다.
+  @Patch(':id/style-link')
+  @ApiOperation({ summary: '미연결 발주 1건을 스타일에 연결(이미 연결됐거나 취소된 발주는 400)' })
+  @ApiResponse({ status: 200, type: PurchaseOrder })
+  linkStyle(@Param('id', ParseIntPipe) id: number, @Body() dto: LinkPurchaseOrderStyleDto): Promise<PurchaseOrder> {
+    return this.poService.linkStyle(id, dto.styleNo);
   }
 
   @Patch(':id/status')

@@ -8,6 +8,7 @@ import { PackingReceiptRoll } from './entities/packing-receipt-roll.entity';
 import { PackingReceiptCarton } from './entities/packing-receipt-carton.entity';
 import { PurchaseOrderLine } from './entities/purchase-order-line.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
+import { Bom } from '../boms/entities/bom.entity';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PackingReceiptsService } from './packing-receipts.service';
@@ -20,16 +21,18 @@ import { BrandPriceRulesModule } from '../brand-price-rules/brand-price-rules.mo
 import { BrandPrefixRulesModule } from '../brand-prefix-rules/brand-prefix-rules.module';
 import { CustomsExchangeRatesModule } from '../customs-exchange-rates/customs-exchange-rates.module';
 import { PriceReferenceService } from './price-reference.service';
+import { MaterialPackagingUnitRulesModule } from '../material-packaging-unit-rules/material-packaging-unit-rules.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PurchaseOrder, PurchaseOrderLine, Item, PackingReceipt, PackingReceiptRoll, PackingReceiptCarton, BomItem]),
+    TypeOrmModule.forFeature([PurchaseOrder, PurchaseOrderLine, Item, PackingReceipt, PackingReceiptRoll, PackingReceiptCarton, BomItem, Bom]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     AuthModule,
     MidoPriceTableModule,
     BrandPriceRulesModule,
     BrandPrefixRulesModule,
     CustomsExchangeRatesModule,
+    MaterialPackagingUnitRulesModule,
   ],
   controllers: [PurchaseOrdersController, PackingReceiptsController, PackingReceiptsReportController],
   providers: [PurchaseOrdersService, PackingReceiptsService, PurchaseOrderDocumentService, PriceReferenceService],

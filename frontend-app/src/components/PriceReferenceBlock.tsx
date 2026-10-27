@@ -7,11 +7,36 @@ export interface PriceReferenceValue {
   note: string | null;
 }
 
+// PR-204: 후보 0건이고 다른 경고(종류 미지정/단위 불일치)가 이미 떠 있지 않을 때만 — 빈
+// 입력칸만 남아 "참고단가가 안 보인다"로 오해되지 않게 안내한다. 기존 경고가 있으면 그것이
+// 우선이라 이 안내는 숨긴다. 순수 함수로 분리한 이유: 이 컴포넌트는 비동기 fetch로 state를
+// 채우기 때문에(getPriceReference) renderToStaticMarkup 동기 렌더 테스트로는 분기를 검증할
+// 수 없다(PriceReferenceBlockLabels.test.tsx의 기존 제약과 동일) — 분기 조건만 따로 떼어
+// 합성 입력으로 테스트한다.
+export function shouldShowNoMatchNotice(result: PriceReferenceResult | null): boolean {
+  return !!result && result.candidates.length === 0 && !result.warning && !result.unitMismatchWarning;
+}
+
+// PR-188R: PR-188의 "미도 브랜드 아님"(result.note)과 PR-204의 "단가표에서 못 찾음"
+// (shouldShowNoMatchNotice) 안내가 같은 자리를 차지해 둘 다 뜰 수 있었다 — note가 더
+// 구체적인 이유이므로 note가 있으면 그것만, note가 없을 때만 PR-204 문구로 넘어간다
+// (두 안내가 동시에 뜨지 않는다). 종류 미지정·단위 불일치 경고는 그 위에서 이미 우선
+// 처리되므로(shouldShowNoMatchNotice가 그 경우 false) 여기서는 신경 쓰지 않는다.
+export function noMatchNoticeText(result: PriceReferenceResult | null, itemName?: string | null): string | null {
+  if (result?.note) return result.note;
+  if (shouldShowNoMatchNotice(result)) {
+    return `단가표에서 이 자재와 맞는 항목을 찾지 못했습니다${itemName ? `(자재명: ${itemName})` : ''}. 단가는 직접 입력하세요.`;
+  }
+  return null;
+}
+
 // PR-185 C: 발주 폼 "단가표 참고(USD)" 블록 — 브랜드 전용가 → 미도 단가표 순 후보를 보여주고,
 // suggested가 있으면 미리 채우되 "확인 필요" 배지를 단다. 자동으로 저장하지 않는다(안전모드) —
 // 사람이 후보를 고르거나 직접 입력(MANUAL)해야 실제 값이 확정된다. KRW unitPrice와는 완전히 별개.
 export const PriceReferenceBlock: React.FC<{
   itemId: number | null;
+  // PR-204: 후보가 0건일 때 안내 문구에 자재명을 보여준다(표시용일 뿐, 매칭 로직에는 안 씀).
+  itemName?: string | null;
   styleNo?: string | null;
   brandName?: string | null;
   lineUnit?: string | null;
@@ -22,7 +47,7 @@ export const PriceReferenceBlock: React.FC<{
   // 올려준다 — 발주 폼의 "수량 (콘)" 라벨이 스타일 미연결 트랙에서도 이 값을 따를 수 있게.
   // 수량을 자동으로 채우지는 않는다(라벨 표시만).
   onPackagingUnitLabel?: (label: string | null) => void;
-}> = ({ itemId, styleNo, brandName, lineUnit, materialSubType, value, onChange, onPackagingUnitLabel }) => {
+}> = ({ itemId, itemName, styleNo, brandName, lineUnit, materialSubType, value, onChange, onPackagingUnitLabel }) => {
   const [result, setResult] = useState<PriceReferenceResult | null>(null);
   const [touched, setTouched] = useState(false);
 
@@ -81,9 +106,10 @@ export const PriceReferenceBlock: React.FC<{
         <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">{result.warning}</p>
       )}
       {/* PR-188: 미도 브랜드가 아니거나 브랜드를 모르면 단가표 후보를 아예 안 보여주고 안내만
-          — 입력칸은 그대로 열려 있어 수동 입력은 가능하다. */}
-      {result?.note && (
-        <p className="text-xs text-gray-500 bg-gray-50 rounded px-2 py-1">{result.note}</p>
+          — 입력칸은 그대로 열려 있어 수동 입력은 가능하다. PR-188R: note가 있으면 그것만
+          보여주고, 없을 때만 PR-204의 "단가표에서 못 찾음" 문구로 넘어간다(동시에 뜨지 않음). */}
+      {noMatchNoticeText(result, itemName) && (
+        <p className="text-xs text-gray-500 bg-gray-50 rounded px-2 py-1">{noMatchNoticeText(result, itemName)}</p>
       )}
       {result && result.candidates.length > 1 && (
         <ul className="text-xs space-y-1">

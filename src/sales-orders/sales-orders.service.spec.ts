@@ -36,6 +36,43 @@ describe('SalesOrdersService', () => {
     expect(service).toBeDefined();
   });
 
+  // PR-200: VisionService는 DB에 접근하지 않으므로 SalesOrdersService가 자재/공급업체/
+  // 스타일번호 목록을 모아 context로 넘긴다. DB 조회가 실패해도(예: 레포지토리 미구성)
+  // 분석 자체는 계속돼야 한다(안전장치가 없어도 기존 분석 동작은 유지).
+  describe('analyzeImage - PR-200 안전장치 컨텍스트', () => {
+    it('Item/Supplier/MasterStyle 이름 목록을 모아 VisionService에 context로 넘긴다', async () => {
+      const repos: Record<string, { find: jest.Mock }> = {
+        items: { find: jest.fn().mockResolvedValue([{ name: '코아사' }]) },
+        suppliers: { find: jest.fn().mockResolvedValue([{ name: '르카이' }]) },
+        styles: { find: jest.fn().mockResolvedValue([{ styleNo: 'MB00AAA000Z' }]) },
+      };
+      mockDataSource.getRepository.mockImplementation((entity: any) => {
+        if (entity.name === 'Item') return repos.items;
+        if (entity.name === 'Supplier') return repos.suppliers;
+        return repos.styles;
+      });
+      mockVisionService.analyzeSalesOrder.mockResolvedValue({
+        results: [], usage: { pageCount: 0, promptTokens: 0, outputTokens: 0 }, isMock: true, modelUsed: null, fallbackUsed: false,
+      });
+
+      await service.analyzeImage({} as any, 1);
+
+      expect(mockVisionService.analyzeSalesOrder).toHaveBeenCalledWith({}, {
+        masterItemNames: ['코아사'], supplierNames: ['르카이'], knownStyleNos: ['MB00AAA000Z'],
+      });
+    });
+
+    it('DB 조회가 실패해도(레포지토리 없음) 분석은 빈 컨텍스트로 계속된다', async () => {
+      mockDataSource.getRepository.mockReturnValue(undefined); // find 호출 시 TypeError 발생 상황 재현
+      mockVisionService.analyzeSalesOrder.mockResolvedValue({
+        results: [], usage: { pageCount: 0, promptTokens: 0, outputTokens: 0 }, isMock: true, modelUsed: null, fallbackUsed: false,
+      });
+
+      await expect(service.analyzeImage({} as any, 1)).resolves.toBeDefined();
+      expect(mockVisionService.analyzeSalesOrder).toHaveBeenCalledWith({}, {});
+    });
+  });
+
   describe('analyzeImage - AI 사용량 과금 로그', () => {
     it('실제 Gemini 응답(pageCount > 0)이면 사용량을 로그로 남기고 과금액을 반환해야 한다', async () => {
       mockVisionService.analyzeSalesOrder.mockResolvedValue({
@@ -72,6 +109,49 @@ describe('SalesOrdersService', () => {
 
   // PR-168: 미도 전용 수기 CMT단가 — 검토 화면에서 사람이 확인한 overview.cmtPrice만
   // mapping-commit으로 넘어가는지(handwrittenCmtPriceCandidate는 넘어가지 않음).
+  // PR-200: commitAnalysis는 bomItems.map()에서 필드를 하나씩 직접 골라 넘긴다 — AI
+  // 후보/서버 경고 필드(itemNameCandidates, consumptionCandidates, uncertain,
+  // uncertainReason, supplierName, rawItemName, warnings)는 그 목록에 없으므로 저장
+  // 경로로 넘어가지 않는다. 회귀 방지용으로 명시적으로 확인한다.
+  describe('commitAnalysis - PR-200 후보/경고 필드가 저장 경로로 안 넘어가는지', () => {
+    const mockMasterStyleRepo = { findOne: jest.fn() };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === Contract ? mockContractRepo : mockMasterStyleRepo,
+      );
+      mockMasterStyleRepo.findOne.mockResolvedValue({ styleNo: 'S1', overview: { totalQty: 100 } });
+      mockMappingCommitService.commit.mockResolvedValue({ success: true, notices: [], warnings: [] });
+      mockSalesOrderSpecsService.save.mockResolvedValue({ id: 1 });
+    });
+
+    it('itemNameCandidates/consumptionCandidates/uncertain/supplierName/rawItemName/warnings는 commit payload에 없다', async () => {
+      await service.commitAnalysis({
+        overview: {
+          styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남',
+          buyer: null, totalQty: 100, targetRdd: null, documentDate: null,
+          rawStyleNo: 's1', warnings: [{ code: 'STYLE_NO_CASE_NORMALIZED', message: 'x' }],
+        },
+        bomItems: [{
+          category: '겉감', itemName: 'KL-R114', spec: null, colorCode: null, consumption: 1.2, requiredQty: null, supplier: null, remarks: null,
+          itemNameCandidates: ['KL-R114', 'KL-R115'], consumptionCandidates: [1.2, 1.3], uncertain: true, uncertainReason: '손글씨 흐림',
+          supplierName: '르카이', rawItemName: '르카이)KL-R114', warnings: [{ code: 'UNKNOWN_NAME', message: 'x' }],
+        }],
+        sizeSpecs: [], workNotes: null,
+      } as any);
+
+      const payload = mockMappingCommitService.commit.mock.calls[0][0];
+      expect(payload.overviewData.rawStyleNo).toBeUndefined();
+      expect(payload.overviewData.warnings).toBeUndefined();
+      const bomItem = payload.bomItems[0];
+      expect(bomItem).toEqual({
+        category: '겉감', itemName: 'KL-R114', spec: undefined, colorCode: undefined, consumption: 1.2,
+        requiredQty: undefined, supplier: undefined, remarks: undefined, threadType: undefined, tapeType: undefined,
+      });
+    });
+  });
+
   describe('commitAnalysis - CMT단가 전달 (PR-168)', () => {
     const mockMasterStyleRepo = { findOne: jest.fn() };
     const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };

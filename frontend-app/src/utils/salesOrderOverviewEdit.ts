@@ -59,7 +59,19 @@ export function updateOverviewField<K extends keyof AiOverview>(
   field: K,
   value: AiOverview[K],
 ): AiSalesOrderResult[] {
-  return results.map((r, i) => (i === index ? { ...r, overview: { ...r.overview, [field]: value } } : r));
+  return results.map((r, i) => {
+    if (i !== index) return r;
+    const overview = { ...r.overview, [field]: value };
+    // PR-190: 사용자가 납기를 직접 고치면 "연도 자동 보정" 안내는 더 이상 맞지 않으므로 숨긴다
+    // (원래 인식값 비교 대상이 사라졌기 때문 — 서버가 다시 계산해 주기 전까지는 보여줄 근거가 없다).
+    if (field === 'targetRdd') {
+      overview.targetRddYearAdjusted = false;
+      overview.targetRddOriginal = null;
+      overview.targetRddAdjustBasis = null;
+      overview.targetRddNotice = 'none';
+    }
+    return { ...r, overview };
+  });
 }
 
 // PR-181: 미도 작지 수기 CMT단가 — AI 후보를 "사용" 버튼 없이 입력란에 초안으로 미리

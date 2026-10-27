@@ -19,6 +19,14 @@ export interface AiOverview {
   // "납기가 작성일/오늘보다 이르거나 같아 의심스러운지" 플래그.
   documentDate: string | null;
   targetRddSuspicious?: boolean;
+  // PR-190: 서버가 계산해 내려주는 값 — 납기에 연도가 없어 작성일보다 이른 날짜로
+  // 인식됐을 때 다음 해로 자동 보정했는지와, 보정했다면 원래 인식값(화면 안내용).
+  targetRddYearAdjusted?: boolean;
+  targetRddOriginal?: string | null;
+  // PR-201: 보정 기준(작성일 또는 오늘) — 화면 안내 문구를 기준에 맞게 바꾸는 데만 쓴다.
+  targetRddAdjustBasis?: 'DOCUMENT_DATE' | 'TODAY' | null;
+  // PR-201d: 값을 바꿨는지와 별개로 화면에 안내를 띄울지(서버 계산).
+  targetRddNotice?: 'none' | 'past-kept' | 'bumped-today' | 'bumped-written';
   // PR-168: 미도 전용 — 작지 상단 수기 CMT단가. candidate는 AI 후보(읽기전용 참고용,
   // 미도가 아니면 항상 null), cmtPrice는 사람이 확인/수정한 최종값(이것만 저장된다).
   handwrittenCmtPriceCandidate?: number | null;
@@ -27,6 +35,18 @@ export interface AiOverview {
   cmtPrice?: number | null;
   // PR-181: cmtPrice의 근거 코멘트 — 저장되는 값(계약 cmtPriceNote까지 전달됨).
   cmtPriceNote?: string | null;
+  // PR-200: 서버가 계산해 내려주는 값(AI가 채우는 필드 아님) — 스타일번호가 대소문자만
+  // 틀려 서버가 대문자로 정리했을 때만 원문이 담긴다.
+  rawStyleNo?: string | null;
+  // PR-200: 서버 후처리 경고(저장 대상 아님, 검토 화면 표시용).
+  warnings?: AiWarning[] | null;
+}
+
+// PR-200: 작지 AI 판독 안전장치 — 서버 후처리 경고 하나(code/message + 선택적 후보값).
+export interface AiWarning {
+  code: string;
+  message: string;
+  suggestions?: string[];
 }
 
 export interface AiBomItem {
@@ -43,6 +63,17 @@ export interface AiBomItem {
   // 사람이 검토 화면에서 확정한 최종값(저장 대상). AI가 직접 채우지 않는다.
   threadType?: string | null;
   tapeType?: string | null;
+  // PR-200: 전부 AI 후보/서버 후처리 필드다 — commitSalesOrderAnalysis로 그대로
+  // 보내도 서버 commitAnalysis는 이 필드들을 읽지 않는다(저장 대상 아님).
+  itemNameCandidates?: string[] | null;
+  consumptionCandidates?: number[] | null;
+  uncertain?: boolean | null;
+  uncertainReason?: string | null;
+  // "공급사)자재명"을 서버가 분리했을 때만 채워진다(형식 해석). 화면에서 사람이
+  // 확인하면 기존 supplier 칸으로 복사해야 저장된다(이 필드 자체는 저장 대상 아님).
+  supplierName?: string | null;
+  rawItemName?: string | null;
+  warnings?: AiWarning[] | null;
 }
 
 export interface AiSizeSpecRow {
@@ -61,11 +92,14 @@ export interface AiSalesOrderResult {
   workNotes: string | null;
 }
 
+// PR-192: 백엔드가 240초 한도로 재시도·폴백을 끝내므로, 그보다 약간 긴 270초로 맞춰
+// 둔다(전역 axiosInstance 기본값에는 timeout이 없다 — 다른 API는 건드리지 않음).
 export const uploadSalesOrderImage = (file: File): Promise<any> => {
   const formData = new FormData();
   formData.append('file', file);
   return apiClient.post('/sales-orders/upload-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 270_000,
   });
 };
 export const commitSalesOrderAnalysis = (result: AiSalesOrderResult): Promise<any> =>

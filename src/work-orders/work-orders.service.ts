@@ -9,12 +9,22 @@ import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
 import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
-import { calculateMaterialRequirements } from './utils/material-requirements.util';
+import { calculateMaterialRequirements, MaterialRequirementRow } from './utils/material-requirements.util';
 import { pickActiveBom } from '../boms/utils/active-bom.util';
 import { StatusCodesService } from '../status-codes/status-codes.service';
 import { MaterialPackagingUnitRulesService } from '../material-packaging-unit-rules/material-packaging-unit-rules.service';
 
 const STATUS_DOMAIN = 'WORK_ORDER';
+
+// PR-194: 다품번 일괄발주 1단계(GET /work-orders/multi-style-requirements) 응답 — 스타일별 1건.
+export interface MultiStyleRequirementResult {
+  styleNo: string;
+  styleName: string | null;
+  totalQty: number;
+  targetRdd: string | null;
+  rows: MaterialRequirementRow[];
+  error?: string;
+}
 
 const EMPTY_REQUIREMENTS = {
   rows: [] as ReturnType<typeof calculateMaterialRequirements>,
@@ -251,6 +261,37 @@ export class WorkOrdersService {
     };
   }
 
+  // PR-194: 다품번 일괄발주 1단계 — 스타일 여러 개의 소요량을 한 번에 조회한다. 스타일마다
+  // getStyleRequirements()와 완전히 같은 계산(expandStyleRequirements → calculateMaterialRequirements)을
+  // 그대로 재사용한다(새 계산식 금지). 한 스타일이 없거나 BOM이 없어도 그 스타일만 error를
+  // 달아 반환하고 나머지는 정상 처리한다(전체 실패 금지 — 화면에서 스타일별로 안내).
+  async getMultiStyleRequirements(styleNos: string[]): Promise<MultiStyleRequirementResult[]> {
+    const results: MultiStyleRequirementResult[] = [];
+    for (const styleNo of styleNos) {
+      try {
+        const style = await this.dataSource.manager.findOne(MasterStyle, { where: { styleNo }, relations: ['overview'] });
+        if (!style) {
+          results.push({ styleNo, styleName: null, totalQty: 0, targetRdd: null, rows: [], error: '존재하지 않는 스타일번호입니다.' });
+          continue;
+        }
+        const styleName = style.overview?.styleName ?? null;
+        const totalQty = Number(style.overview?.totalQty) || 0;
+        const targetRdd = style.overview?.targetRdd
+          ? new Date(style.overview.targetRdd).toISOString().slice(0, 10)
+          : null;
+        const requirements = await this.getStyleRequirements(styleNo);
+        if (requirements.reason === 'NO_BOM') {
+          results.push({ styleNo, styleName, totalQty, targetRdd, rows: [], error: 'BOM이 없습니다.' });
+          continue;
+        }
+        results.push({ styleNo, styleName, totalQty, targetRdd, rows: requirements.rows });
+      } catch (err) {
+        results.push({ styleNo, styleName: null, totalQty: 0, targetRdd: null, rows: [], error: (err as Error).message || '조회 중 오류가 발생했습니다.' });
+      }
+    }
+    return results;
+  }
+
   // BOM 전개 공용 로직: 스타일의 활성 BOM(pickActiveBom) → 자재별 필요 총수량(consumption × targetQuantity) →
   // 이미 발주한 수량(취소 제외 PENDING+RECEIVED)과 대조한 부족분.
   private async expandStyleRequirements(styleNo: string, targetQuantity: number) {
@@ -260,7 +301,7 @@ export class WorkOrdersService {
     const latest = pickActiveBom(boms);
     if (!latest) return { reason: 'NO_BOM' as const, ...EMPTY_REQUIREMENTS };
 
-    const bom = await manager.findOne(Bom, { where: { id: latest.id }, relations: ['items', 'items.material'] });
+    const bom = await manager.findOne(Bom, { where: { id: latest.id }, relations: ['items', 'items.material', 'items.material.category'] });
     const items = bom?.items ?? [];
 
     const itemIds = [...new Set(items.map((i) => i.material?.id).filter((v): v is number => typeof v === 'number'))];

@@ -1,4 +1,4 @@
-import { effectiveSubType, looksLikeThreadOrTape, buildThreadTapeSuggestion } from './packaging-subtype.util';
+import { effectiveSubType, looksLikeThreadOrTape, buildThreadTapeSuggestion, materialSubTypeLabel } from './packaging-subtype.util';
 
 const rules = [
   { materialSubType: 'COA_SA', displayName: '코아사' },
@@ -80,5 +80,22 @@ describe('buildThreadTapeSuggestion', () => {
   it('빈 이름은 추천하지 않는다', () => {
     expect(buildThreadTapeSuggestion('', rules)).toBeNull();
     expect(buildThreadTapeSuggestion(null, rules)).toBeNull();
+  });
+});
+
+// PR-194: 다품번 일괄발주 화면에서 품목군 아래 종류 한 줄을 보여줄 때 쓰는 코드→라벨 변환.
+describe('materialSubTypeLabel', () => {
+  it('규칙에 있는 코드는 displayName으로 바꾼다', () => {
+    expect(materialSubTypeLabel('COA_SA', rules)).toBe('코아사');
+    expect(materialSubTypeLabel('DADE', rules)).toBe('다데');
+  });
+
+  it('규칙에 없는 코드는(데이터 누락) 추측하지 않고 코드 자체를 그대로 돌려준다', () => {
+    expect(materialSubTypeLabel('UNKNOWN_CODE', rules)).toBe('UNKNOWN_CODE');
+  });
+
+  it('null/undefined는 null이다', () => {
+    expect(materialSubTypeLabel(null, rules)).toBeNull();
+    expect(materialSubTypeLabel(undefined, rules)).toBeNull();
   });
 });

@@ -132,7 +132,8 @@ export const ExportShipmentManager: React.FC = () => {
         consigneeInfo: defaults.consigneeInfo ?? prev.consigneeInfo,
         portOfLoading: defaults.portOfLoading ?? prev.portOfLoading,
         finalDestination: defaults.finalDestination ?? prev.finalDestination,
-        carrier: defaults.carrier ?? prev.carrier,
+        // PR-193: Carrier는 선적 건마다 바뀌는 값이라 기본값에서 가져오지 않는다 —
+        // 새 선적 생성 폼은 항상 빈칸에서 시작(건별 헤더 입력칸 자체는 유지).
       }));
     } catch {
       // 기본값을 못 불러와도 생성 폼 자체는 빈 채로 계속 쓸 수 있어야 하므로 무시한다.

@@ -43,6 +43,26 @@ describe('updateOverviewField (PR-158)', () => {
     const next = updateOverviewField(results, 0, 'buyer', null);
     expect(next[0].overview.buyer).toBeNull();
   });
+
+  // PR-190: 사용자가 납기(targetRdd)를 직접 고치면 "연도 자동 보정" 안내는 더 이상 맞지
+  // 않으므로(원래 인식값 비교 대상이 사라짐) 함께 지운다. 다른 필드를 고칠 때는 그대로 둔다.
+  it('targetRdd를 직접 수정하면 targetRddYearAdjusted/targetRddOriginal/targetRddNotice가 함께 지워진다', () => {
+    const base = buildResult('A');
+    const results = [{ ...base, overview: { ...base.overview, targetRdd: '2027-02-17', targetRddYearAdjusted: true, targetRddOriginal: '2026-02-17', targetRddNotice: 'bumped-today' as const } }];
+    const next = updateOverviewField(results, 0, 'targetRdd', '2027-03-01');
+    expect(next[0].overview.targetRdd).toBe('2027-03-01');
+    expect(next[0].overview.targetRddYearAdjusted).toBe(false);
+    expect(next[0].overview.targetRddOriginal).toBeNull();
+    expect(next[0].overview.targetRddNotice).toBe('none');
+  });
+
+  it('targetRdd가 아닌 다른 필드를 수정할 때는 targetRddYearAdjusted/targetRddOriginal을 건드리지 않는다', () => {
+    const base = buildResult('A');
+    const results = [{ ...base, overview: { ...base.overview, targetRdd: '2027-02-17', targetRddYearAdjusted: true, targetRddOriginal: '2026-02-17' } }];
+    const next = updateOverviewField(results, 0, 'buyer', '새 바이어');
+    expect(next[0].overview.targetRddYearAdjusted).toBe(true);
+    expect(next[0].overview.targetRddOriginal).toBe('2026-02-17');
+  });
 });
 
 

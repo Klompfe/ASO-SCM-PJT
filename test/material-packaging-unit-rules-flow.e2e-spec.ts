@@ -7,19 +7,40 @@ process.env.DB_DATABASE = TEST_DB_PATH;
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
 import { MaterialPackagingUnitRulesService } from '../src/material-packaging-unit-rules/material-packaging-unit-rules.service';
 import { calculateConePriceUsd } from '../src/boms/utils/thread-cone-price.util';
+import { User, UserRole } from '../src/users/entities/user.entity';
 
 // PR-175: 자재 포장단위 룩업(DB) — CRUD, 중복 방지, 실/테이프(50m/롤) 환산, BOM 테이프 종류 저장.
 // sqlite e2e는 synchronize로 스키마를 만들므로 마이그레이션의 시드 행은 없다 — 여기서는
 // 시드와 같은 값을 직접 등록해 룩업 동작을 검증한다(시드 자체 값은 마이그레이션 파일에서 확인).
-describe('자재 포장단위 룩업 + 테이프 종류 회귀 테스트 (PR-175)', () => {
+// PR-203: 등록/수정/삭제가 MANAGER/ADMIN 전용으로 바뀌어, 이 describe 블록의 "규칙 CRUD"는
+// 처음부터 MANAGER 토큰을 쓴다(status-codes-flow.e2e-spec.ts와 동일한 설계).
+describe('자재 포장단위 룩업 + 테이프 종류 회귀 테스트 (PR-175, PR-203)', () => {
   let app: INestApplication;
+  let dataSource: DataSource;
   let token: string;
+  let userToken: string;
+
+  const registerAndLogin = async (email: string, role?: UserRole): Promise<string> => {
+    const password = 'password123!';
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email, password, name: 'Packaging Unit E2E' });
+    if (role) {
+      await dataSource.getRepository(User).update({ email }, { role });
+    }
+    const loginRes = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email, password })
+      .expect(201);
+    return loginRes.body.data.accessToken;
+  };
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -28,17 +49,11 @@ describe('자재 포장단위 룩업 + 테이프 종류 회귀 테스트 (PR-175
     app.useGlobalFilters(new AllExceptionsFilter());
     app.useGlobalInterceptors(new TransformInterceptor());
     await app.init();
+    dataSource = app.get(DataSource);
 
-    const email = `pkg-unit-e2e-${Date.now()}@test.com`;
-    await request(app.getHttpServer())
-      .post('/auth/register')
-      .send({ email, password: 'password123!', name: 'Packaging Unit E2E' });
-    token = (
-      await request(app.getHttpServer())
-        .post('/auth/login')
-        .send({ email, password: 'password123!' })
-        .expect(201)
-    ).body.data.accessToken;
+    const stamp = Date.now();
+    token = await registerAndLogin(`pkg-unit-e2e-manager-${stamp}@test.com`, UserRole.MANAGER);
+    userToken = await registerAndLogin(`pkg-unit-e2e-user-${stamp}@test.com`);
   });
 
   afterAll(async () => {
@@ -46,7 +61,7 @@ describe('자재 포장단위 룩업 + 테이프 종류 회귀 테스트 (PR-175
     if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
   });
 
-  const auth = (r: request.Test) => r.set('Authorization', `Bearer ${token}`);
+  const auth = (r: request.Test, authToken = token) => r.set('Authorization', `Bearer ${authToken}`);
 
   describe('규칙 CRUD', () => {
     it('등록 → 목록 조회 → 수정 → 삭제가 동작한다', async () => {
@@ -73,6 +88,29 @@ describe('자재 포장단위 룩업 + 테이프 종류 회귀 테스트 (PR-175
       await auth(request(app.getHttpServer()).post('/material-packaging-unit-rules'))
         .send({ materialSubType: 'DUP_TEST', displayName: '중복B', packagingUnitLabel: '롤', unitLengthM: 50 })
         .expect(400);
+    });
+  });
+
+  describe('권한: 조회는 USER도 가능, 등록/수정/삭제는 MANAGER/ADMIN만 (PR-203)', () => {
+    it('GET은 일반 USER로도 된다', async () => {
+      await auth(request(app.getHttpServer()).get('/material-packaging-unit-rules'), userToken).expect(200);
+    });
+
+    it('POST/PATCH/DELETE는 USER면 403', async () => {
+      await auth(request(app.getHttpServer()).post('/material-packaging-unit-rules'), userToken)
+        .send({ materialSubType: 'RBAC_USER', displayName: 'X', packagingUnitLabel: '롤', unitLengthM: 50 })
+        .expect(403);
+
+      const existing = (
+        await auth(request(app.getHttpServer()).post('/material-packaging-unit-rules'))
+          .send({ materialSubType: `RBAC_MGR_${Date.now()}`, displayName: 'X', packagingUnitLabel: '롤', unitLengthM: 50 })
+          .expect(201)
+      ).body.data;
+
+      await auth(request(app.getHttpServer()).patch(`/material-packaging-unit-rules/${existing.id}`), userToken)
+        .send({ displayName: 'hacked' })
+        .expect(403);
+      await auth(request(app.getHttpServer()).delete(`/material-packaging-unit-rules/${existing.id}`), userToken).expect(403);
     });
   });
 

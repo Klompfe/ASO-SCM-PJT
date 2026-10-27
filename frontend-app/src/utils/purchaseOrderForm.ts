@@ -82,6 +82,32 @@ export function buildEditableOrderByItem<T extends { id: number; itemId: number;
   return map;
 }
 
+// PR-191: "이 스타일로 발주한 적 없는데 발주된 것처럼 보이는" 문제 — 오바사/다데 같은
+// 공용 자재는 다른 스타일(또는 미연결)로 낸 미입고 발주가 있으면 buildEditableOrderByItem이
+// "수정하기"로 잘못 판정했다. 부족분 표/일괄발주는 **이 스타일에 연결된** 미입고 발주만
+// "수정하기"로 봐야 하므로, 호출하는 쪽(StyleShortagePanel)이 미리 styleNo로 필터링한
+// 배열을 buildEditableOrderByItem에 넘긴다(buildEditableOrderByItem 자체는 바꾸지 않음 —
+// ItemsManager.tsx의 자재 기준 "수정하기"는 스타일 개념이 없어 그대로 전체 배열을 쓴다).
+export const filterOrdersByStyleNo = <T extends { styleNo?: string | null }>(orders: T[], styleNo: string): T[] =>
+  orders.filter((o) => o.styleNo === styleNo);
+
+// PR-191: 다른 스타일(스타일 있음, 현재 스타일과 다름)의 미입고 발주 건수 — "수정하기"는
+// 아니지만 참고로 알려준다. 스타일 미연결(styleNo 없음) 발주는 서버가 이미 계산해 주는
+// unlinkedOrderedQty/"미연결 발주 — 스타일을 연결하세요" 안내로 따로 표시되므로 여기서는
+// 세지 않는다(중복 안내 방지).
+export function countOtherStylePendingByItem<T extends { itemId: number; status: string; styleNo?: string | null }>(
+  orders: T[],
+  currentStyleNo: string,
+): Map<number, number> {
+  const map = new Map<number, number>();
+  for (const o of orders) {
+    if (o.status !== 'PENDING') continue;
+    if (!o.styleNo || o.styleNo === currentStyleNo) continue;
+    map.set(o.itemId, (map.get(o.itemId) ?? 0) + 1);
+  }
+  return map;
+}
+
 // PR-176: 색상/사이즈 라인 합계(정수 수량). 라인이 없으면 0.
 export const sumPurchaseOrderLines = (lines: { qty: number }[]): number =>
   lines.reduce((sum, l) => sum + (Number.isFinite(Number(l.qty)) ? Number(l.qty) : 0), 0);

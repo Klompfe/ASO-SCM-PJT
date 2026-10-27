@@ -53,3 +53,8 @@ export const getMasterStyles = (filter?: FindMasterStylesFilter): Promise<any> =
 export const createMasterStyle = (data: CreateMasterStyle): Promise<any> => apiClient.post('/master-styles', data);
 export const updateMasterStyle = (styleNo: string, data: UpdateMasterStyle): Promise<any> =>
   apiClient.patch(`/master-styles/${encodeURIComponent(styleNo)}`, data);
+
+// PR-198: 작지 AI가 읽은 스타일번호와 "끝 글자만 다른" 기존 스타일을 찾는다(읽기 전용,
+// 자동 변경 없음).
+export const getSimilarMasterStyles = (styleNo: string): Promise<{ styleNo: string }[]> =>
+  apiClient.get('/master-styles/similar', { params: { styleNo } });

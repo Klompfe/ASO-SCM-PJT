@@ -24,6 +24,33 @@ export class AiOverviewDto {
   @IsBoolean()
   targetRddSuspicious?: boolean;
 
+  // PR-190: 서버가 계산해 내려주는 값(AI가 채우는 필드 아님) — 납기에 연도가 없어
+  // 작성일보다 이른 날짜로 인식됐을 때 다음 해로 자동 보정했는지와, 보정했다면 원래
+  // 인식값(화면 안내용). commitAnalysis()는 targetRddSuspicious와 마찬가지로 이 두
+  // 필드를 읽지 않는다(targetRdd 자체만 저장).
+  @ApiPropertyOptional({ description: '납기 연도를 다음 해로 자동 보정했는지(서버 계산)' })
+  @IsOptional()
+  @IsBoolean()
+  targetRddYearAdjusted?: boolean;
+
+  @ApiPropertyOptional({ description: '연도 보정 전 원래 인식값(YYYY-MM-DD, 보정했을 때만, 서버 계산)' })
+  @IsOptional()
+  @IsString()
+  targetRddOriginal?: string | null;
+
+  // PR-201: 보정 기준(작성일 또는 오늘) — 화면 안내 문구를 기준에 맞게 바꾸는 데만 쓴다.
+  @ApiPropertyOptional({ description: '연도 보정 기준(DOCUMENT_DATE|TODAY, 보정했을 때만, 서버 계산)' })
+  @IsOptional()
+  @IsString()
+  targetRddAdjustBasis?: 'DOCUMENT_DATE' | 'TODAY' | null;
+
+  // PR-201d: 값을 바꿨는지와 별개로 화면에 안내를 띄울지(서버 계산) — 'past-kept'면 납기가
+  // 오늘보다 과거인데 값은 그대로 둔 경우(보정 시도가 실패해 과거로 남은 경우 포함).
+  @ApiPropertyOptional({ description: '납기 안내 종류(none|past-kept|bumped-today|bumped-written, 서버 계산)' })
+  @IsOptional()
+  @IsString()
+  targetRddNotice?: 'none' | 'past-kept' | 'bumped-today' | 'bumped-written';
+
   // PR-168: 미도 전용 — 작업지시서 이미지 상단에 수기로 적힌 CMT단가 숫자(AI 후보일
   // 뿐, 그대로 저장되지 않는다). 미도가 아닌 바이어 건은 vision.service.ts가 결정적으로
   // null로 덮어쓴다(바이어 인식 자체를 AI 판단에만 맡기지 않음, PR-158과 동일한 원칙).
@@ -55,6 +82,21 @@ export class AiOverviewDto {
   @IsOptional()
   @IsString()
   cmtPriceNote?: string | null;
+
+  // PR-200: 서버가 계산해 내려주는 값(AI가 채우는 필드 아님) — 스타일번호가 대소문자만
+  // 틀려 서버가 대문자로 정리했을 때만 원문을 담는다. commitAnalysis는 읽지 않는다
+  // (styleNo 자체만 저장).
+  @ApiPropertyOptional({ description: '스타일번호 대소문자 정리 전 원문(정리했을 때만, 서버 계산)' })
+  @IsOptional()
+  @IsString()
+  rawStyleNo?: string | null;
+
+  // PR-200: 서버 후처리 경고(스타일번호 형식·작성일 의심 등) — 저장 대상이 아니다
+  // (commitAnalysis는 읽지 않는다, 검토 화면 표시용).
+  @ApiPropertyOptional({ description: '서버 후처리 경고 목록(저장 대상 아님)', type: [Object] })
+  @IsOptional()
+  @IsArray()
+  warnings?: { code: string; message: string; suggestions?: string[] }[] | null;
 }
 
 export class AiBomItemDto {
@@ -87,6 +129,48 @@ export class AiBomItemDto {
   @IsOptional()
   @IsString()
   tapeType?: string | null;
+
+  // PR-200: 아래부터는 전부 AI 후보/서버 후처리 필드다 — commitAnalysis는 하나도 읽지
+  // 않는다(저장 대상은 사람이 확정한 itemName/consumption 등 기존 필드뿐).
+  @ApiPropertyOptional({ description: '자재명 후보(한 줄을 여러 이름으로 중복 출력하는 대신 여기로, 확신 없을 때만)' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  itemNameCandidates?: string[] | null;
+
+  @ApiPropertyOptional({ description: '요척 후보(확신 없을 때만)' })
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  consumptionCandidates?: number[] | null;
+
+  @ApiPropertyOptional({ description: 'AI가 이 행의 값을 확신하지 못했는지' })
+  @IsOptional()
+  @IsBoolean()
+  uncertain?: boolean | null;
+
+  @ApiPropertyOptional({ description: '불확실한 이유(AI 서술)' })
+  @IsOptional()
+  @IsString()
+  uncertainReason?: string | null;
+
+  // "공급사)자재명"을 서버가 분리했을 때만 채워진다(형식 해석 — vision.service.ts
+  // applyGuardrails 참고). 기존 supplier 필드와는 별도이며 저장 경로로 넘어가지 않는다 —
+  // 사람이 화면에서 확인하면 프런트가 이 값을 기존 supplier 칸으로 복사해야 저장된다.
+  @ApiPropertyOptional({ description: '"공급사)자재명"에서 분리한 공급사명 후보(저장 대상 아님, 확인 화면용)' })
+  @IsOptional()
+  @IsString()
+  supplierName?: string | null;
+
+  @ApiPropertyOptional({ description: '공급사/자재명 분리 전 원문(분리했을 때만, 서버 계산)' })
+  @IsOptional()
+  @IsString()
+  rawItemName?: string | null;
+
+  @ApiPropertyOptional({ description: '서버 후처리 경고 목록(저장 대상 아님)', type: [Object] })
+  @IsOptional()
+  @IsArray()
+  warnings?: { code: string; message: string; suggestions?: string[] }[] | null;
 }
 
 // 사이즈 스펙표 한 행 (부위 x 사이즈). 원본이 손글씨 분수 표기라 문자열로 둔다.

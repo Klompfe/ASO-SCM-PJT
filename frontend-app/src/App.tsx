@@ -5,10 +5,12 @@ import { WorkOrdersManager } from './components/WorkOrdersManager';
 import { StylesManager } from './components/StylesManager';
 import { OrderProgressSummary } from './components/OrderProgressSummary';
 import { ProcurementStatusReport } from './components/ProcurementStatusReport';
+import { UnlinkedPurchaseOrders } from './components/UnlinkedPurchaseOrders';
 import { SuppliersManager } from './components/SuppliersManager';
 import { BuyersManager } from './components/BuyersManager';
 import { UsersManager } from './components/UsersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
+import { MultiStyleBulkOrder } from './components/MultiStyleBulkOrder';
 import { ProductionContractsManager } from './components/ProductionContractsManager';
 import { PurchaseOrderLedgerReport } from './components/PurchaseOrderLedgerReport';
 import { PackingReceiptSummaryReport } from './components/PackingReceiptSummaryReport';
@@ -114,6 +116,26 @@ function App() {
   const isManagerOrAdmin = canManageUsers;
   // Items(자재명세) 화면에서 "발주하기"를 누르면 이 값을 채우고 Purchase Orders 탭으로 이동한다.
   const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(null);
+  // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"를 누르면 그 스타일번호를
+  // 채우고 발주관리 탭으로 이동한다(poPrefillItemId와 동일한 패턴).
+  const [poPrefillStyleNo, setPoPrefillStyleNo] = useState<string | null>(null);
+  const handleGoToPurchaseOrdersForStyle = (styleNo: string) => {
+    setPoPrefillStyleNo(styleNo);
+    setPurchaseOrdersSubTab('list');
+    setActiveTab('purchaseOrders');
+  };
+  const handleGoToUnlinkedPurchaseOrders = () => {
+    setPurchaseOrdersSubTab('unlinked');
+    setActiveTab('purchaseOrders');
+  };
+  // PR-194 보완: 발주·입고·출고 현황에서 체크한 스타일들을 다품번 일괄발주 화면에
+  // 미리 채워 넘긴다 — poPrefillStyleNo와 동일한 consume-once 패턴.
+  const [multiStylePrefillStyleNos, setMultiStylePrefillStyleNos] = useState<string[] | null>(null);
+  const handleGoToMultiStyleBulkOrder = (styleNos: string[]) => {
+    setMultiStylePrefillStyleNos(styleNos);
+    setPurchaseOrdersSubTab('multiStyleBulkOrder');
+    setActiveTab('purchaseOrders');
+  };
 
   // PR-067: 오더관리 탭 하위에 "오더 목록"/"진행현황 요약" 두 서브탭을 둔다.
   // 진행현황 요약에서 행을 클릭하면 오더 목록 서브탭으로 전환하며 해당 styleNo의
@@ -145,7 +167,7 @@ function App() {
   const [itemsSubTab, setItemsSubTab] = useState<'items' | 'bomDuplicates'>('items');
   const [workOrdersSubTab, setWorkOrdersSubTab] = useState<'list' | 'requirements'>('list');
   const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import' | 'exportPerformance'>('export');
-  const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing'>('list');
+  const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing' | 'multiStyleBulkOrder' | 'unlinked'>('list');
 
   const handleOrderItem = (itemId: number) => {
     setPoPrefillItemId(itemId);
@@ -262,7 +284,11 @@ function App() {
             ) : orderManagementSubTab === 'summary' ? (
               <OrderProgressSummary onSelectStyle={handleSelectStyleFromSummary} />
             ) : (
-              <ProcurementStatusReport onGoToPurchaseOrders={() => setActiveTab('purchaseOrders')} />
+              <ProcurementStatusReport
+                onGoToPurchaseOrders={handleGoToPurchaseOrdersForStyle}
+                onGoToUnlinkedPurchaseOrders={handleGoToUnlinkedPurchaseOrders}
+                onGoToMultiStyleBulkOrder={handleGoToMultiStyleBulkOrder}
+              />
             )}
           </div>
         );
@@ -307,13 +333,33 @@ function App() {
                 className={`px-3 py-2 text-sm font-medium ${purchaseOrdersSubTab === 'packing' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                 onClick={() => setPurchaseOrdersSubTab('packing')}
               >포장내역 집계</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${purchaseOrdersSubTab === 'multiStyleBulkOrder' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setPurchaseOrdersSubTab('multiStyleBulkOrder')}
+              >다품번 일괄발주</button>
+              <button
+                className={`px-3 py-2 text-sm font-medium ${purchaseOrdersSubTab === 'unlinked' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setPurchaseOrdersSubTab('unlinked')}
+              >미연결 발주 정리</button>
             </div>
             {purchaseOrdersSubTab === 'list' ? (
-              <PurchaseOrdersManager prefillItemId={poPrefillItemId} onPrefillConsumed={() => setPoPrefillItemId(null)} />
+              <PurchaseOrdersManager
+                prefillItemId={poPrefillItemId}
+                onPrefillConsumed={() => setPoPrefillItemId(null)}
+                prefillStyleNo={poPrefillStyleNo}
+                onStylePrefillConsumed={() => setPoPrefillStyleNo(null)}
+              />
             ) : purchaseOrdersSubTab === 'ledger' ? (
               <PurchaseOrderLedgerReport />
             ) : purchaseOrdersSubTab === 'packing' ? (
               <PackingReceiptSummaryReport />
+            ) : purchaseOrdersSubTab === 'multiStyleBulkOrder' ? (
+              <MultiStyleBulkOrder
+                prefillStyleNos={multiStylePrefillStyleNos}
+                onStyleNosPrefillConsumed={() => setMultiStylePrefillStyleNos(null)}
+              />
+            ) : purchaseOrdersSubTab === 'unlinked' ? (
+              <UnlinkedPurchaseOrders />
             ) : (
               <ProductionContractsManager />
             )}

@@ -8,7 +8,8 @@ const LENGTH_MAP = {
   OBA_SA_SKU_I_SA: 4000,
   POLY_JINUIDO: 500,
   DADE: 50,
-  AMHOL: 50,
+  // PR-202: 암홀테이프는 100M/롤이 맞다(사용자 확정값) — 50은 틀린 시드값이었다.
+  AMHOL: 100,
 };
 
 describe('calculateConePriceUsd (PR-157, PR-175 DB 룩업 전환)', () => {
@@ -28,8 +29,8 @@ describe('calculateConePriceUsd (PR-157, PR-175 DB 룩업 전환)', () => {
     expect(calculateConePriceUsd(0.0008, 'DADE', LENGTH_MAP)).toBeCloseTo(0.04, 10);
   });
 
-  it('암홀(테이프, 50m/롤): 미터단가 $0.01 × 50M = $0.5', () => {
-    expect(calculateConePriceUsd(0.01, 'AMHOL', LENGTH_MAP)).toBeCloseTo(0.5, 10);
+  it('암홀(테이프, 100m/롤): 미터단가 $0.01 × 100M = $1.0', () => {
+    expect(calculateConePriceUsd(0.01, 'AMHOL', LENGTH_MAP)).toBeCloseTo(1.0, 10);
   });
 
   it('자재 서브타입이 없으면(null/undefined) 추측하지 않고 null을 반환한다', () => {

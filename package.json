@@ -23,7 +23,10 @@
     "migration:generate": "npm run typeorm -- migration:generate -d src/data-source.ts",
     "migration:run": "npm run typeorm -- migration:run -d src/data-source.ts",
     "migration:revert": "npm run typeorm -- migration:revert -d src/data-source.ts",
-    "migration:run:prod": "typeorm migration:run -d dist/data-source.js"
+    "migration:run:prod": "typeorm migration:run -d dist/data-source.js",
+    "vision:eval": "ts-node scripts/vision-eval/cli.ts",
+    "vision:eval:test": "jest --config scripts/vision-eval/jest.config.js",
+    "vision:eval:typecheck": "tsc -p scripts/vision-eval/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

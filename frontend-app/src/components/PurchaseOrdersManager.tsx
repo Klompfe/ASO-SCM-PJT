@@ -10,6 +10,7 @@ import {
   type CreatePurchaseOrder,
   type PurchaseOrder,
   getPurchaseOrderDocument,
+  getCombinedPurchaseOrderDocuments,
   type PurchaseOrderLine,
 } from '../api/purchaseOrders.service';
 import { downloadBase64File } from '../utils/fileDownload';
@@ -22,7 +23,7 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
 import {
-  pickLatestOrderDefaults, resolveAutofill, buildEditableOrderByItem, isUnitPriceRequired,
+  pickLatestOrderDefaults, resolveAutofill, isUnitPriceRequired,
   sumPurchaseOrderLines, suggestStyleLinkedQuantity, suggestUnlinkedQuantity, trackBadgeLabel, isQuantityFilled, type SupplierRef,
 } from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
@@ -42,9 +43,13 @@ const emptyPriceRef: PriceReferenceValue = { usd: null, source: null, note: null
 interface PurchaseOrdersManagerProps {
   prefillItemId?: number | null;
   onPrefillConsumed?: () => void;
+  // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"로 넘어온 경우 — 그 스타일의
+  // 부족분 표를 바로 열고(기존 styleSearch 경로 재사용) 발주 목록도 그 스타일로 필터한다.
+  prefillStyleNo?: string | null;
+  onStylePrefillConsumed?: () => void;
 }
 
-export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ prefillItemId, onPrefillConsumed }) => {
+export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ prefillItemId, onPrefillConsumed, prefillStyleNo, onStylePrefillConsumed }) => {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +91,12 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [filterItem, setFilterItem] = useState<ItemRef | null>(null);
   // PR-185 A: 목록 트랙 필터 — 전체 / 스타일 연결 / 스타일 미연결.
   const [listTrack, setListTrack] = useState<'ALL' | 'STYLE' | 'ITEM_ONLY'>('ALL');
+  // PR-194: 발주 목록에서도 합본 발주서를 다시 받을 수 있게(최초 생성 때와 같은 호출 재사용).
+  // 목록의 기존 동작/열은 바꾸지 않고 체크박스 열과 버튼만 덧붙인다.
+  const [selectedPoIds, setSelectedPoIds] = useState<Set<number>>(new Set());
+  const [combinedDownloading, setCombinedDownloading] = useState(false);
+  // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"로 넘어오면 그 스타일로 목록을 거른다.
+  const [filterStyleNo, setFilterStyleNo] = useState<string | null>(null);
   // PR-183: "이 품목군 취급 업체만 보기" — 기본 켜짐. 품목에 품목군이 있을 때만 보이고, 켜면 폼의 공급업체 검색을 그 품목군 업체로 거른다(자동 선택은 하지 않음).
   const [byItemCategory, setByItemCategory] = useState(true);
   // PR-074: 포장내역은 발주 하위 흐름이라 별도 탭이 아니라 발주 행에서 모달로 연다.
@@ -110,6 +121,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         supplierId: filterSupplier?.id || undefined,
         itemId: filterItem?.id || undefined,
         track: listTrack === 'ALL' ? undefined : listTrack,
+        styleNo: filterStyleNo || undefined,
       });
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setPurchaseOrders(data);
@@ -119,7 +131,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     } finally {
       setLoading(false);
     }
-  }, [filterSupplier, filterItem, listTrack]);
+  }, [filterSupplier, filterItem, listTrack, filterStyleNo]);
 
   formValuesRef.current = { supplier, unitPrice: newPo.unitPrice ?? 0, autofilled };
 
@@ -276,6 +288,18 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillItemId, onPrefillConsumed]);
 
+  // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"로 넘어온 경우 — 그 스타일을
+  // styleSearch에 넣어 기존 경로(getStyleRequirements → StyleShortagePanel)를 그대로
+  // 태우고, 발주 목록도 그 스타일로 필터한다.
+  useEffect(() => {
+    if (prefillStyleNo) {
+      setStyleSearch({ styleNo: prefillStyleNo });
+      setFilterStyleNo(prefillStyleNo);
+      onStylePrefillConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillStyleNo, onStylePrefillConsumed]);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -397,7 +421,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         onPickMaterial={handlePickMaterial}
         onGoToList={() => setListTrack('ALL')}
         refreshKey={panelRefresh}
-        editable={buildEditableOrderByItem(pendingOrders)}
+        pendingOrders={pendingOrders}
         onEdit={(order, pendingCount) => setEditing({ order, pendingCount })}
         onBulkDone={() => { setPanelRefresh((n) => n + 1); loadPurchaseOrders(); loadPendingOrders(); }}
       />
@@ -531,6 +555,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         {item && (
           <PriceReferenceBlock
             itemId={item.id}
+            itemName={item.name}
             styleNo={styleSearch?.styleNo}
             brandName={styleSearch ? undefined : (brandOverride || undefined)}
             value={priceRef}
@@ -604,10 +629,42 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         </div>
       </div>
 
+      {selectedPoIds.size > 0 && (
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-600">{selectedPoIds.size}건 선택됨</span>
+          <button
+            type="button"
+            disabled={combinedDownloading}
+            className="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm disabled:opacity-50"
+            onClick={async () => {
+              setCombinedDownloading(true);
+              try {
+                const files = await getCombinedPurchaseOrderDocuments([...selectedPoIds]);
+                for (const f of files) downloadBase64File(f.base64, f.filename);
+                toast.success(`업체 ${files.length}곳의 합본 발주서를 받았습니다.`);
+              } catch (err: any) {
+                toast.error(getErrorMessage(err, '합본 발주서 생성에 실패했습니다.'));
+              } finally {
+                setCombinedDownloading(false);
+              }
+            }}
+          >{combinedDownloading ? '생성 중...' : '선택 발주 합본 발주서'}</button>
+          <button type="button" className="text-sm text-gray-500" onClick={() => setSelectedPoIds(new Set())}>선택 해제</button>
+        </div>
+      )}
+
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
         <table>
           <thead className="bg-gray-100 text-gray-700">
             <tr>
+              <th className="px-4 py-2 text-left">
+                <input
+                  type="checkbox"
+                  aria-label="전체 선택"
+                  checked={purchaseOrders.length > 0 && selectedPoIds.size === purchaseOrders.length}
+                  onChange={(e) => setSelectedPoIds(e.target.checked ? new Set(purchaseOrders.map((p) => p.id)) : new Set())}
+                />
+              </th>
               <th className="px-4 py-2 text-left">품목</th>
               <th className="px-4 py-2 text-left">스타일</th>
               <th className="px-4 py-2 text-right">수량</th>
@@ -624,6 +681,18 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             {purchaseOrders.map((po) => (
               <Fragment key={po.id}>
               <tr className="hover:bg-gray-50">
+                <td className="px-4 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`${po.item?.name ?? po.itemId} 선택`}
+                    checked={selectedPoIds.has(po.id)}
+                    onChange={(e) => setSelectedPoIds((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(po.id); else next.delete(po.id);
+                      return next;
+                    })}
+                  />
+                </td>
                 <td className="px-4 py-2">{po.item?.name ?? `#${po.itemId}`}</td>
                 <td className="px-4 py-2">
                   <span className={`px-2 py-0.5 rounded-full text-xs ${po.styleNo ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400'}`}>{trackBadgeLabel(po.styleNo)}</span>
@@ -666,7 +735,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               </tr>
               {po.lines && po.lines.length > 0 && (
                 <tr className="bg-gray-50 text-xs text-gray-600">
-                  <td className="px-4 py-1" colSpan={9}>
+                  <td className="px-4 py-1" colSpan={10}>
                     색상/사이즈별: {po.lines.map((l, i) => <span key={i} className="mr-3">{l.color || '-'}/{l.size || '-'} × {l.qty}</span>)}
                   </td>
                 </tr>

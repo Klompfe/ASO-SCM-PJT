@@ -4,6 +4,7 @@ import { StylesService } from './styles.service';
 import { CreateMasterStyleDto } from './dto/create-master-style.dto';
 import { UpdateMasterStyleDto } from './dto/update-master-style.dto';
 import { FindMasterStylesDto } from './dto/find-master-styles.dto';
+import { SimilarMasterStylesDto } from './dto/similar-master-styles.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
@@ -22,6 +23,14 @@ export class StylesController {
   @Get()
   findAll(@Query() query: FindMasterStylesDto) {
     return this.stylesService.findAll(query);
+  }
+
+  // PR-198: /master-styles/:styleNo 같은 동적 경로가 이 컨트롤러에 없어 순서 문제는
+  // 없지만, 혹시 나중에 추가될 경우를 대비해 고정 경로를 위에 둔다. 읽기 전용 —
+  // 자동 변경 없음(화면에서 사람이 버튼을 눌러야 적용된다).
+  @Get('similar')
+  findSimilar(@Query() query: SimilarMasterStylesDto) {
+    return this.stylesService.findSimilar(query.styleNo);
   }
 
   // PR-141: 스타일 정보 수정 — 삭제와 같은 파괴적 잠재력은 없지만(부분 필드만 바뀜),
