@@ -256,8 +256,22 @@ describe('checkDocumentDateSuspicious (PR-200)', () => {
     expect(checkDocumentDateSuspicious('2027-01-01', '2026-10-21')?.code).toBe('DOCUMENT_DATE_SUSPICIOUS');
   });
 
-  it('18개월보다 오래되면 의심', () => {
+  it('12개월보다 오래되면 의심(PR-207: 18개월→12개월)', () => {
     expect(checkDocumentDateSuspicious('2024-01-01', '2026-10-21')?.code).toBe('DOCUMENT_DATE_SUSPICIOUS');
+  });
+
+  it('경고 문구에 "옛 문서를 올린 것일 수 있다" 취지가 들어 있다(PR-207)', () => {
+    expect(checkDocumentDateSuspicious('2024-01-01', '2026-10-21')?.message).toContain('옛 문서를 올린 것일 수 있습니다');
+  });
+
+  // PR-207 경계: 오늘 2026-10-21 기준 11개월 전(2025-11-21)은 경고 없음, 13개월 전
+  // (2025-09-21)은 경고 — 18개월 기준이었다면 둘 다 정상 범위였을 경계값들이다.
+  it('경계: 11개월 전이면 경고 없음', () => {
+    expect(checkDocumentDateSuspicious('2025-11-21', '2026-10-21')).toBeNull();
+  });
+
+  it('경계: 13개월 전이면 경고', () => {
+    expect(checkDocumentDateSuspicious('2025-09-21', '2026-10-21')?.code).toBe('DOCUMENT_DATE_SUSPICIOUS');
   });
 
   it('정상 범위면 경고 없음', () => {

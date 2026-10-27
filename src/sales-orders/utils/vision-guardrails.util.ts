@@ -279,7 +279,13 @@ export function findDuplicateGroups(
   return result;
 }
 
-// 작성일이 미래이거나 18개월 넘게 과거면 의심 — targetRdd 연도보정(PR-190)과는 독립이고
+// PR-207: 과거 기준을 18개월→12개월로 좁힌다 — 이제 targetRdd가 오늘보다 과거면 항상
+// 미래로 올려버리므로(rolloverTargetRddYear), "작성일이 오래된 보관 문서"를 더 적극적으로
+// 따로 잡아내 사람이 원본과 대조하게 해야 한다(안 그러면 옛 문서의 작성일까지 조용히
+// 받아들여질 위험이 커진다).
+const DOCUMENT_DATE_SUSPICIOUS_PAST_MONTHS = 12;
+
+// 작성일이 미래이거나 12개월 넘게 과거면 의심 — targetRdd 연도보정(PR-190)과는 독립이고
 // documentDate 값 자체는 바꾸지 않는다.
 export function checkDocumentDateSuspicious(documentDate: string | null, todayIso: string): VisionWarning | null {
   if (!documentDate) return null;
@@ -289,10 +295,13 @@ export function checkDocumentDateSuspicious(documentDate: string | null, todayIs
   if (d.getTime() > today.getTime()) {
     return { code: 'DOCUMENT_DATE_SUSPICIOUS', message: '작성일이 미래로 읽혔습니다 — 원본과 대조해 주세요' };
   }
-  const months18Ago = new Date(today);
-  months18Ago.setMonth(months18Ago.getMonth() - 18);
-  if (d.getTime() < months18Ago.getTime()) {
-    return { code: 'DOCUMENT_DATE_SUSPICIOUS', message: '작성일이 18개월보다 오래된 날짜로 읽혔습니다 — 원본과 대조해 주세요' };
+  const monthsAgo = new Date(today);
+  monthsAgo.setMonth(monthsAgo.getMonth() - DOCUMENT_DATE_SUSPICIOUS_PAST_MONTHS);
+  if (d.getTime() < monthsAgo.getTime()) {
+    return {
+      code: 'DOCUMENT_DATE_SUSPICIOUS',
+      message: `작성일이 ${DOCUMENT_DATE_SUSPICIOUS_PAST_MONTHS}개월보다 오래된 날짜로 읽혔습니다 — 옛 문서를 올린 것일 수 있습니다, 원본과 대조해 주세요`,
+    };
   }
   return null;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { updateOverviewField, resolveMaterialSubTypeCandidate, setBomItemSubType, prefillHandwrittenCmtDraft } from './salesOrderOverviewEdit';
+import { updateOverviewField, resolveMaterialSubTypeCandidate, setBomItemSubType, prefillHandwrittenCmtDraft, originalMonthDay } from './salesOrderOverviewEdit';
 import type { AiSalesOrderResult } from '../api/salesOrders.service';
 
 const buildResult = (styleNo: string): AiSalesOrderResult => ({
@@ -152,5 +152,23 @@ describe('prefillHandwrittenCmtDraft (PR-181)', () => {
     const next = prefillHandwrittenCmtDraft(results);
     expect(next[0]).toBe(results[0]);
     expect(next[0].overview.cmtPrice ?? null).toBeNull();
+  });
+});
+
+// PR-207: "오늘보다 과거라 올렸습니다" 안내에 작지 원문 표기(M/D)를 보여주는 데 쓴다.
+describe('originalMonthDay (PR-207)', () => {
+  it('YYYY-MM-DD에서 연도를 떼고 앞의 0을 지운 M/D를 돌려준다', () => {
+    expect(originalMonthDay('2026-02-17')).toBe('2/17');
+    expect(originalMonthDay('2024-12-05')).toBe('12/5');
+  });
+
+  it('null/undefined/빈 문자열이면 빈 문자열', () => {
+    expect(originalMonthDay(null)).toBe('');
+    expect(originalMonthDay(undefined)).toBe('');
+    expect(originalMonthDay('')).toBe('');
+  });
+
+  it('형식이 YYYY-MM-DD가 아니면 추측하지 않고 그대로 돌려준다', () => {
+    expect(originalMonthDay('깨진값')).toBe('깨진값');
   });
 });

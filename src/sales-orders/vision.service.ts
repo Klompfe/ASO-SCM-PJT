@@ -389,7 +389,8 @@ export class VisionService {
       // 시점 오늘 2026-10-14 기준 이미 지난 날짜 → 2027-02-17로 보정). 작성일 값 자체는
       // 절대 읽어서 바꾸지 않는다 — 납기==작성일(PR-158의 혼동 패턴)인 경우만 예외로
       // 보정하지 않는다(의심 경고만 유지).
-      const rollover = rolloverTargetRddYear(result.overview.targetRdd, result.overview.documentDate, today);
+      const rawTargetRdd = result.overview.targetRdd;
+      const rollover = rolloverTargetRddYear(rawTargetRdd, result.overview.documentDate, today);
       result.overview.targetRdd = rollover.targetRdd;
       result.overview.targetRddYearAdjusted = rollover.adjusted;
       result.overview.targetRddOriginal = rollover.adjusted ? rollover.original : null;
@@ -398,10 +399,14 @@ export class VisionService {
       // (targetRddYearAdjusted만 보면 "값은 안 바꿨고 조용히 넘어간" 경우가 생겼었다).
       result.overview.targetRddNotice = rollover.notice;
 
+      // PR-207: documentDate와의 "잘못 읽음" 비교는 보정 전 원본(rawTargetRdd)으로 한다 —
+      // 이제 보정이 항상 미래로 밀어 올리므로, 보정된 값으로 비교하면 PR-158의 misread
+      // 패턴(targetRdd==documentDate)이 가려진다(target-rdd-validation.util.ts 참고).
       result.overview.targetRddSuspicious = isSuspiciousTargetRdd(
         result.overview.targetRdd,
         result.overview.documentDate,
         today,
+        rawTargetRdd,
       );
     }
   }
