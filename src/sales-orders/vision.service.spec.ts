@@ -126,6 +126,29 @@ describe('VisionService.analyzeSalesOrder — PR-200 안전장치', () => {
     expect(item.warnings).toEqual([{ code: 'UNKNOWN_NAME', message: expect.any(String), suggestions: ['KL-R926'] }]);
   });
 
+  // PR-208: 품목군(괄호 앞) 자모 오독 자동 교정 — 후보가 정확히 1개이고 거리<=1일 때만.
+  it('품목군이 보봉사(코아사)면 본봉사(코아사)로 교정하고 nameCorrection·NAME_AUTOCORRECTED를 남긴다', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      { overview: baseOverview, bomItems: [{ category: null, itemName: '보봉사(코아사)', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ]);
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('본봉사(코아사)');
+    expect(item.nameCorrection).toEqual({ from: '보봉사(코아사)', to: '본봉사(코아사)' });
+    expect(item.warnings?.some((w: any) => w.code === 'NAME_AUTOCORRECTED')).toBe(true);
+  });
+
+  it('품목군 후보가 2개 이상(옥단추, 사전에 없고 마스터에도 없음)이면 교정 없이 기존 UNKNOWN_NAME 경고에 후보를 덧붙인다(중복 경고 없음)', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      { overview: baseOverview, bomItems: [{ category: null, itemName: '옥단추', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ]);
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('옥단추'); // 자동 교정 없음
+    expect(item.nameCorrection).toBeUndefined();
+    const warnings = item.warnings ?? [];
+    expect(warnings.filter((w: any) => w.code === 'UNKNOWN_NAME')).toHaveLength(1); // 중복 경고 없음
+    expect(warnings[0].suggestions).toEqual(expect.arrayContaining(['목단추', '속단추']));
+  });
+
   it('같은 구분·규격·요척 행이 3개면 POSSIBLE_DUPLICATE로 묶는다', async () => {
     const dupItem = (name: string) => ({ category: '봉사', itemName: name, spec: null, colorCode: null, consumption: 20, requiredQty: null, supplier: null, remarks: null });
     const outcome = await buildServiceWithFakeResponse(

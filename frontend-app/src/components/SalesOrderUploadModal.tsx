@@ -789,6 +789,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                   const duplicateWarning = findWarning(item.warnings, 'POSSIBLE_DUPLICATE');
                                   const supplierSplit = findWarning(item.warnings, 'SUPPLIER_NAME_SPLIT');
                                   const unknownSupplier = findWarning(item.warnings, 'UNKNOWN_SUPPLIER');
+                                  const nameAutocorrected = findWarning(item.warnings, 'NAME_AUTOCORRECTED');
                                   const duplicateGroup = duplicateGroups.find((g) => g.includes(i));
                                   const hasServerWarning = (item.warnings ?? []).length > 0;
                                   return (
@@ -819,6 +820,18 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           onChange={(e) => updateBomItemField(index, i, 'itemName', e.target.value)}
                                         />
                                         {isEdited && <span className="ml-1 text-[10px] text-blue-600 align-middle">수정됨</span>}
+                                        {/* PR-208: 품목군(괄호 앞) 자모 오독을 사전 기준으로 자동 교정했을 때만
+                                            — itemName은 이미 교정된 값이고, 직접 고치면(위 입력칸) 원문으로
+                                            되돌릴 수 있다(기존 동작 재사용, 별도 "되돌리기" 버튼 없음). */}
+                                        {nameAutocorrected && item.nameCorrection && (
+                                          <span
+                                            className="ml-1 text-[10px] text-indigo-600 align-middle"
+                                            data-testid={`bom-name-autocorrected-${index}-${i}`}
+                                            title={nameAutocorrected.message}
+                                          >
+                                            교정됨({item.nameCorrection.from}→{item.nameCorrection.to})
+                                          </span>
+                                        )}
                                       </td>
                                       <td className="border p-1">
                                         <input

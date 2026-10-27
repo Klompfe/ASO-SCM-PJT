@@ -74,6 +74,9 @@ export interface AiBomItem {
   // 확인하면 기존 supplier 칸으로 복사해야 저장된다(이 필드 자체는 저장 대상 아님).
   supplierName?: string | null;
   rawItemName?: string | null;
+  // PR-208: 품목군(괄호 앞) 자모 오독을 사전 기준으로 자동 교정했을 때만 채워진다 —
+  // itemName은 이미 교정된 값, 이 필드는 "교정됨(원문→교정값)" 배지 표시용(저장 대상 아님).
+  nameCorrection?: { from: string; to: string } | null;
   warnings?: AiWarning[] | null;
 }
 

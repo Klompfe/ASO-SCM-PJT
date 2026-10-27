@@ -169,6 +169,14 @@ export class AiBomItemDto {
   @IsString()
   rawItemName?: string | null;
 
+  // PR-208: 품목군(괄호 앞) 자모 오독을 사전 기준으로 자동 교정했을 때만 채워진다
+  // (예: {from:'보봉사(코아사)', to:'본봉사(코아사)'}). 저장 경로는 이 필드를 읽지
+  // 않는다 — itemName 자체가 이미 교정된 값으로 바뀌어 있고, 이 필드는 검토 화면이
+  // "교정됨(보봉사→본봉사)" 배지를 보여주는 용도일 뿐이다.
+  @ApiPropertyOptional({ description: '품목군 자동 교정 내역(교정됐을 때만, 서버 계산, 저장 대상 아님)' })
+  @IsOptional()
+  nameCorrection?: { from: string; to: string } | null;
+
   @ApiPropertyOptional({ description: '서버 후처리 경고 목록(저장 대상 아님)', type: [Object] })
   @IsOptional()
   @IsArray()

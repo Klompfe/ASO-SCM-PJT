@@ -44,6 +44,10 @@ export interface AiBomItemLike {
   requiredQty?: number | null;
   supplier?: string | null;
   remarks?: string | null;
+  // PR-208: 품목군 자동 교정이 적용됐을 때만(vision.service.ts applyGuardrails) 채워짐 —
+  // 하네스 채점은 이 값(교정 전 원문, 있으면)으로 비교해야 "운영 후처리가 점수를
+  // 좋게 만드는" 왜곡 없이 모델의 원래 읽기 성능을 그대로 측정한다.
+  nameCorrection?: { from: string; to: string } | null;
 }
 
 export interface AiOverviewLike {
