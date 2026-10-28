@@ -120,6 +120,18 @@ describe('MappingCommitService', () => {
       expect(mockQueryRunner.rollbackTransaction).not.toHaveBeenCalled();
     });
 
+    // PR-211: 신규 스타일은 지킬 기존 값이 없으므로 파싱값 0이 그대로 저장된다
+    // (덮어쓰기 위험은 "기존 값이 있는 스타일에 재업로드"할 때만 해당 — mergeOverview
+    // 쪽 테스트 참고). 신규 생성 경로(mergeOverview를 안 타는 쪽)는 그대로 둔다.
+    it('신규 스타일 + 파싱값 0 → 0으로 저장된다(기존 동작 유지, 지킬 값이 없음)', async () => {
+      await service.commit({ ...validPayload, overviewData: { ...validPayload.overviewData, totalQty: 0 } });
+
+      const styleSave = mockQueryRunnerManager.save.mock.calls.find(
+        ([arg]: any) => arg && typeof arg === 'object' && arg.overview,
+      );
+      expect(styleSave[0].overview.totalQty).toBe(0);
+    });
+
     // PR-175: 사람이 검토 화면에서 확인한 실/테이프 종류(threadType/tapeType)가
     // 신규 BomItem 생성 시 그대로 저장되는지 — AI 후보(materialSubTypeCandidate)는
     // CommitBomItemDto에 아예 없으므로 여기선 다루지 않는다(저장 대상이 아님).
@@ -426,6 +438,41 @@ describe('MappingCommitService', () => {
         ([arg]: any) => arg && typeof arg === 'object' && arg.overview,
       );
       expect(styleSave[0].overview.totalQty).toBe(430);
+    });
+
+    // PR-211: MATERIAL LIST의 QTY 칸이 비어 있으면 파서가 0을 만든다(section-parser.util.ts) —
+    // 그 0이 기존 totalQty(215)를 덮어쓰면 안 된다. 유한한 양수일 때만 갱신한다.
+    const totalQtyOf = async (overrideTotalQty: unknown): Promise<unknown> => {
+      const payload = rebuildPayload();
+      (payload.overviewData as any).totalQty = overrideTotalQty;
+      await service.commit(payload);
+      const styleSave = mockQueryRunnerManager.save.mock.calls.find(
+        ([arg]: any) => arg && typeof arg === 'object' && arg.overview,
+      );
+      return styleSave[0].overview.totalQty;
+    };
+
+    it('기존 totalQty(215) + 파싱값 0 → 기존 값 유지(재업로드가 지우지 않음)', async () => {
+      expect(await totalQtyOf(0)).toBe(215);
+    });
+
+    it('기존 215 + 파싱값 800(양수) → 800으로 갱신(기존 동작 유지)', async () => {
+      expect(await totalQtyOf(800)).toBe(800);
+    });
+
+    it.each([undefined, null, NaN, -5])('기존 215 + 파싱값 %p → 기존 값 유지', async (bad) => {
+      expect(await totalQtyOf(bad)).toBe(215);
+    });
+
+    it('기존 0(또는 null) + 파싱값 0 → 0(변화 없음)', async () => {
+      mockQueryRunnerManager.findOne.mockImplementation((entity: any) => {
+        if (entity === MasterStyle) {
+          return Promise.resolve({ ...existingStyle, overview: { ...existingOverview, totalQty: 0 } });
+        }
+        if (entity === Item) return Promise.resolve({ id: 10, name: '원단' });
+        return Promise.resolve(null);
+      });
+      expect(await totalQtyOf(0)).toBe(0);
     });
 
     // PR-168: 미도 전용 수기 CMT단가 — factory와 같은 원칙(자동 덮어쓰기 금지)을

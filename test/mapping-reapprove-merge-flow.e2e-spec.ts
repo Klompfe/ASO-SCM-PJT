@@ -140,6 +140,23 @@ describe('이미 등록된 스타일 재승인 = 병합 (PR-130)', () => {
       expect(items).toHaveLength(5);
       expect(items.filter((i) => i.material.name === 'MRG-원단').map((i) => i.colorCode).sort()).toEqual(['BK', 'NV']);
     });
+
+    // PR-211: MATERIAL LIST의 QTY 칸이 비어 있으면 파서가 totalQty=0을 만든다
+    // (section-parser.util.ts) — 이 스타일을 같은 상태로 재업로드해도 기존 총수량
+    // (900)이 0으로 지워지면 안 된다.
+    it('(PR-211) totalQty=0으로 재승인해도 기존 총수량(900)이 지워지지 않는다', async () => {
+      const before = await overview();
+      expect(Number(before.totalQty)).toBe(900);
+
+      await commit({
+        styleNo: STYLE,
+        overviewData: { styleNo: STYLE, factory: '베트남', totalQty: 0, buyer: '바이어B' },
+        bomItems: [line('MRG-원단', 1.47, 1029)],
+      });
+
+      const after = await overview();
+      expect(Number(after.totalQty)).toBe(900); // 그대로 유지
+    });
   });
 
   // PR-132: 화면이 유형별로 구분해 보여주는 구조화 알림(notices). warnings(문자열)는 같은 내용을 그대로 유지한다.

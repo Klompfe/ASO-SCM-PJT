@@ -453,7 +453,14 @@ export class MappingCommitService {
       }
     }
 
-    if (overviewData.totalQty != null) overview.totalQty = overviewData.totalQty;
+    // PR-211: MATERIAL LIST의 QTY 칸이 비어 있으면 파서가 0으로 만든다
+    // (section-parser.util.ts:40-41, 실측 118/118 시트가 이 칸이 비어 있어 항상 0).
+    // `!= null`은 0을 "값이 있다"로 취급해 기존 총수량을 0으로 덮어써 버리는 사고가
+    // 있었다(PILOT-13) — 들어온 값이 유한한 양수일 때만 갱신한다. 0/NaN/null/undefined/
+    // 음수는 "못 읽음"으로 보고 기존 값을 그대로 둔다.
+    if (Number.isFinite(overviewData.totalQty) && overviewData.totalQty > 0) {
+      overview.totalQty = overviewData.totalQty;
+    }
     if (overviewData.buyer) overview.buyer = overviewData.buyer;
     if (overviewData.shipDate) overview.firstShipDate = new Date(overviewData.shipDate);
     if (overviewData.styleName != null) overview.styleName = overviewData.styleName;
