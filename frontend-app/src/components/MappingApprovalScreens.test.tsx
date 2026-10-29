@@ -41,6 +41,24 @@ describe('스타일 미리보기 모달 — 이미 등록됨 경고/버튼 (PR-1
   });
 });
 
+// PR-211: QTY 칸을 못 읽으면 파서가 0을 만든다 — "총 생산수량: 0"으로 보이면 진짜
+// 수량 0처럼 보여 혼동된다. 0이면 "미기재"로, 양수면 숫자 그대로 보인다.
+describe('스타일 미리보기 모달 — 총 생산수량 0은 "미기재"로 표시 (PR-211)', () => {
+  it('총 생산수량이 양수면 숫자 그대로 보인다', () => {
+    const html = modal(false);
+    expect(html).toContain('총 생산수량:</strong> 700');
+  });
+
+  it('총 생산수량이 0이면 "미기재(기존 값이 있으면 유지됩니다)"로 보인다', () => {
+    const zeroData = { ...data, overview: { ...data.overview, totalQty: 0 } };
+    const html = renderToStaticMarkup(
+      createElement(MappingPreviewModal, { isOpen: true, onClose: vi.fn(), data: zeroData, alreadyExists: false, onRefresh: vi.fn() }),
+    );
+    expect(html).toContain('미기재');
+    expect(html).not.toContain('총 생산수량:</strong> 0<');
+  });
+});
+
 describe('업로드된 스타일 목록 배지 (PR-130)', () => {
   const styles: any[] = [
     { sheetName: 'S1', styleNo: 'NEW-1', overview: {}, bomItems: [] },

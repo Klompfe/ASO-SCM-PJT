@@ -26,4 +26,16 @@ describe('isSuspiciousTargetRdd (PR-158)', () => {
   it('documentDate가 null이고 targetRdd가 오늘보다 미래면 의심스럽지 않다', () => {
     expect(isSuspiciousTargetRdd('2026-12-30', null, '2026-06-25')).toBe(false);
   });
+
+  // PR-207: rolloverTargetRddYear가 과거 납기를 항상 미래로 올려버리므로, 보정된
+  // targetRdd만으로는 "작성일을 납기로 잘못 읽음" 패턴(targetRdd==documentDate)이
+  // 가려진다 — rawTargetRdd(보정 전 원본)로 판정해야 계속 잡힌다.
+  it('[PR-207] 보정된 targetRdd가 documentDate와 달라도, 보정 전 원본이 documentDate와 같으면 여전히 의심스럽다', () => {
+    expect(isSuspiciousTargetRdd('2027-06-22', '2026-06-22', '2026-10-14', '2026-06-22')).toBe(true);
+  });
+
+  it('[PR-207] rawTargetRdd를 안 주면 기존처럼 targetRdd 자체로 판정한다(호출 호환)', () => {
+    expect(isSuspiciousTargetRdd('2026-06-22', '2026-06-22', '2026-01-01')).toBe(true);
+    expect(isSuspiciousTargetRdd('2026-12-30', '2026-06-22', '2026-06-25')).toBe(false);
+  });
 });

@@ -25,8 +25,9 @@ export interface AiOverview {
   targetRddOriginal?: string | null;
   // PR-201: 보정 기준(작성일 또는 오늘) — 화면 안내 문구를 기준에 맞게 바꾸는 데만 쓴다.
   targetRddAdjustBasis?: 'DOCUMENT_DATE' | 'TODAY' | null;
-  // PR-201d: 값을 바꿨는지와 별개로 화면에 안내를 띄울지(서버 계산).
-  targetRddNotice?: 'none' | 'past-kept' | 'bumped-today' | 'bumped-written';
+  // PR-201d: 값을 바꿨는지와 별개로 화면에 안내를 띄울지(서버 계산). PR-207: 납기는
+  // 항상 미래로 올리므로 'past-kept'는 더 이상 내려오지 않는다.
+  targetRddNotice?: 'none' | 'bumped-today' | 'bumped-written';
   // PR-168: 미도 전용 — 작지 상단 수기 CMT단가. candidate는 AI 후보(읽기전용 참고용,
   // 미도가 아니면 항상 null), cmtPrice는 사람이 확인/수정한 최종값(이것만 저장된다).
   handwrittenCmtPriceCandidate?: number | null;
@@ -73,6 +74,9 @@ export interface AiBomItem {
   // 확인하면 기존 supplier 칸으로 복사해야 저장된다(이 필드 자체는 저장 대상 아님).
   supplierName?: string | null;
   rawItemName?: string | null;
+  // PR-208: 품목군(괄호 앞) 자모 오독을 사전 기준으로 자동 교정했을 때만 채워진다 —
+  // itemName은 이미 교정된 값, 이 필드는 "교정됨(원문→교정값)" 배지 표시용(저장 대상 아님).
+  nameCorrection?: { from: string; to: string } | null;
   warnings?: AiWarning[] | null;
 }
 

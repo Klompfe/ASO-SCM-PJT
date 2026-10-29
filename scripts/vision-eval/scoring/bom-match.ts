@@ -1,6 +1,13 @@
 import type { GoldenBomItem, AiBomItemLike, FieldErrorType, DigitConfusionPair } from '../types';
 import { levenshteinDistance } from '../manifest.util';
 
+// PR-208: 운영 후처리(품목군 자동 교정)가 채점에 끼어들지 않게 — 교정됐으면 교정 전
+// 원문으로 비교한다. 그래야 "운영이 고쳐준 값"이 아니라 모델이 실제로 읽은 값을
+// 그대로 측정한다(채점용 원본 이름 보존).
+function rawName(item: AiBomItemLike): string {
+  return item.nameCorrection?.from ?? item.itemName;
+}
+
 // PR-199: 이름을 정규화(공백·괄호·꺾쇠 제거)해 표준 이름 사전으로 분류한다. 사전에
 // 있는 핵심 단어가 포함돼 있으면 그 그룹, 없으면(오독으로 핵심 단어까지 깨졌을 때)
 // 사전 키와의 편집거리가 가까우면(≤2) 그 그룹으로 느슨하게 묶는다(겉고리↔걸고리 같은
@@ -90,7 +97,7 @@ export function classifyBomItems(golden: GoldenBomItem[], ai: AiBomItemLike[]): 
     const gConsumption = goldenConsumption(g);
     const candidates = ai
       .map((item, idx) => ({ item, idx }))
-      .filter(({ item, idx }) => !usedAi.has(idx) && standardGroupOf(item.itemName) === group);
+      .filter(({ item, idx }) => !usedAi.has(idx) && standardGroupOf(rawName(item)) === group);
 
     if (candidates.length === 0) {
       results.push({ type: 'MISSING', golden: g });
@@ -117,7 +124,7 @@ export function classifyBomItems(golden: GoldenBomItem[], ai: AiBomItemLike[]): 
       continue;
     }
 
-    const nameMatch = classifyNameMatch(g.itemName, best.item.itemName);
+    const nameMatch = classifyNameMatch(g.itemName, rawName(best.item));
     if (nameMatch === 'EXACT') {
       results.push({ type: 'OK', golden: g, ai: best.item });
     } else if (nameMatch === 'ABBREV') {
@@ -140,7 +147,7 @@ export function classifyBomItems(golden: GoldenBomItem[], ai: AiBomItemLike[]): 
 
   ai.forEach((item, idx) => {
     if (usedAi.has(idx)) return;
-    const group = standardGroupOf(item.itemName);
+    const group = standardGroupOf(rawName(item));
     const existing = matchedValuesByGroup.get(group) ?? [];
     const isDuplicateValue = existing.some((v) => Math.abs(v - (item.consumption ?? 0)) < 1e-9);
     results.push({ type: isDuplicateValue ? 'EXTRA_DUPLICATE' : 'EXTRA_OTHER', ai: item });
@@ -154,6 +161,6 @@ export function classifyBomItems(golden: GoldenBomItem[], ai: AiBomItemLike[]): 
 // 라벨 구역(필수 소모품)은 요척을 비교하지 않고 "존재 여부"만 센다.
 export function checkLabelZonePresence(golden: GoldenBomItem[], ai: AiBomItemLike[]): { itemName: string; present: boolean }[] {
   const labelItems = golden.filter((g) => g.isLabelZone);
-  const aiNames = ai.map((a) => standardGroupOf(a.itemName));
+  const aiNames = ai.map((a) => standardGroupOf(rawName(a)));
   return labelItems.map((g) => ({ itemName: g.itemName, present: aiNames.includes(standardGroupOf(g.itemName)) }));
 }

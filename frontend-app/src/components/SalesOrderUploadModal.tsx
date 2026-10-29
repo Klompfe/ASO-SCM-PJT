@@ -8,6 +8,7 @@ import {
   resolveMaterialSubTypeCandidate,
   resolveSubTypeValue,
   prefillHandwrittenCmtDraft,
+  originalMonthDay,
 } from '../utils/salesOrderOverviewEdit';
 import {
   updateBomItemField as updateBomItemFieldPure,
@@ -706,28 +707,18 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           onChange={(e) => updateOverviewField(index, 'targetRdd', e.target.value || null)}
                         />
                         {/* PR-201: 기준이 "항상 오늘"에서 "작성일(신뢰 가능하면)·아니면 오늘"로
-                            바뀌어, 어느 기준으로 보정했는지에 따라 문구를 바꾼다(작성일이
-                            과거인 작지는 납기도 오늘보다 과거일 수 있어 혼동을 줄이기 위함).
-                            자동 확정이 아니라 초안 보정임을 알리는 안내 — 빨간 경고와는 다른
-                            색(파란)으로 구분한다. 사용자가 납기를 직접 고치면 사라진다
-                            (updateOverviewField가 targetRddYearAdjusted를 함께 지운다). */}
+                            바뀌어, 어느 기준으로 보정했는지에 따라 문구를 바꾼다. PR-207: 이
+                            업무의 납기는 항상 미래라는 결정에 따라 오늘 기준 보정(bumped-today)
+                            문구를 "오늘보다 이전이라 올렸다/직접 고치라" 취지로 바꾼다 — 작지
+                            표기(M/D)도 함께 보여준다. 작성일 기준 보정(bumped-written)은 기존
+                            문구를 유지한다. 자동 확정이 아니라 초안 보정임을 알리는 안내 — 빨간
+                            경고와는 다른 색(파란)으로 구분한다. 사용자가 납기를 직접 고치면
+                            사라진다(updateOverviewField가 targetRddYearAdjusted를 함께 지운다). */}
                         {result.overview.targetRddYearAdjusted && (
                           <span className="text-xs text-blue-600 mt-0.5" data-testid={`target-rdd-year-adjusted-${index}`}>
-                            납기가 {result.overview.targetRddAdjustBasis === 'DOCUMENT_DATE' ? '작성일' : '오늘(한국시간)'}보다 이른 날짜로 인식되어 연도를 다음 해로 자동 보정했습니다(원래 인식값: {result.overview.targetRddOriginal}) — 확인해주세요
-                          </span>
-                        )}
-                        {/* PR-201d: 값은 안 바꿨지만 납기가 오늘보다 과거면 반드시 안내한다
-                            (작성일 기준으로는 정상 — 또는 보정을 시도했지만 끝내 오늘을 못
-                            넘긴 경우 — 둘 다 "조용히 넘어가지" 않게 한다, PR-201c 합성 입력
-                            ③에서 확인된 사각지대). 보정 안내(파란)·의심 경고(빨강)와 구분되는
-                            색(주황)으로 표시한다. */}
-                        {result.overview.targetRddNotice === 'past-kept' && (
-                          <span className="text-xs text-amber-600 mt-0.5" data-testid={`target-rdd-past-kept-${index}`}>
-                            납기 {result.overview.targetRdd}가 오늘(한국시간)보다 이른 날짜입니다.{' '}
-                            {result.overview.documentDate
-                              ? `작성일(${result.overview.documentDate}) 이후라서 값을 바꾸지 않았습니다.`
-                              : '연도를 자동으로 보정하지 못했습니다.'}{' '}
-                            원본의 납기 연·월·일을 확인해 주세요.
+                            {result.overview.targetRddAdjustBasis === 'DOCUMENT_DATE'
+                              ? `납기가 작성일보다 이른 날짜로 인식되어 연도를 다음 해로 자동 보정했습니다(원래 인식값: ${result.overview.targetRddOriginal}) — 확인해주세요`
+                              : `납기가 오늘보다 이전이라 ${result.overview.targetRdd}로 올렸습니다(작지 표기: ${originalMonthDay(result.overview.targetRddOriginal)}). 틀리면 직접 고치세요.`}
                           </span>
                         )}
                         {result.overview.targetRddSuspicious && (
@@ -798,6 +789,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                   const duplicateWarning = findWarning(item.warnings, 'POSSIBLE_DUPLICATE');
                                   const supplierSplit = findWarning(item.warnings, 'SUPPLIER_NAME_SPLIT');
                                   const unknownSupplier = findWarning(item.warnings, 'UNKNOWN_SUPPLIER');
+                                  const nameAutocorrected = findWarning(item.warnings, 'NAME_AUTOCORRECTED');
                                   const duplicateGroup = duplicateGroups.find((g) => g.includes(i));
                                   const hasServerWarning = (item.warnings ?? []).length > 0;
                                   return (
@@ -828,6 +820,18 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           onChange={(e) => updateBomItemField(index, i, 'itemName', e.target.value)}
                                         />
                                         {isEdited && <span className="ml-1 text-[10px] text-blue-600 align-middle">수정됨</span>}
+                                        {/* PR-208: 품목군(괄호 앞) 자모 오독을 사전 기준으로 자동 교정했을 때만
+                                            — itemName은 이미 교정된 값이고, 직접 고치면(위 입력칸) 원문으로
+                                            되돌릴 수 있다(기존 동작 재사용, 별도 "되돌리기" 버튼 없음). */}
+                                        {nameAutocorrected && item.nameCorrection && (
+                                          <span
+                                            className="ml-1 text-[10px] text-indigo-600 align-middle"
+                                            data-testid={`bom-name-autocorrected-${index}-${i}`}
+                                            title={nameAutocorrected.message}
+                                          >
+                                            교정됨({item.nameCorrection.from}→{item.nameCorrection.to})
+                                          </span>
+                                        )}
                                       </td>
                                       <td className="border p-1">
                                         <input

@@ -15,6 +15,16 @@ export const MATERIAL_SUB_TYPE_LABELS = {
 
 export type MaterialSubTypeLabel = keyof typeof MATERIAL_SUB_TYPE_LABELS;
 
+// PR-207: "오늘보다 과거라 연도를 올렸습니다" 안내에 작지 원문 표기(M/D, 연도 없이)를
+// 같이 보여준다 — targetRddOriginal(YYYY-MM-DD)에서 연도를 떼고 앞의 0을 지운다.
+// 형식이 YYYY-MM-DD가 아니면(없거나 깨진 값) 그대로 돌려준다(추측하지 않음).
+export function originalMonthDay(targetRddOriginal: string | null | undefined): string {
+  if (!targetRddOriginal) return '';
+  const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(targetRddOriginal);
+  if (!m) return targetRddOriginal;
+  return `${Number(m[1])}/${Number(m[2])}`;
+}
+
 // 후보 라벨을 threadType/tapeType 중 어느 필드에 어떤 값으로 적용할지 결정한다. 알 수 없는
 // 라벨이면 null — 추측해서 엉뚱한 필드에 넣지 않는다.
 export function resolveMaterialSubTypeCandidate(

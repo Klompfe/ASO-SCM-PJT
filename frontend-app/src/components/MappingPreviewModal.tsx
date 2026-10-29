@@ -76,7 +76,10 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
         )}
         <div className="grid grid-cols-4 gap-4 text-sm">
           <div><strong>공장:</strong> {styleOverview.factory}</div>
-          <div><strong>총 생산수량:</strong> {styleOverview.totalQty}</div>
+          {/* PR-211: QTY 칸을 못 읽으면 파서가 0을 만든다 — 그 0을 그대로 보여주면
+              "진짜 수량 0"처럼 보여 혼동된다(재업로드 시 기존 값을 지우는 사고의
+              화면쪽 짝). 기존 값이 있으면 저장 시 유지된다는 것을 알린다. */}
+          <div><strong>총 생산수량:</strong> {styleOverview.totalQty > 0 ? styleOverview.totalQty : '미기재 (기존 값이 있으면 유지됩니다)'}</div>
           <div><strong>바이어:</strong> {styleOverview.buyer}</div>
           <div><strong>선적일:</strong> {styleOverview.shipDate}</div>
         </div>

@@ -93,6 +93,18 @@ describe('classifyBomItems (PR-199)', () => {
     const result = classifyBomItems([g], []);
     expect(result).toEqual([]);
   });
+
+  // PR-208: 운영 후처리(품목군 자동 교정)가 nameCorrection을 채웠으면, 채점은 교정
+  // 전 원문(from)으로 비교해야 한다 — 그래야 "운영이 고쳐준 값" 때문에 모델 점수가
+  // 실제보다 좋게 나오지 않는다(채점용 원본 이름 보존).
+  it('nameCorrection이 있으면 교정 전 원문(from)으로 채점한다 — 교정 후 이름이 골든과 같아도 원문 기준으로 판정', () => {
+    const g = golden({ itemName: '본봉사', consumption: 2.9 });
+    // AI가 "보봉사"로 읽었고 운영이 "본봉사"로 교정했다고 가정(itemName은 교정된 값).
+    const a = ai({ itemName: '본봉사', consumption: 2.9, nameCorrection: { from: '보봉사', to: '본봉사' } });
+    const result = classifyBomItems([g], [a]);
+    // 원문(보봉사)과 골든(본봉사)은 1글자 오독이라 NAME_DIFF로 판정돼야 한다(OK가 아님).
+    expect(result).toEqual([{ type: 'NAME_DIFF', golden: g, ai: a }]);
+  });
 });
 
 describe('classifyNameMatch (PR-199b — PILOT-2 보정)', () => {

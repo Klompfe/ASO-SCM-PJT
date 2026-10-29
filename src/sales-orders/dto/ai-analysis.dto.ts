@@ -44,12 +44,14 @@ export class AiOverviewDto {
   @IsString()
   targetRddAdjustBasis?: 'DOCUMENT_DATE' | 'TODAY' | null;
 
-  // PR-201d: 값을 바꿨는지와 별개로 화면에 안내를 띄울지(서버 계산) — 'past-kept'면 납기가
-  // 오늘보다 과거인데 값은 그대로 둔 경우(보정 시도가 실패해 과거로 남은 경우 포함).
-  @ApiPropertyOptional({ description: '납기 안내 종류(none|past-kept|bumped-today|bumped-written, 서버 계산)' })
+  // PR-201d: 값을 바꿨는지와 별개로 화면에 안내를 띄울지(서버 계산).
+  // PR-207: 이 업무의 납기는 항상 미래라는 결정에 따라 'past-kept'(과거인데 값을 그대로
+  // 둠)는 더 이상 만들지 않는다 — 오늘보다 과거면 항상 다음 해까지 올려 bumped-today/
+  // bumped-written 중 하나가 된다.
+  @ApiPropertyOptional({ description: '납기 안내 종류(none|bumped-today|bumped-written, 서버 계산)' })
   @IsOptional()
   @IsString()
-  targetRddNotice?: 'none' | 'past-kept' | 'bumped-today' | 'bumped-written';
+  targetRddNotice?: 'none' | 'bumped-today' | 'bumped-written';
 
   // PR-168: 미도 전용 — 작업지시서 이미지 상단에 수기로 적힌 CMT단가 숫자(AI 후보일
   // 뿐, 그대로 저장되지 않는다). 미도가 아닌 바이어 건은 vision.service.ts가 결정적으로
@@ -166,6 +168,14 @@ export class AiBomItemDto {
   @IsOptional()
   @IsString()
   rawItemName?: string | null;
+
+  // PR-208: 품목군(괄호 앞) 자모 오독을 사전 기준으로 자동 교정했을 때만 채워진다
+  // (예: {from:'보봉사(코아사)', to:'본봉사(코아사)'}). 저장 경로는 이 필드를 읽지
+  // 않는다 — itemName 자체가 이미 교정된 값으로 바뀌어 있고, 이 필드는 검토 화면이
+  // "교정됨(보봉사→본봉사)" 배지를 보여주는 용도일 뿐이다.
+  @ApiPropertyOptional({ description: '품목군 자동 교정 내역(교정됐을 때만, 서버 계산, 저장 대상 아님)' })
+  @IsOptional()
+  nameCorrection?: { from: string; to: string } | null;
 
   @ApiPropertyOptional({ description: '서버 후처리 경고 목록(저장 대상 아님)', type: [Object] })
   @IsOptional()

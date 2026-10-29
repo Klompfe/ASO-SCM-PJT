@@ -23,6 +23,7 @@ import {
   checkYocheokMismatchBundle,
   type VisionWarning,
 } from './utils/vision-guardrails.util';
+import { suggestCategoryCorrection, applyCategoryCorrection } from './utils/term-autocorrect.util';
 
 // PR-190 보강: "오늘" 기준 납기 연도 보정/의심 판정은 반드시 한국시간(KST, UTC+9) 날짜여야
 // 한다 — new Date().toISOString()은 UTC라 한국 00:00~09:00 사이에는 하루 전 날짜가 되어
@@ -389,7 +390,8 @@ export class VisionService {
       // 시점 오늘 2026-10-14 기준 이미 지난 날짜 → 2027-02-17로 보정). 작성일 값 자체는
       // 절대 읽어서 바꾸지 않는다 — 납기==작성일(PR-158의 혼동 패턴)인 경우만 예외로
       // 보정하지 않는다(의심 경고만 유지).
-      const rollover = rolloverTargetRddYear(result.overview.targetRdd, result.overview.documentDate, today);
+      const rawTargetRdd = result.overview.targetRdd;
+      const rollover = rolloverTargetRddYear(rawTargetRdd, result.overview.documentDate, today);
       result.overview.targetRdd = rollover.targetRdd;
       result.overview.targetRddYearAdjusted = rollover.adjusted;
       result.overview.targetRddOriginal = rollover.adjusted ? rollover.original : null;
@@ -398,10 +400,14 @@ export class VisionService {
       // (targetRddYearAdjusted만 보면 "값은 안 바꿨고 조용히 넘어간" 경우가 생겼었다).
       result.overview.targetRddNotice = rollover.notice;
 
+      // PR-207: documentDate와의 "잘못 읽음" 비교는 보정 전 원본(rawTargetRdd)으로 한다 —
+      // 이제 보정이 항상 미래로 밀어 올리므로, 보정된 값으로 비교하면 PR-158의 misread
+      // 패턴(targetRdd==documentDate)이 가려진다(target-rdd-validation.util.ts 참고).
       result.overview.targetRddSuspicious = isSuspiciousTargetRdd(
         result.overview.targetRdd,
         result.overview.documentDate,
         today,
+        rawTargetRdd,
       );
     }
   }
@@ -456,8 +462,29 @@ export class VisionService {
           if (unknownSupplier) warnings.push(unknownSupplier);
         }
 
+        // PR-208: 품목군(괄호 앞) 자모 오독 자동 교정 — 후보가 정확히 1개이고 자모
+        // 편집거리 <= 1일 때만 바꾸고(예: 보봉사→본봉사), 원문/교정값을 nameCorrection에
+        // 남긴다(저장 경로는 이 필드를 읽지 않음 — 사람이 검토 화면에서 확인하는 용도).
+        const categoryCorrection = suggestCategoryCorrection(item.itemName);
+        if (categoryCorrection.kind === 'corrected') {
+          const from = item.itemName;
+          item.itemName = applyCategoryCorrection(item.itemName, categoryCorrection);
+          item.nameCorrection = { from, to: item.itemName };
+          warnings.push({
+            code: 'NAME_AUTOCORRECTED',
+            message: `자재명을 "${categoryCorrection.to}"로 교정했습니다(원문: ${categoryCorrection.from})`,
+          });
+        }
+
         const unknownName = checkUnknownName(item.itemName, context.masterItemNames ?? []);
-        if (unknownName) warnings.push(unknownName);
+        if (unknownName) {
+          // PR-208: ambiguous/unknown 후보가 있으면 이미 뜬 UNKNOWN_NAME 경고에만 덧붙인다
+          // (새 경고를 따로 만들어 중복으로 두 번 뜨지 않게 한다).
+          if (categoryCorrection.candidates?.length) {
+            unknownName.suggestions = [...(unknownName.suggestions ?? []), ...categoryCorrection.candidates];
+          }
+          warnings.push(unknownName);
+        }
       });
 
       // PR-201(운영 화면 확인): 같은 겉감 자재가 색상별로 행이 나뉘어 있으면 출고량

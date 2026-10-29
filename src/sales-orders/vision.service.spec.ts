@@ -126,6 +126,29 @@ describe('VisionService.analyzeSalesOrder — PR-200 안전장치', () => {
     expect(item.warnings).toEqual([{ code: 'UNKNOWN_NAME', message: expect.any(String), suggestions: ['KL-R926'] }]);
   });
 
+  // PR-208: 품목군(괄호 앞) 자모 오독 자동 교정 — 후보가 정확히 1개이고 거리<=1일 때만.
+  it('품목군이 보봉사(코아사)면 본봉사(코아사)로 교정하고 nameCorrection·NAME_AUTOCORRECTED를 남긴다', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      { overview: baseOverview, bomItems: [{ category: null, itemName: '보봉사(코아사)', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ]);
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('본봉사(코아사)');
+    expect(item.nameCorrection).toEqual({ from: '보봉사(코아사)', to: '본봉사(코아사)' });
+    expect(item.warnings?.some((w: any) => w.code === 'NAME_AUTOCORRECTED')).toBe(true);
+  });
+
+  it('품목군 후보가 2개 이상(옥단추, 사전에 없고 마스터에도 없음)이면 교정 없이 기존 UNKNOWN_NAME 경고에 후보를 덧붙인다(중복 경고 없음)', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      { overview: baseOverview, bomItems: [{ category: null, itemName: '옥단추', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ]);
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('옥단추'); // 자동 교정 없음
+    expect(item.nameCorrection).toBeUndefined();
+    const warnings = item.warnings ?? [];
+    expect(warnings.filter((w: any) => w.code === 'UNKNOWN_NAME')).toHaveLength(1); // 중복 경고 없음
+    expect(warnings[0].suggestions).toEqual(expect.arrayContaining(['목단추', '속단추']));
+  });
+
   it('같은 구분·규격·요척 행이 3개면 POSSIBLE_DUPLICATE로 묶는다', async () => {
     const dupItem = (name: string) => ({ category: '봉사', itemName: name, spec: null, colorCode: null, consumption: 20, requiredQty: null, supplier: null, remarks: null });
     const outcome = await buildServiceWithFakeResponse(
@@ -220,11 +243,10 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
   });
 
   // PR-190 실사례(MB74BLM107)였던 테스트 — PR-201에서 기준을 "오늘"에서 "작성일(신뢰
-  // 가능하면)"로 되돌렸다. 작성일 2026-01-01이 의심스럽지 않은(미래/18개월초과과거 아님)
-  // 날짜이므로 이제는 작성일을 기준으로 삼고, 납기 2026-02-17은 작성일보다 뒤라 보정하지
-  // 않는다(조회 시점이 2026-10-14라서 "오늘보다 과거"였을 뿐, 문서 자체로는 정상인
-  // 근거리 납기였다 — PR-201 배경의 "작성일이 과거인 작지" 패턴과 구조가 같다).
-  it('작성일이 의심스럽지 않고 납기가 작성일보다 뒤면 — 조회 시점이 나중이라도 보정하지 않는다(PR-201, 기준 작성일로 변경)', async () => {
+  // 가능하면)"로 되돌렸으나, PR-207(이 업무의 납기는 항상 미래)부터는 1단계(작성일
+  // 기준)가 보정하지 않아도 그 결과가 오늘보다 과거면 2단계가 오늘 기준으로 끝까지
+  // 올린다 — 더 이상 과거로 남지 않는다(past-kept 폐지).
+  it('[PR-207로 바뀜] 작성일이 의심스럽지 않고 납기가 작성일보다 뒤여도 — 오늘보다 과거면 끝까지 올린다', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-14T03:00:00Z')); // KST 2026-10-14 12:00
     try {
       const service = await buildServiceWithFakeResponse({
@@ -232,20 +254,23 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
         targetRdd: '2026-02-17', documentDate: '2026-01-01',
       });
       const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
-      expect(outcome.results[0].overview.targetRdd).toBe('2026-02-17');
-      expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
-      expect(outcome.results[0].overview.targetRddOriginal).toBeNull();
-      // PR-201d: 값은 안 바꿨지만 2026-02-17이 오늘(2026-10-14)보다 과거라 past-kept 안내.
-      expect(outcome.results[0].overview.targetRddNotice).toBe('past-kept');
+      expect(outcome.results[0].overview.targetRdd).toBe('2027-02-17');
+      expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(true);
+      expect(outcome.results[0].overview.targetRddOriginal).toBe('2026-02-17');
+      // PR-207: 1단계(작성일 기준)는 보정하지 않았지만 2단계(오늘 기준)가 넘겨받아
+      // 끝까지 올렸으므로 basis/notice는 TODAY/bumped-today가 된다.
+      expect(outcome.results[0].overview.targetRddAdjustBasis).toBe('TODAY');
+      expect(outcome.results[0].overview.targetRddNotice).toBe('bumped-today');
       expect(outcome.results[0].overview.documentDate).toBe('2026-01-01'); // 작성일은 절대 건드리지 않는다
     } finally {
       jest.useRealTimers();
     }
   });
 
-  // PR-201 배경 실사례: 작성일이 과거(보관/시험 문서)인 작지는 납기도 오늘보다 과거일 수
-  // 있다 — 작성일 기준으로는 보정이 필요 없는데 "오늘" 기준으로만 보면 틀리게 보정된다.
-  it('작성일이 과거이고 납기가 작성일보다 뒤·오늘보다 앞이면 보정하지 않는다(PR-201 배경 실사례 패턴)', async () => {
+  // PR-201 배경 실사례였던 "작성일이 과거(보관 문서)" 패턴 — 다만 이 작성일(2025-09-08)은
+  // PR-207의 12개월 기준(18개월→12개월)에서는 오늘(2026-10-23)보다 12개월 넘게 과거라
+  // 의심스러운 날짜로 바뀌어, 기준이 작성일이 아니라 오늘로 전환된다.
+  it('[PR-207로 바뀜] 작성일이 12개월 넘게 과거(의심)로 재분류되어 오늘 기준으로 끝까지 올린다', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-23T03:00:00Z'));
     try {
       const service = await buildServiceWithFakeResponse({
@@ -253,23 +278,21 @@ describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158
         targetRdd: '2026-03-17', documentDate: '2025-09-08',
       });
       const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
-      expect(outcome.results[0].overview.targetRdd).toBe('2026-03-17');
-      expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(false);
-      expect(outcome.results[0].overview.targetRddAdjustBasis).toBeNull();
-      // PR-201d: 2026-03-17이 오늘(2026-10-23)보다 과거라 past-kept 안내(PR-201c ③에서
-      // 확인된 사각지대 — 값은 안 바꿔도 반드시 안내가 뜨게 한다).
-      expect(outcome.results[0].overview.targetRddNotice).toBe('past-kept');
+      expect(outcome.results[0].overview.targetRdd).toBe('2027-03-17');
+      expect(outcome.results[0].overview.targetRddYearAdjusted).toBe(true);
+      expect(outcome.results[0].overview.targetRddAdjustBasis).toBe('TODAY');
+      expect(outcome.results[0].overview.targetRddNotice).toBe('bumped-today');
     } finally {
       jest.useRealTimers();
     }
   });
 
-  it('작성일이 의심스러운 날짜(18개월 초과 과거)이면 여전히 오늘을 기준으로 보정한다', async () => {
+  it('작성일이 의심스러운 날짜(12개월 초과 과거, PR-207: 18개월→12개월)이면 여전히 오늘을 기준으로 보정한다', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-14T03:00:00Z'));
     try {
       const service = await buildServiceWithFakeResponse({
         styleNo: 'S', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null,
-        targetRdd: '2026-02-17', documentDate: '2020-01-01', // 18개월 넘게 과거 — 신뢰 불가
+        targetRdd: '2026-02-17', documentDate: '2020-01-01', // 12개월 넘게 과거 — 신뢰 불가
       });
       const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
       expect(outcome.results[0].overview.targetRdd).toBe('2027-02-17');
