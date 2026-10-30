@@ -5,6 +5,7 @@ import { APPROVE_LABEL, BADGE_ALREADY_REGISTERED, REAPPROVE_LABEL, REAPPROVE_NOT
 import { extractNotices, type CommitNotice } from '../utils/commitNotices';
 import { getErrorMessage } from '../utils/errorMessage';
 import { computeRawRowPackaging } from '../utils/materialRequirementDisplay';
+import { buildColorSizeQuantityTable } from '../utils/styleColorSizeQuantities';
 import { CommitResultPanel } from './CommitResultPanel';
 import {
   buildBomDiffDraftRows,
@@ -38,6 +39,12 @@ interface ViewProps {
   // 종류를 추론해 "123.456콘" 대신 "N콘/N롤"(정수)로 보여주는 데 쓴다. 선택(기존 테스트가
   // 이 prop 없이 호출해도 깨지지 않게) — 없으면 규칙 미로딩과 동일하게 취급한다.
   packagingRules?: MaterialPackagingUnitRule[];
+  // PR-212: 색상×사이즈 수량(국내만) — 서버가 CLOOR/SIZE 블록에서 읽은 그대로. 비어 있으면
+  // "수량표 없음"을 보여준다(파싱 실패가 아니라 정상적으로 없는 경우일 수 있음).
+  colorSizeQuantities?: { color: string; size: string; qty: number }[];
+  // PR-212: 파서가 수량 셀을 읽으며 낸 경고(예: 잘못된 셀, 색상 빈 칸, 중복 색상, 중국
+  // 수량 무시) — 저장에는 영향 없음(해당 값들은 이미 저장 대상에서 제외됐다), 참고용.
+  colorSizeQuantityWarnings?: string[];
   saving: boolean;
   // 승인 결과. 있으면 "확인"을 눌러야만 모달이 닫힌다(경고를 놓치지 않게 — 예전엔 alert('저장 성공!')가 그 역할을 어설프게 했다).
   result: CommitOutcome | null;
@@ -48,7 +55,9 @@ interface ViewProps {
 }
 
 // 표시 전용(상태 없음) — 결과 유무에 따른 화면/버튼을 그대로 테스트할 수 있다.
-export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExists, styleOverview, bomItems, packagingRules = [], saving, result, error, onCommit, onClose, onConfirm }) => (
+export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExists, styleOverview, bomItems, packagingRules = [], colorSizeQuantities = [], colorSizeQuantityWarnings = [], saving, result, error, onCommit, onClose, onConfirm }) => {
+  const quantityTable = buildColorSizeQuantityTable(colorSizeQuantities);
+  return (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
     <div className="bg-white rounded-lg w-full max-w-7xl max-h-[90vh] flex flex-col">
     <div className="p-6 overflow-y-auto flex-1 min-h-0">
@@ -85,10 +94,60 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
           {/* PR-211: QTY 칸을 못 읽으면 파서가 0을 만든다 — 그 0을 그대로 보여주면
               "진짜 수량 0"처럼 보여 혼동된다(재업로드 시 기존 값을 지우는 사고의
               화면쪽 짝). 기존 값이 있으면 저장 시 유지된다는 것을 알린다. */}
-          <div><strong>총 생산수량:</strong> {styleOverview.totalQty > 0 ? styleOverview.totalQty : '미기재 (기존 값이 있으면 유지됩니다)'}</div>
+          <div>
+            <strong>총 생산수량:</strong>{' '}
+            {styleOverview.totalQty > 0
+              ? styleOverview.totalQty
+              : quantityTable.grandTotal > 0
+                ? <>{quantityTable.grandTotal}<span className="block text-xs text-gray-400">(색상×사이즈 합계, QTY 칸 미기재)</span></>
+                : '미기재 (기존 값이 있으면 유지됩니다)'}
+          </div>
           <div><strong>바이어:</strong> {styleOverview.buyer}</div>
           <div><strong>선적일:</strong> {styleOverview.shipDate}</div>
         </div>
+      </div>
+
+      {/* PR-212: 색상×사이즈 수량표 — 행=색상, 열=사이즈. */}
+      <div className="bg-gray-50 p-4 rounded border mb-6" data-testid="color-size-quantity-block">
+        <h4 className="font-semibold mb-2 text-sm">색상×사이즈 수량</h4>
+        {quantityTable.colors.length === 0 ? (
+          <p className="text-sm text-gray-500" data-testid="color-size-quantity-empty">수량표 없음</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="border text-sm" data-testid="color-size-quantity-table">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="border p-2">색상</th>
+                  {quantityTable.sizes.map((size) => <th key={size} className="border p-2">{size}</th>)}
+                  <th className="border p-2">합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quantityTable.colors.map((color) => (
+                  <tr key={color}>
+                    <td className="border p-2">{color}</td>
+                    {quantityTable.sizes.map((size) => (
+                      <td key={size} className="border p-2 text-right">{quantityTable.cellQty(color, size) ?? '-'}</td>
+                    ))}
+                    <td className="border p-2 text-right font-semibold">{quantityTable.totalByColor[color]}</td>
+                  </tr>
+                ))}
+                <tr className="bg-gray-100 font-semibold">
+                  <td className="border p-2">합계</td>
+                  {quantityTable.sizes.map((size) => (
+                    <td key={size} className="border p-2 text-right">{quantityTable.totalBySize[size]}</td>
+                  ))}
+                  <td className="border p-2 text-right">{quantityTable.grandTotal}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+        {colorSizeQuantityWarnings.length > 0 && (
+          <ul className="text-xs text-amber-700 mt-2 list-disc pl-5" data-testid="color-size-quantity-warnings">
+            {colorSizeQuantityWarnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        )}
       </div>
 
       {/* BOM Table */}
@@ -154,7 +213,8 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
     </div>
     </div>
   </div>
-);
+  );
+};
 
 const ROW_TYPE_LABEL: Record<BomDiffDraftRow['type'], string> = {
   SAME: '같음',
@@ -324,7 +384,14 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
 
   const doCommit = async () => {
     const styleNo = data?.styleNo || 'UNKNOWN';
-    const payload = { styleNo, overviewData: styleOverview, bomItems };
+    // PR-212: 색상×사이즈 수량(국내만) — 파서가 CLOOR/SIZE를 못 찾았으면 undefined로 보내
+    // 기존 수량 행을 전혀 건드리지 않는다(서버의 "안 보냄 vs 빈 시트" 구분과 맞춤).
+    const payload = {
+      styleNo,
+      overviewData: styleOverview,
+      bomItems,
+      colorSizeQuantities: data?.colorSizeQuantities?.rows,
+    };
     setSaving(true);
     setError(null);
     try {
@@ -409,6 +476,8 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
       styleOverview={styleOverview}
       bomItems={bomItems}
       packagingRules={packagingRules}
+      colorSizeQuantities={data?.colorSizeQuantities?.rows}
+      colorSizeQuantityWarnings={data?.colorSizeQuantities?.warnings}
       saving={saving}
       result={result}
       error={error}

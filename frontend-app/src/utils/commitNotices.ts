@@ -3,7 +3,16 @@
 // - NEEDS_REVIEW: 병합 중 "자동 반영을 보류"한 차이(공장 불일치, 기존 자재의 요척/필요량 차이) → 사용자가 확인하고 수동으로 고쳐야 한다.
 // - AUTO_APPLIED: 시스템이 값을 "자동으로 채운" 정보성 안내(안감 혼용률 기본값).
 export type CommitNoticeType = 'AUTO_APPLIED' | 'NEEDS_REVIEW';
-export type CommitNoticeCode = 'FACTORY_MISMATCH' | 'BOM_ITEM_VALUE_DIFF' | 'LINING_COMPOSITION_DEFAULT';
+export type CommitNoticeCode =
+  | 'FACTORY_MISMATCH'
+  | 'BOM_ITEM_VALUE_DIFF'
+  | 'LINING_COMPOSITION_DEFAULT'
+  | 'CMT_PRICE_MISMATCH'
+  // PR-212
+  | 'QTY_KEPT_MANUAL'
+  | 'QTY_UPDATED'
+  | 'QTY_NOT_IN_SHEET'
+  | 'TOTAL_QTY_MISMATCH';
 
 export interface CommitNotice {
   type: CommitNoticeType;
@@ -46,6 +55,11 @@ export const NOTICE_CODE_LABELS: Record<CommitNoticeCode, string> = {
   FACTORY_MISMATCH: '공장 불일치',
   BOM_ITEM_VALUE_DIFF: '요척/필요량 차이',
   LINING_COMPOSITION_DEFAULT: '혼용률 기본값 적용',
+  CMT_PRICE_MISMATCH: 'CMT단가 불일치',
+  QTY_KEPT_MANUAL: '수동 수정값 보존',
+  QTY_UPDATED: '색상×사이즈 수량 갱신',
+  QTY_NOT_IN_SHEET: '시트에 없는 기존 수량',
+  TOTAL_QTY_MISMATCH: '총수량 불일치',
 };
 
 export const noticeCodeLabel = (code: string): string => NOTICE_CODE_LABELS[code as CommitNoticeCode] ?? '알림';

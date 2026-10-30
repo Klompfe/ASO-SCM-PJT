@@ -78,6 +78,30 @@ export class CommitOverviewDto {
   @IsOptional()
   @IsString()
   cmtPriceNote?: string;
+
+  // PR-212: totalQty(headerRow[8])가 0/못읽음이고 색상×사이즈 수량 합계가 양수일 때만
+  // 파서가 채우는 후보값 — 기존 양수 totalQty는 이 값으로도 절대 덮어쓰지 않는다
+  // (mapping-commit.service.ts의 mergeOverview 참고).
+  @ApiPropertyOptional({ description: 'totalQty가 0일 때의 색상×사이즈 합계 후보', example: 700 })
+  @IsOptional()
+  @IsNumber()
+  totalQtyCandidate?: number;
+}
+
+export class CommitColorSizeQuantityDto {
+  @ApiProperty({ example: 'BK' })
+  @IsNotEmpty()
+  @IsString()
+  color: string;
+
+  @ApiProperty({ example: '55' })
+  @IsNotEmpty()
+  @IsString()
+  size: string;
+
+  @ApiProperty({ example: 320 })
+  @IsNumber()
+  qty: number;
 }
 
 export class CommitBomItemDto {
@@ -181,4 +205,14 @@ export class CommitMappingDto {
   @ValidateNested({ each: true })
   @Type(() => CommitBomItemDto)
   bomItems: CommitBomItemDto[];
+
+  // PR-212: 색상×사이즈 수량(국내만) — 선택 필드다. 파서가 CLOOR/SIZE 블록을 못 찾았거나
+  // 보내지 않은(구버전 프런트) 요청은 undefined로 오고, 이 경우 기존 수량 행을 전혀
+  // 건드리지 않는다(QTY_NOT_IN_SHEET 알림도 내지 않음 — "시트에 없음"과 "안 보냄"을 구분).
+  @ApiPropertyOptional({ type: [CommitColorSizeQuantityDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CommitColorSizeQuantityDto)
+  colorSizeQuantities?: CommitColorSizeQuantityDto[];
 }

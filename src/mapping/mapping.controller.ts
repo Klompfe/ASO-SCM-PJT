@@ -67,8 +67,11 @@ export class MappingController {
       sheetName: sheet.sheetName,
       styleNo: sheet.styleOverview?.styleNo,
       matchStatus: null,
-      overview: sheet.styleOverview,
+      // PR-212: totalQty는 그대로(파서가 읽은 원래 값), totalQtyCandidate는 그 값이 0/못읽음일
+      // 때만 색상×사이즈 합계로 채워지는 후보 — 커밋 시 overviewData.totalQtyCandidate로 넘어간다.
+      overview: sheet.styleOverview ? { ...sheet.styleOverview, totalQtyCandidate: sheet.totalQtyCandidate } : sheet.styleOverview,
       bomItems: sheet.bomItems?.map((item: any, idx: number) => ({ id: idx + 1, ...item })),
+      colorSizeQuantities: sheet.colorSizeQuantities,
       parseError: sheet.parseError,
     }));
   }

@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Not, In } from 'typeorm';
+import { Repository, DataSource, EntityManager, Not, In } from 'typeorm';
 import { MasterStyle } from '../../styles/entities/master-style.entity';
 import { StyleOverview, StyleOverviewStatus } from '../../styles/entities/style-overview.entity';
+import { StyleColorSizeQuantity, QuantityMarket, QuantitySource } from '../../styles/entities/style-color-size-quantity.entity';
 import { Bom } from '../../boms/entities/bom.entity';
 import { pickActiveBom } from '../../boms/utils/active-bom.util';
 import { BomItem } from '../../boms/entities/bom-item.entity';
@@ -24,7 +25,16 @@ import {
 // - NEEDS_REVIEW: 병합 중 "자동 반영을 보류"했다 → 사용자가 확인하고 필요하면 수동으로 고쳐야 한다.
 // - AUTO_APPLIED: 시스템이 값을 "자동으로 채웠다"(정보성) → 확인만 하면 된다.
 export type CommitNoticeType = 'AUTO_APPLIED' | 'NEEDS_REVIEW';
-export type CommitNoticeCode = 'FACTORY_MISMATCH' | 'BOM_ITEM_VALUE_DIFF' | 'LINING_COMPOSITION_DEFAULT' | 'CMT_PRICE_MISMATCH';
+export type CommitNoticeCode =
+  | 'FACTORY_MISMATCH'
+  | 'BOM_ITEM_VALUE_DIFF'
+  | 'LINING_COMPOSITION_DEFAULT'
+  | 'CMT_PRICE_MISMATCH'
+  // PR-212: 색상×사이즈 수량 병합/totalQty 후보 관련 알림.
+  | 'QTY_KEPT_MANUAL'
+  | 'QTY_UPDATED'
+  | 'QTY_NOT_IN_SHEET'
+  | 'TOTAL_QTY_MISMATCH';
 
 export interface CommitNotice {
   type: CommitNoticeType;
@@ -105,6 +115,12 @@ export class MappingCommitService {
     try {
       const { styleNo, overviewData, bomItems } = payload;
 
+      // PR-212: 색상×사이즈 합계 — totalQty 후보/불일치 알림(mergeOverview)과 수량 행
+      // 병합(mergeColorSizeQuantities) 둘 다에서 쓴다. colorSizeQuantities가 없으면
+      // (구버전 프런트 등) 0으로 보고, 둘 다 "시트에 수량 정보 없음"으로 안전하게 넘어간다.
+      const incomingQuantities = payload.colorSizeQuantities;
+      const quantitySum = (incomingQuantities ?? []).reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+
       // 1. Import Log
       await queryRunner.manager.save(ImportFile, {
         fileName: `${styleNo}.csv`,
@@ -118,12 +134,21 @@ export class MappingCommitService {
         style = queryRunner.manager.create(MasterStyle, { styleNo });
       }
 
+      // PR-211 규칙 유지 + PR-212 확장: headerRow 기반 totalQty가 있으면 그 값, 없으면(0)
+      // 색상×사이즈 합계 후보(totalQtyCandidate)를 새 스타일의 초기 totalQty로 쓴다.
+      const newStyleInitialTotalQty =
+        Number.isFinite(overviewData.totalQty) && overviewData.totalQty > 0
+          ? overviewData.totalQty
+          : Number.isFinite(overviewData.totalQtyCandidate) && (overviewData.totalQtyCandidate as number) > 0
+            ? (overviewData.totalQtyCandidate as number)
+            : 0;
+
       if (style.overview) {
-        this.mergeOverview(style.overview, overviewData, notices);
+        this.mergeOverview(style.overview, overviewData, notices, quantitySum);
       } else {
         style.overview = queryRunner.manager.create(StyleOverview, {
           factory: overviewData.factory,
-          totalQty: overviewData.totalQty,
+          totalQty: newStyleInitialTotalQty,
           buyer: overviewData.buyer,
           firstShipDate: overviewData.shipDate ? new Date(overviewData.shipDate) : null,
           status: StyleOverviewStatus.PENDING_APPROVAL,
@@ -139,6 +164,10 @@ export class MappingCommitService {
         });
       }
       await queryRunner.manager.save(style);
+
+      // PR-212: 색상×사이즈 수량 — 스타일 저장과 같은 트랜잭션에서 병합한다(재업로드 시
+      // 전체 삭제 후 삽입이 아니라 키(색상,사이즈) 단위로 비교-갱신).
+      await this.mergeColorSizeQuantities(queryRunner.manager, styleNo, incomingQuantities, notices);
 
       // 4. Bom — 해당 스타일에 이미 Bom이 있으면 pickActiveBom 규칙(활성 BOM 중 최신)으로 골라 재사용하고, 없을 때만
       // 새로 만든다. 사용자가 "BOM 중복 검토"에서 고른 BOM에 새 항목이 병합되도록 다른 화면과 같은 규칙을 쓴다(PR-123).
@@ -440,6 +469,7 @@ export class MappingCommitService {
     overview: StyleOverview,
     overviewData: CommitMappingDto['overviewData'],
     notices: CommitNotice[],
+    quantitySum = 0,
   ): void {
     if (overviewData.factory) {
       if (overview.factory && overview.factory !== overviewData.factory) {
@@ -458,8 +488,28 @@ export class MappingCommitService {
     // `!= null`은 0을 "값이 있다"로 취급해 기존 총수량을 0으로 덮어써 버리는 사고가
     // 있었다(PILOT-13) — 들어온 값이 유한한 양수일 때만 갱신한다. 0/NaN/null/undefined/
     // 음수는 "못 읽음"으로 보고 기존 값을 그대로 둔다.
-    if (Number.isFinite(overviewData.totalQty) && overviewData.totalQty > 0) {
+    // PR-212 확장: headerRow 기반 값(overviewData.totalQty)이 유한한 양수면 기존 PR-211
+    // 동작 그대로 항상 갱신한다(기존 값이 양수여도 — 이 경로는 "진짜로 다시 읽은 값"이라
+    // PR-211이 막던 "0으로 덮어쓰기 사고"와는 다른 경우). headerRow 값이 못 읽혔고(0 등)
+    // 기존 값도 비어 있을 때만 색상×사이즈 합계 후보(totalQtyCandidate)로 채운다 — 이
+    // 후보로는 기존 양수 값을 절대 덮어쓰지 않는다(지시서 규칙). 기존 양수 값을 그대로 둔
+    // 경우(headerRow로 갱신하지 않은 경우)에만, 합계와 다르면 참고용 알림을 남긴다.
+    const existingPositive = Number.isFinite(Number(overview.totalQty)) && Number(overview.totalQty) > 0;
+    const oldTotalQty = Number(overview.totalQty);
+    const incomingTotalQtyValid = Number.isFinite(overviewData.totalQty) && overviewData.totalQty > 0;
+
+    if (incomingTotalQtyValid) {
       overview.totalQty = overviewData.totalQty;
+    } else if (!existingPositive && Number.isFinite(overviewData.totalQtyCandidate) && (overviewData.totalQtyCandidate as number) > 0) {
+      overview.totalQty = overviewData.totalQtyCandidate as number;
+    }
+
+    if (existingPositive && !incomingTotalQtyValid && quantitySum > 0 && oldTotalQty !== quantitySum) {
+      notices.push({
+        type: 'NEEDS_REVIEW',
+        code: 'TOTAL_QTY_MISMATCH',
+        message: `기존 총수량 ${oldTotalQty} ↔ 색상×사이즈 합계 ${quantitySum} — 다릅니다(참고용, 자동 반영하지 않음).`,
+      });
     }
     if (overviewData.buyer) overview.buyer = overviewData.buyer;
     if (overviewData.shipDate) overview.firstShipDate = new Date(overviewData.shipDate);
@@ -483,6 +533,82 @@ export class MappingCommitService {
       } else if (overview.cmtPrice == null) {
         overview.cmtPrice = overviewData.cmtPrice;
       }
+    }
+  }
+
+  // PR-212: 재업로드 시 전체 삭제 후 삽입이 아니라 (color,size) 키 단위로 병합한다.
+  // - 새 시트에 있는데 기존에 없으면: INSERT(source=MATERIAL_LIST).
+  // - 기존이 source=MANUAL이면: 건드리지 않고 알림(QTY_KEPT_MANUAL).
+  // - 그 밖의 기존 행(MATERIAL_LIST/AI)이 값이 같으면: 변화 없음. 다르면: UPDATE + 알림(QTY_UPDATED).
+  // - 기존에는 있고 새 시트에는 없으면: 삭제하지 않고 알림(QTY_NOT_IN_SHEET)만.
+  // incoming이 undefined면(구버전 프런트 등 필드를 안 보낸 요청) 완전히 손대지 않는다 —
+  // "시트에 없음"과 "안 보냄"을 구분해야, 파서가 CLOOR/SIZE를 못 찾은 정상 케이스(빈 배열)와
+  // 수량 기능 자체를 모르는 옛 요청을 섞어서 기존 행을 "시트에 없다"고 잘못 알리지 않는다.
+  private async mergeColorSizeQuantities(
+    manager: EntityManager,
+    styleNo: string,
+    incoming: { color: string; size: string; qty: number }[] | undefined,
+    notices: CommitNotice[],
+  ): Promise<void> {
+    if (!incoming) return;
+
+    const existing = await manager.find(StyleColorSizeQuantity, { where: { styleNo, market: QuantityMarket.DOMESTIC } });
+    const existingByKey = new Map(existing.map((e) => [`${e.color}\u0000${e.size}`, e]));
+    const incomingKeys = new Set(incoming.map((i) => `${i.color}\u0000${i.size}`));
+
+    let updatedCount = 0;
+    let keptManualCount = 0;
+    const updatedSamples: string[] = [];
+
+    for (const inc of incoming) {
+      const key = `${inc.color}\u0000${inc.size}`;
+      const ex = existingByKey.get(key);
+      if (!ex) {
+        await manager.save(StyleColorSizeQuantity, {
+          styleNo,
+          color: inc.color,
+          size: inc.size,
+          market: QuantityMarket.DOMESTIC,
+          qty: inc.qty,
+          source: QuantitySource.MATERIAL_LIST,
+        });
+        continue;
+      }
+      if (ex.source === QuantitySource.MANUAL) {
+        keptManualCount++;
+        continue;
+      }
+      if (Number(ex.qty) === Number(inc.qty)) continue;
+      const before = ex.qty;
+      ex.qty = inc.qty;
+      ex.source = QuantitySource.MATERIAL_LIST;
+      await manager.save(StyleColorSizeQuantity, ex);
+      updatedCount++;
+      if (updatedSamples.length < 10) updatedSamples.push(`${inc.color}/${inc.size}: ${before}→${inc.qty}`);
+    }
+
+    if (keptManualCount > 0) {
+      notices.push({
+        type: 'NEEDS_REVIEW',
+        code: 'QTY_KEPT_MANUAL',
+        message: `색상×사이즈 수량 ${keptManualCount}건은 수동으로 수정된 값이라 건드리지 않았습니다.`,
+      });
+    }
+    if (updatedCount > 0) {
+      const sampleText = updatedSamples.join(', ') + (updatedCount > 10 ? ` 등 ${updatedCount}건` : '');
+      notices.push({
+        type: 'AUTO_APPLIED',
+        code: 'QTY_UPDATED',
+        message: `색상×사이즈 수량 ${updatedCount}건이 바뀌어 갱신했습니다: ${sampleText}`,
+      });
+    }
+    const notInSheetCount = existing.filter((e) => !incomingKeys.has(`${e.color}\u0000${e.size}`)).length;
+    if (notInSheetCount > 0) {
+      notices.push({
+        type: 'NEEDS_REVIEW',
+        code: 'QTY_NOT_IN_SHEET',
+        message: `기존 색상×사이즈 수량 ${notInSheetCount}건은 이번 시트에 없어 그대로 두었습니다(삭제하지 않음).`,
+      });
     }
   }
 }

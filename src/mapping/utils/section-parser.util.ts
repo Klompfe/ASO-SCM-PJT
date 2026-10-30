@@ -1,12 +1,19 @@
 import { StandardMaterial } from '../interfaces/standard-material.interface';
 import { Logger, BadRequestException } from '@nestjs/common';
 import { CellMergeRange, ParsedWorkbookSheet } from './excel-parser.util';
+import { parseStyleColorSizeQuantities, type ParseStyleColorSizeQuantitiesResult } from './style-color-size-quantity-parser.util';
 
 export interface ParsedSheetResult {
   sheetName: string;
   styleOverview?: { styleNo: string; totalQty: number; factory: string; buyer: string; shipDate: string };
   bomItems?: any[];
   parseError?: string;
+  // PR-212: 색상×사이즈 수량 블록(국내만, 중국은 무시) — CLOOR/SIZE를 못 찾으면 info만 채워진다.
+  colorSizeQuantities?: ParseStyleColorSizeQuantitiesResult;
+  // PR-212: headerRow[8](QTY) 값이 0/못읽음이고 색상×사이즈 합계가 양수일 때만 채워지는
+  // 후보값. styleOverview.totalQty는 그대로 유지한다(파서가 읽은 원래 값을 숨기지 않음) —
+  // 이 값을 실제로 쓸지는 커밋 단계(mapping-commit.service.ts)의 결정이다.
+  totalQtyCandidate?: number;
 }
 
 export class SectionParser {
@@ -17,8 +24,8 @@ export class SectionParser {
   static parseWorkbook(sheets: ParsedWorkbookSheet[]): ParsedSheetResult[] {
     return sheets.map((sheet) => {
       try {
-        const { styleOverview, bomItems } = this.parse(sheet.rows, sheet.merges);
-        return { sheetName: sheet.sheetName, styleOverview, bomItems };
+        const { styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate } = this.parse(sheet.rows, sheet.merges);
+        return { sheetName: sheet.sheetName, styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate };
       } catch (e) {
         return { sheetName: sheet.sheetName, parseError: (e as Error).message };
       }
@@ -58,8 +65,16 @@ export class SectionParser {
 
         const bomItems = this.parseBomItems(rawData, 13, styleOverview.totalQty, merges);
 
+        // PR-212: 색상×사이즈 수량 블록은 BOM 파싱 위치(bomStartIndex=13)와 무관하게
+        // 시트 상단에서 CLOOR/SIZE 헤더를 독립적으로 찾는다 — BOM 파싱에 영향 없음.
+        const colorSizeQuantities = parseStyleColorSizeQuantities(rawData);
+        const totalQtyCandidate =
+          styleOverview.totalQty === 0 && colorSizeQuantities.quantitySum > 0
+            ? colorSizeQuantities.quantitySum
+            : undefined;
+
         console.log('[PARSER RESULT]', { overview: styleOverview, count: bomItems.length });
-        return { styleOverview, bomItems };
+        return { styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate };
     } catch (e) {
         this.logger.error('[PARSER CRASH DETAILED] Section parsing failed', e);
         throw e;

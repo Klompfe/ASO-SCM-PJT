@@ -33,6 +33,12 @@ export class StylesController {
     return this.stylesService.findSimilar(query.styleNo);
   }
 
+  // PR-212: 색상×사이즈 수량 조회(읽기 전용) — 다른 스타일 조회 API와 같은 권한(가드 없음).
+  @Get(':styleNo/quantities')
+  getQuantities(@Param('styleNo') styleNo: string) {
+    return this.stylesService.getColorSizeQuantities(styleNo);
+  }
+
   // PR-141: 스타일 정보 수정 — 삭제와 같은 파괴적 잠재력은 없지만(부분 필드만 바뀜),
   // 계약/오더 정보와 맞물린 값이라 같은 RBAC 기준(MANAGER/ADMIN)을 적용한다.
   @UseGuards(RolesGuard)

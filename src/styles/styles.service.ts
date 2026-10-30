@@ -6,6 +6,7 @@ import { StyleOverview, StyleOverviewStatus } from './entities/style-overview.en
 import { Contract } from './entities/contract.entity';
 import { OrderProcessStage } from './entities/order-process-stage.entity';
 import { OrderShipment } from './entities/order-shipment.entity';
+import { StyleColorSizeQuantity, QuantityMarket } from './entities/style-color-size-quantity.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { BomItem } from '../boms/entities/bom-item.entity';
 import { CreateMasterStyleDto } from './dto/create-master-style.dto';
@@ -25,6 +26,8 @@ export class StylesService {
     private readonly masterStyleRepository: Repository<MasterStyle>,
     @InjectRepository(StyleOverview)
     private readonly overviewRepository: Repository<StyleOverview>,
+    @InjectRepository(StyleColorSizeQuantity)
+    private readonly colorSizeQuantityRepository: Repository<StyleColorSizeQuantity>,
     private readonly dataSource: DataSource,
     private readonly brandPrefixRulesService: BrandPrefixRulesService,
   ) {}
@@ -153,6 +156,9 @@ export class StylesService {
       await queryRunner.manager.delete(Contract, { styleNo });
       await queryRunner.manager.delete(OrderProcessStage, { styleNo });
       await queryRunner.manager.delete(OrderShipment, { styleNo });
+      // PR-212: style_color_size_quantities의 FK도 다른 styleNo 참조 테이블과 같은 ON
+      // DELETE NO ACTION이라, 먼저 지우지 않으면 스타일 삭제가 FK 위반으로 막힌다.
+      await queryRunner.manager.delete(StyleColorSizeQuantity, { styleNo });
 
       const overviewId = style.overview?.id;
       await queryRunner.manager.delete(MasterStyle, { styleNo });
@@ -167,6 +173,42 @@ export class StylesService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  // PR-212: 색상×사이즈 수량 조회(읽기 전용) — 권한은 다른 스타일 조회 API(findAll/
+  // findSimilar)와 같다(가드 없음). 수량이 없으면 빈 배열(404 아님, DB에 아직 수량
+  // 블록이 저장되지 않은 스타일을 조회해도 "조회 실패"가 아니라 "수량표 없음"이다).
+  // 사이즈 순서는 저장 당시 엑셀 열 순서를 그대로 보존하는 유일한 신호인 id(자동증가,
+  // 커밋 시 열 순서대로 insert됨) 오름차순으로 처음 등장한 순서를 쓴다.
+  async getColorSizeQuantities(styleNo: string): Promise<{
+    styleNo: string;
+    sizes: string[];
+    rows: { color: string; size: string; qty: number }[];
+    totalByColor: { color: string; qty: number }[];
+    grandTotal: number;
+  }> {
+    const rows = await this.colorSizeQuantityRepository.find({
+      where: { styleNo, market: QuantityMarket.DOMESTIC },
+      order: { id: 'ASC' },
+    });
+
+    const sizes: string[] = [];
+    for (const r of rows) {
+      if (!sizes.includes(r.size)) sizes.push(r.size);
+    }
+
+    const totalByColorMap = new Map<string, number>();
+    for (const r of rows) {
+      totalByColorMap.set(r.color, (totalByColorMap.get(r.color) ?? 0) + r.qty);
+    }
+
+    return {
+      styleNo,
+      sizes,
+      rows: rows.map((r) => ({ color: r.color, size: r.size, qty: r.qty })),
+      totalByColor: [...totalByColorMap.entries()].map(([color, qty]) => ({ color, qty })),
+      grandTotal: rows.reduce((sum, r) => sum + r.qty, 0),
+    };
   }
 
   // PR-198: 작지 AI가 스타일번호 끝 영문 구분자를 놓치는 오인식을 사람에게 알려주기

@@ -6,6 +6,7 @@ import { StyleOverview } from './entities/style-overview.entity';
 import { Contract } from './entities/contract.entity';
 import { OrderProcessStage } from './entities/order-process-stage.entity';
 import { OrderShipment } from './entities/order-shipment.entity';
+import { StyleColorSizeQuantity } from './entities/style-color-size-quantity.entity';
 import { Bom } from '../boms/entities/bom.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { ExportShipmentLine } from '../export-shipments/entities/export-shipment-line.entity';
@@ -32,6 +33,7 @@ import { SalesContractPricesModule } from '../sales-contract-prices/sales-contra
       Contract,
       OrderProcessStage,
       OrderShipment,
+      StyleColorSizeQuantity,
       Bom,
       PurchaseOrder,
       ExportShipmentLine,

@@ -5,6 +5,7 @@ import { NotFoundException } from '@nestjs/common';
 import { StylesService } from './styles.service';
 import { MasterStyle } from './entities/master-style.entity';
 import { StyleOverview, ProductionType } from './entities/style-overview.entity';
+import { StyleColorSizeQuantity } from './entities/style-color-size-quantity.entity';
 import { BrandPrefixRulesService } from '../brand-prefix-rules/brand-prefix-rules.service';
 
 // PR-101: findAll()에 추가된 itemType 필터(정확히 일치)를 검증한다 — styleNo/기간
@@ -32,6 +33,7 @@ describe('StylesService.findAll — itemType 필터 (PR-101)', () => {
           useValue: { createQueryBuilder: jest.fn(() => queryBuilder) },
         },
         { provide: getRepositoryToken(StyleOverview), useValue: {} },
+        { provide: getRepositoryToken(StyleColorSizeQuantity), useValue: {} },
         { provide: DataSource, useValue: {} },
         { provide: BrandPrefixRulesService, useValue: mockBrandPrefixRulesService },
       ],
@@ -113,6 +115,7 @@ describe('StylesService.update (PR-141)', () => {
         StylesService,
         { provide: getRepositoryToken(MasterStyle), useValue: mockMasterStyleRepository },
         { provide: getRepositoryToken(StyleOverview), useValue: mockOverviewRepository },
+        { provide: getRepositoryToken(StyleColorSizeQuantity), useValue: {} },
         { provide: DataSource, useValue: {} },
         { provide: BrandPrefixRulesService, useValue: mockBrandPrefixRulesService },
       ],
