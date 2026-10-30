@@ -6,6 +6,7 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { PrintableReport } from './PrintableReport';
 import { requirementColumns, parsePlanQuantity, type RequirementMode, type RequirementView } from '../utils/bomRequirementReport';
 import { fetchStyleRequirementView, fetchWorkOrderRequirementView } from '../utils/bomRequirementFetch';
+import { formatRequirementQty, formatCountOrQty } from '../utils/materialRequirementDisplay';
 
 interface WoOption { id: number; targetQuantity: number; status: string; item?: { name: string; styleNo?: string } }
 
@@ -193,12 +194,14 @@ export const BomRequirementReport: React.FC = () => {
                   <td className={td}>
                     {r.itemName}
                     {r.itemCode && <span className="block text-xs text-gray-400">{r.itemCode}</span>}
+                    {r.packaging && <span className="block text-xs text-amber-700">{r.packaging.conversionFormula}</span>}
+                    {r.conversionWarning && <span className="block text-xs text-amber-700" data-testid={`conversion-warning-${r.itemId}`}>⚠ {r.conversionWarning}</span>}
                   </td>
                   <td className={td}>{r.categories.join(', ') || '-'}</td>
                   <td className={`${td} text-right`}>{fmt(r.consumptionPerUnit)}</td>
-                  <td className={`${td} text-right`}>{fmt(r.requiredQty)}</td>
-                  <td className={`${td} text-right`}>{fmt(r.orderedQty)}</td>
-                  <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(r.shortageQty)}</td>
+                  <td className={`${td} text-right`}>{formatRequirementQty(r.requiredQty, r.packaging)}</td>
+                  <td className={`${td} text-right`}>{formatCountOrQty(r.orderedQty, r.packaging ? r.orderedQty : undefined, r.packaging?.packagingUnitLabel)}</td>
+                  <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCountOrQty(r.shortageQty, r.packaging?.shortagePackages, r.packaging?.packagingUnitLabel)}</td>
                 </tr>
               ))}
             </tbody>

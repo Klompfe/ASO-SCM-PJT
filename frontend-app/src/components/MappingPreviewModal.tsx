@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { commitMapping, getBomDiff, reconcileBom, type BomReconcileResult } from '../api/mapping.service';
+import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
 import { APPROVE_LABEL, BADGE_ALREADY_REGISTERED, REAPPROVE_LABEL, REAPPROVE_NOTICE_POINTS, REAPPROVE_NOTICE_TITLE } from '../utils/mappingApproval';
 import { extractNotices, type CommitNotice } from '../utils/commitNotices';
 import { getErrorMessage } from '../utils/errorMessage';
+import { computeRawRowPackaging } from '../utils/materialRequirementDisplay';
 import { CommitResultPanel } from './CommitResultPanel';
 import {
   buildBomDiffDraftRows,
@@ -32,6 +34,10 @@ interface ViewProps {
   alreadyExists?: boolean;
   styleOverview: any;
   bomItems: any[];
+  // PR-216: 실/테이프 포장단위 규칙 — 이 화면의 행(threadType/tapeType 없음)에서 자재명으로
+  // 종류를 추론해 "123.456콘" 대신 "N콘/N롤"(정수)로 보여주는 데 쓴다. 선택(기존 테스트가
+  // 이 prop 없이 호출해도 깨지지 않게) — 없으면 규칙 미로딩과 동일하게 취급한다.
+  packagingRules?: MaterialPackagingUnitRule[];
   saving: boolean;
   // 승인 결과. 있으면 "확인"을 눌러야만 모달이 닫힌다(경고를 놓치지 않게 — 예전엔 alert('저장 성공!')가 그 역할을 어설프게 했다).
   result: CommitOutcome | null;
@@ -42,7 +48,7 @@ interface ViewProps {
 }
 
 // 표시 전용(상태 없음) — 결과 유무에 따른 화면/버튼을 그대로 테스트할 수 있다.
-export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExists, styleOverview, bomItems, saving, result, error, onCommit, onClose, onConfirm }) => (
+export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExists, styleOverview, bomItems, packagingRules = [], saving, result, error, onCommit, onClose, onConfirm }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
     <div className="bg-white rounded-lg w-full max-w-7xl max-h-[90vh] flex flex-col">
     <div className="p-6 overflow-y-auto flex-1 min-h-0">
@@ -97,14 +103,34 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
             </tr>
           </thead>
           <tbody>
-            {bomItems.map((item, index) => (
-              <tr key={index}>
-                <td className="border p-2">{item.category}</td>
-                <td className="border p-2">{item.itemName}</td>
-                <td className="border p-2">{item.consumption}</td>
-                <td className="border p-2">{item.requiredQty}</td>
-              </tr>
-            ))}
+            {bomItems.map((item, index) => {
+              // PR-216: 엑셀에서 막 파싱한 행이라 threadType/tapeType이 없다 — 자재명으로
+              // 종류를 추론해 맞으면(하나로 확정) 정수+포장단위로, 아니면(실/테이프로는
+              // 보이지만 종류를 하나로 못 정함) 경고만, 일반 자재는 기존처럼 그대로 보여준다.
+              const packagingResult = computeRawRowPackaging(item.itemName, Number(item.requiredQty) || 0, packagingRules);
+              return (
+                <tr key={index}>
+                  <td className="border p-2">{item.category}</td>
+                  <td className="border p-2">{item.itemName}</td>
+                  <td className="border p-2">{item.consumption}</td>
+                  <td className="border p-2">
+                    {packagingResult.status === 'DETERMINED' ? (
+                      <>
+                        {packagingResult.packages}{packagingResult.unitLabel}
+                        <span className="block text-xs text-amber-700">{packagingResult.formula}</span>
+                      </>
+                    ) : (
+                      <>
+                        {item.requiredQty}
+                        {packagingResult.status === 'AMBIGUOUS' && (
+                          <span className="block text-xs text-amber-700" data-testid={`packaging-warning-${index}`}>⚠ {packagingResult.warning}</span>
+                        )}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -264,6 +290,7 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
 }) => {
   const [bomItems, setBomItems] = useState<any[]>([]);
   const [styleOverview, setStyleOverview] = useState<any>(data?.overview || {});
+  const [packagingRules, setPackagingRules] = useState<MaterialPackagingUnitRule[]>([]);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<CommitOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -287,6 +314,13 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
     setDecisions(new Map());
     setApplied(null);
   }, [data, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    getMaterialPackagingUnitRules()
+      .then((res) => setPackagingRules(Array.isArray(res) ? res : (res?.data ?? [])))
+      .catch(() => setPackagingRules([]));
+  }, [isOpen]);
 
   const doCommit = async () => {
     const styleNo = data?.styleNo || 'UNKNOWN';
@@ -374,6 +408,7 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
       alreadyExists={alreadyExists}
       styleOverview={styleOverview}
       bomItems={bomItems}
+      packagingRules={packagingRules}
       saving={saving}
       result={result}
       error={error}

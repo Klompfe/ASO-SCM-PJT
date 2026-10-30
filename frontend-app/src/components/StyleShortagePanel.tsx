@@ -5,6 +5,7 @@ import { getMasterStyles } from '../api/styles.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { requirementEmptyMessage, type MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { sortForShortage, filterOrdersByStyleNo, countOtherStylePendingByItem, buildEditableOrderByItem } from '../utils/purchaseOrderForm';
+import { formatRequirementQty, formatCountOrQty } from '../utils/materialRequirementDisplay';
 import { SearchSelectField } from './SearchSelectField';
 import { BulkOrderPreviewModal } from './BulkOrderPreviewModal';
 import type { PurchaseOrder } from '../api/purchaseOrders.service';
@@ -73,19 +74,19 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                 )}
               </td>
               <td className={td}>{r.categories.join(', ') || '-'}</td>
-              <td className={`${td} text-right`}>{r.packaging ? `${fmt(r.requiredQty)}m (${r.packaging.requiredPackages}${r.packaging.packagingUnitLabel})` : fmt(r.requiredQty)}</td>
-              <td className={`${td} text-right`}>{r.packaging ? `${r.orderedQty}${r.packaging.packagingUnitLabel}` : fmt(r.orderedQty)}</td>
+              <td className={`${td} text-right`}>{r.packaging ? `${fmt(r.requiredQty)}m (${formatRequirementQty(r.requiredQty, r.packaging)})` : formatRequirementQty(r.requiredQty, r.packaging)}</td>
+              <td className={`${td} text-right`}>{formatCountOrQty(r.orderedQty, r.packaging ? r.orderedQty : undefined, r.packaging?.packagingUnitLabel)}</td>
               <td className={`${td} text-right text-gray-400`} data-testid={`unlinked-ordered-${r.itemId}`}>
                 {(r.unlinkedOrderedQty ?? 0) > 0 ? (
                   <>
-                    {r.packaging ? `${r.unlinkedOrderedQty}${r.packaging.packagingUnitLabel}` : fmt(r.unlinkedOrderedQty ?? 0)}
+                    {formatCountOrQty(r.unlinkedOrderedQty ?? 0, r.packaging ? r.unlinkedOrderedQty : undefined, r.packaging?.packagingUnitLabel)}
                     <button type="button" className="block text-xs text-blue-600 underline ml-auto" onClick={onGoToList}>
                       미연결 발주 — 스타일을 연결하세요
                     </button>
                   </>
                 ) : '-'}
               </td>
-              <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{r.packaging ? `${r.packaging.shortagePackages}${r.packaging.packagingUnitLabel}` : fmt(r.shortageQty)}</td>
+              <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCountOrQty(r.shortageQty, r.packaging?.shortagePackages, r.packaging?.packagingUnitLabel)}</td>
               <td className={td}>
                 {editable?.has(r.itemId) && onEdit ? (
                   <button type="button" className="bg-amber-600 text-white px-2 py-1 rounded text-xs hover:bg-amber-700 whitespace-nowrap" onClick={() => { const e = editable.get(r.itemId)!; onEdit(e.order, e.pendingCount); }}>수정하기</button>
