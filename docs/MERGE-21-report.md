@@ -92,6 +92,19 @@ DROP TABLE "style_color_size_quantities";
 
 게이트 1 통과. **main에는 아무것도 반영하지 않았음 — 여기서 멈춤.** 게이트 2(`Render 확인 완료` 문구 필요)는 사용자 승인 전까지 진행하지 않음.
 
+## 7. 게이트 2 — main 반영
+
+사용자가 `Render 확인 완료`를 전달해 진행.
+
+- 게이트 2 시작 시 `origin/main` SHA는 게이트 0 때와 동일한 `ffd3ceb`(새 커밋 없음) — 확인 후 진행.
+- `git merge --ff-only feat/style-color-size-quantities` → fast-forward, **병합 전 main SHA**: `ffd3ceb007354fba325ba108ff220dea2c0d08ff`, **병합 후(= 병합 SHA)**: `f02c1c4e642ba4a4bdf0d8a395c256cede8306c6`.
+- 반영 후 `git rev-parse HEAD^{tree}`(`389aa8557b96e9d71d54b8812f5b735046443ae7`)가 게이트 0에서 검증한 `feat/style-color-size-quantities` 브랜치 트리와 동일함을 확인.
+- `npm run build` 재실행 → 성공.
+
+**Render는 배포 시작 때 `npm run migration:run:prod`를 자동 실행하므로, 이 push가 곧 운영 마이그레이션이다.**
+
+이 push 이후 main이 `f02c1c4`로 반영되며, Neon 운영 DB에 `1792000000000-AddStyleColorSizeQuantities` 마이그레이션이 Render 배포 과정에서 자동 실행된다.
+
 ---
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
