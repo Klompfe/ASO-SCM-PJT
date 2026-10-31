@@ -8,12 +8,17 @@ import type { MaterialRequirementPackaging } from './bomRequirementReport';
 // 이 한 함수로 양쪽을 통일한다.
 const fmtDecimal = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 
+// PR-218: 포장단위가 없는 필요량도 더 이상 소수로 보여주지 않는다 — 정수로 올림한다
+// (사용자 보고: "아직까지... 정수 올림 등의 로직이 적용되지 않았다"). 이 함수는 BOM
+// 소요명세서 화면/엑셀 내보내기가 함께 쓰므로 한 곳만 고치면 양쪽에 반영된다 — "제품
+// 1개당 소요량"(consumptionPerUnit, 비율값)에는 쓰지 않는다(그건 수량이 아니라 요척이라
+// 올림 대상이 아니다).
 export function formatRequirementQty(
   qty: number,
   packaging?: Pick<MaterialRequirementPackaging, 'requiredPackages' | 'packagingUnitLabel'> | null,
 ): string {
   if (packaging) return `${packaging.requiredPackages}${packaging.packagingUnitLabel}`;
-  return fmtDecimal(qty);
+  return ceilToInt(qty).toLocaleString('ko-KR');
 }
 
 // packaging이 없고 단순 개수(이미 발주/부족)일 때도 같은 규칙 — requiredPackages 대신
@@ -24,7 +29,7 @@ export function formatCountOrQty(
   packagingUnitLabel: string | undefined,
 ): string {
   if (packagingCount != null && packagingUnitLabel) return `${packagingCount}${packagingUnitLabel}`;
-  return fmtDecimal(qty);
+  return ceilToInt(qty).toLocaleString('ko-KR');
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +85,16 @@ export function ceilWithEpsilon(value: number, divisor: number): number {
   return Math.ceil(value / divisor - EPSILON);
 }
 
+// PR-218: "필요량이 보이는 모든 화면"에서 포장 규칙이 없는 값도 더 이상 소수로 보여주지
+// 않는다 — 정수로 올림(ROUNDUP)한다. 원값은 필요하면 호출하는 쪽이 툴팁/흐린 글씨로 보조
+// 표시한다(이 함수는 어느 쪽이든 원값을 함께 돌려준다).
+export function ceilToInt(qty: number): number {
+  // qty가 0(또는 EPSILON 보정으로 0보다 살짝 작아지는 값)이면 Math.ceil이 -0을 돌려준다 —
+  // -0은 0과 값은 같지만 Object.is/toEqual이 다르게 본다(엑셀 내보내기 재파싱 테스트에서
+  // 드러남). "|| 0"으로 -0을 0으로 정규화한다.
+  return Math.ceil(qty - EPSILON) || 0;
+}
+
 export type RawRowPackaging =
   | { status: 'DETERMINED'; packages: number; unitLabel: string; displayName: string; formula: string }
   | { status: 'AMBIGUOUS'; warning: string }
@@ -103,4 +118,54 @@ export function computeRawRowPackaging(itemName: string | null | undefined, requ
     displayName: rule.displayName,
     formula: `${requiredQty.toLocaleString('ko-KR')}m ÷ ${rule.unitLengthM}m/${rule.packagingUnitLabel} = ${packages}${rule.packagingUnitLabel}`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// PR-218: BomItem에 threadType/tapeType이 이미 저장돼 있는 화면(ItemsManager의 BOM
+// 조회 등) 전용 — computeRawRowPackaging처럼 자재명에서 "추론"하지 않는다(이미 지정된
+// 값이 있으니 추측할 필요가 없고, 추론은 오탐 위험이 있다 — 안전모드 원칙 유지).
+// 종류가 비어 있을 때만 이름 기반 추론(looksLikeThreadOrTape)으로 "종류 지정 필요"
+// 경고를 낸다. 포장 규칙은 미터(M) 단위를 전제하므로, 자재 단위가 다르면(Y 등) 환산하지
+// 않고 "단위 확인 필요"만 보여준다(요구사항: Y↔M 환산 코드는 이번 PR에 넣지 않는다).
+export type MaterialQtyDisplay =
+  | { kind: 'PACKAGED'; text: string; formula: string; originalQty: number }
+  | { kind: 'ROUNDED'; text: string; originalQty: number }
+  | { kind: 'SUBTYPE_NEEDED'; text: string; warning: string; originalQty: number }
+  | { kind: 'UNIT_MISMATCH'; text: string; warning: string; originalQty: number };
+
+export function formatBomItemQty(
+  qty: number,
+  opts: { subtype?: string | null; itemName?: string | null; itemUnit?: string | null },
+  rules: PackagingRuleLike[],
+): MaterialQtyDisplay {
+  const q = Number(qty) || 0;
+  if (opts.subtype) {
+    const rule = rules.find((r) => r.materialSubType === opts.subtype);
+    if (rule) {
+      const unit = (opts.itemUnit ?? '').trim().toUpperCase();
+      if (unit && unit !== 'M') {
+        return {
+          kind: 'UNIT_MISMATCH',
+          text: fmtDecimal(q),
+          warning: `단위 확인 필요 — 포장단위 환산은 미터(M) 기준인데 이 자재 단위는 "${opts.itemUnit}"입니다`,
+          originalQty: q,
+        };
+      }
+      const packages = ceilWithEpsilon(q, rule.unitLengthM);
+      return {
+        kind: 'PACKAGED',
+        text: `${packages}${rule.packagingUnitLabel}`,
+        formula: `${q.toLocaleString('ko-KR')}m ÷ ${rule.unitLengthM}m/${rule.packagingUnitLabel} = ${packages}${rule.packagingUnitLabel}`,
+        originalQty: q,
+      };
+    }
+  } else if (looksLikeThreadOrTape(opts.itemName, rules)) {
+    return {
+      kind: 'SUBTYPE_NEEDED',
+      text: fmtDecimal(q),
+      warning: '실/테이프 종류 확인 필요 — 자재명에서 종류를 하나로 판별할 수 없습니다',
+      originalQty: q,
+    };
+  }
+  return { kind: 'ROUNDED', text: ceilToInt(q).toLocaleString('ko-KR'), originalQty: q };
 }

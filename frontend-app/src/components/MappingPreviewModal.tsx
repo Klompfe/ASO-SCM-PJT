@@ -4,7 +4,7 @@ import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '.
 import { APPROVE_LABEL, BADGE_ALREADY_REGISTERED, REAPPROVE_LABEL, REAPPROVE_NOTICE_POINTS, REAPPROVE_NOTICE_TITLE } from '../utils/mappingApproval';
 import { extractNotices, type CommitNotice } from '../utils/commitNotices';
 import { getErrorMessage } from '../utils/errorMessage';
-import { computeRawRowPackaging } from '../utils/materialRequirementDisplay';
+import { computeRawRowPackaging, ceilToInt } from '../utils/materialRequirementDisplay';
 import { buildColorSizeQuantityTable } from '../utils/styleColorSizeQuantities';
 import { CommitResultPanel } from './CommitResultPanel';
 import {
@@ -178,12 +178,17 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
                         {packagingResult.packages}{packagingResult.unitLabel}
                         <span className="block text-xs text-amber-700">{packagingResult.formula}</span>
                       </>
-                    ) : (
+                    ) : packagingResult.status === 'AMBIGUOUS' ? (
                       <>
                         {item.requiredQty}
-                        {packagingResult.status === 'AMBIGUOUS' && (
-                          <span className="block text-xs text-amber-700" data-testid={`packaging-warning-${index}`}>⚠ {packagingResult.warning}</span>
-                        )}
+                        <span className="block text-xs text-amber-700" data-testid={`packaging-warning-${index}`}>⚠ {packagingResult.warning}</span>
+                      </>
+                    ) : (
+                      // PR-218: 실/테이프가 아닌 일반 자재(NOT_APPLICABLE)도 더 이상 소수로
+                      // 보여주지 않는다 — 정수로 올림(ROUNDUP)하고 원래 소수값은 흐린 글씨로 보조 표시.
+                      <>
+                        {ceilToInt(Number(item.requiredQty) || 0).toLocaleString('ko-KR')}
+                        <span className="block text-xs text-gray-400">{Number(item.requiredQty).toLocaleString('ko-KR', { maximumFractionDigits: 4 })}</span>
                       </>
                     )}
                   </td>

@@ -1,4 +1,5 @@
 import type { ExcelColumn } from './excelExport';
+import { ceilToInt } from './materialRequirementDisplay';
 
 // PR-185 B-2: 실/테이프 자재(Item.unit이 콘/롤)만 채워진다. 종류 미지정이거나 규칙
 // 테이블에 없으면 대신 conversionWarning만 채워진다(추측해서 환산하지 않음).
@@ -46,14 +47,20 @@ export interface MaterialRequirements {
   totals: { materialCount: number; shortageMaterialCount: number };
 }
 
+// PR-218: 화면 표(BomRequirementReport.tsx)와 같은 정수 올림 규칙을 엑셀 내보내기에도
+// 맞춘다. 단, 화면의 formatRequirementQty/formatCountOrQty(toLocaleString, 천단위
+// 쉼표 포함 문자열)를 그대로 쓰지 않는다 — 엑셀 셀이 전부 문자열이 되면 엑셀에서
+// 합계·필터가 안 되므로, 포장단위가 없을 때는 숫자형 그대로(정수로만 올림), 포장단위가
+// 있을 때만(원래도 단위 때문에 섞여 있었다) "3콘" 문자열로 둔다. "제품 1개당
+// 소요량"(비율값, 요척)은 수량이 아니라 올림 대상이 아니므로 그대로 둔다.
 export const requirementColumns: ExcelColumn<MaterialRequirementRow>[] = [
   { header: '자재명', accessor: (r) => r.itemName },
   { header: '자재코드', accessor: (r) => r.itemCode },
   { header: '카테고리', accessor: (r) => r.categories.join(', ') },
   { header: '제품 1개당 소요량', accessor: (r) => r.consumptionPerUnit },
-  { header: '필요 총수량', accessor: (r) => r.requiredQty },
-  { header: '이미 발주 수량', accessor: (r) => r.orderedQty },
-  { header: '부족 수량', accessor: (r) => r.shortageQty },
+  { header: '필요 총수량', accessor: (r) => (r.packaging ? `${r.packaging.requiredPackages}${r.packaging.packagingUnitLabel}` : ceilToInt(r.requiredQty)) },
+  { header: '이미 발주 수량', accessor: (r) => (r.packaging ? `${r.orderedQty}${r.packaging.packagingUnitLabel}` : ceilToInt(r.orderedQty)) },
+  { header: '부족 수량', accessor: (r) => (r.packaging ? `${r.packaging.shortagePackages}${r.packaging.packagingUnitLabel}` : ceilToInt(r.shortageQty)) },
 ];
 
 // BOM이 없을 때 화면에 띄우는 안내 문구. (에러가 아니라 정상적인 보고서 상태다.)

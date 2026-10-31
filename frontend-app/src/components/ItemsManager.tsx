@@ -21,6 +21,7 @@ import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagina
 import { buildEditableOrderByItem } from '../utils/purchaseOrderForm';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
+import { formatBomItemQty } from '../utils/materialRequirementDisplay';
 
 // PR-175: 실/테이프 통합 드롭다운 값을 서버 필드(threadType/tapeType) 중 하나로 나눈다.
 const resolveSubTypePayload = (value: string): { threadType?: ThreadType; tapeType?: TapeType } =>
@@ -290,6 +291,12 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       consumption: String(row.consumption ?? ''), spec: row.spec || '', colorCode: row.colorCode || '', category: row.category || '',
     });
   };
+
+  // PR-218: "필요량" 칸의 소수 표시를 BomRequirementReport/StyleShortagePanel과 같은 규칙으로
+  // 맞춘다 — threadType/tapeType이 이미 BOM 행에 지정돼 있으므로(computeRawRowPackaging처럼
+  // 자재명 추론이 필요 없다) formatBomItemQty에 그대로 넘긴다.
+  const bomItemQtyDisplay = (it: BomItemRow) =>
+    formatBomItemQty(it.requiredQty, { subtype: it.threadType ?? it.tapeType, itemName: it.material?.name, itemUnit: it.material?.unit }, packagingRules);
 
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
@@ -738,7 +745,20 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                             onChange={(e) => setEditBomItemForm({ ...editBomItemForm, consumption: e.target.value })}
                           />
                         </td>
-                        <td className="px-4 py-2 text-right">{it.requiredQty}</td>
+                        <td className="px-4 py-2 text-right">
+                          {(() => {
+                            const q = bomItemQtyDisplay(it);
+                            return (
+                              <>
+                                {q.text}
+                                {(q.kind === 'SUBTYPE_NEEDED' || q.kind === 'UNIT_MISMATCH') && (
+                                  <span className="block text-xs text-amber-700">⚠ {q.warning}</span>
+                                )}
+                                {q.kind === 'PACKAGED' && <span className="block text-xs text-gray-400">{q.formula}</span>}
+                              </>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-2">{it.supplier}</td>
                         <td className="px-4 py-2 text-right">{it.unitPrice}</td>
                         <td className="px-4 py-2">{it.remarks}</td>
@@ -786,7 +806,20 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         <td className="px-4 py-2">{it.colorCode}</td>
                         <td className="px-4 py-2">{it.spec}</td>
                         <td className="px-4 py-2 text-right">{it.consumption}</td>
-                        <td className="px-4 py-2 text-right">{it.requiredQty}</td>
+                        <td className="px-4 py-2 text-right">
+                          {(() => {
+                            const q = bomItemQtyDisplay(it);
+                            return (
+                              <>
+                                {q.text}
+                                {(q.kind === 'SUBTYPE_NEEDED' || q.kind === 'UNIT_MISMATCH') && (
+                                  <span className="block text-xs text-amber-700">⚠ {q.warning}</span>
+                                )}
+                                {q.kind === 'PACKAGED' && <span className="block text-xs text-gray-400">{q.formula}</span>}
+                              </>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-2">{it.supplier}</td>
                         <td className="px-4 py-2 text-right">{it.unitPrice}</td>
                         <td className="px-4 py-2">{it.remarks}</td>

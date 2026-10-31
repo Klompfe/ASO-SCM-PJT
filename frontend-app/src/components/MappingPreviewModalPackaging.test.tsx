@@ -49,7 +49,7 @@ describe('MappingPreviewModalView 포장단위 표시 (PR-216)', () => {
     expect(html).toContain('>100<');
   });
 
-  it('일반 자재(실/테이프로 보이지 않음)는 포장단위 규칙이 있어도 기존처럼 그대로 보여준다', () => {
+  it('일반 자재(실/테이프로 보이지 않음)는 정수로 올림해 보여주고 원래 소수값은 보조로 남긴다(PR-218)', () => {
     const html = renderToStaticMarkup(
       createElement(MappingPreviewModalView, {
         ...baseProps,
@@ -57,6 +57,7 @@ describe('MappingPreviewModalView 포장단위 표시 (PR-216)', () => {
         packagingRules: RULES,
       }),
     );
+    expect(html).toContain('151');
     expect(html).toContain('150.5');
   });
 
