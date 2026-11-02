@@ -1,4 +1,4 @@
-import { effectiveSubType, looksLikeThreadOrTape, buildThreadTapeSuggestion, materialSubTypeLabel } from './packaging-subtype.util';
+import { effectiveSubType, looksLikeThreadOrTape, buildThreadTapeSuggestion, materialSubTypeLabel, suggestThreadTapeByKeyword } from './packaging-subtype.util';
 
 const rules = [
   { materialSubType: 'COA_SA', displayName: '코아사' },
@@ -97,5 +97,55 @@ describe('materialSubTypeLabel', () => {
   it('null/undefined는 null이다', () => {
     expect(materialSubTypeLabel(null, rules)).toBeNull();
     expect(materialSubTypeLabel(undefined, rules)).toBeNull();
+  });
+});
+
+// PR-219: [B] 발주 폼의 "실/테이프 종류 추천(전문가 관점 키워드)" — buildThreadTapeSuggestion
+// (displayName 토큰 직접 일치)보다 넓은 동의어 키워드. 번수로는 추측하지 않는다.
+describe('suggestThreadTapeByKeyword (PR-219)', () => {
+  it('오바/오버로크/배색사/배색 실 → 오바사', () => {
+    expect(suggestThreadTapeByKeyword('오바사 60S/3', rules)?.materialSubType).toBe('OBA_SA_SKU_I_SA');
+    expect(suggestThreadTapeByKeyword('오버로크 실 40S', rules)?.materialSubType).toBe('OBA_SA_SKU_I_SA');
+    expect(suggestThreadTapeByKeyword('배색사 30S', rules)?.materialSubType).toBe('OBA_SA_SKU_I_SA');
+    expect(suggestThreadTapeByKeyword('배색 실 20S', rules)?.materialSubType).toBe('OBA_SA_SKU_I_SA');
+  });
+
+  it('본봉/스티치/QQ → 코아사', () => {
+    expect(suggestThreadTapeByKeyword('본봉사 60S/3', rules)?.materialSubType).toBe('COA_SA');
+    expect(suggestThreadTapeByKeyword('스티치 실', rules)?.materialSubType).toBe('COA_SA');
+    expect(suggestThreadTapeByKeyword('QQ 40수', rules)?.materialSubType).toBe('COA_SA');
+    expect(suggestThreadTapeByKeyword('qq 40수(소문자)', rules)?.materialSubType).toBe('COA_SA');
+  });
+
+  it('지누이도(폴리지누이도 포함) → 폴리지누이도', () => {
+    expect(suggestThreadTapeByKeyword('지누이도사', rules)?.materialSubType).toBe('POLY_JINUIDO');
+    expect(suggestThreadTapeByKeyword('폴리지누이도 500m', rules)?.materialSubType).toBe('POLY_JINUIDO');
+  });
+
+  it('다데/암홀 → 기존 테이프 규칙(displayName) 그대로', () => {
+    expect(suggestThreadTapeByKeyword('다데 테이프', rules)?.materialSubType).toBe('DADE');
+    expect(suggestThreadTapeByKeyword('암홀 테이프', rules)?.materialSubType).toBe('AMHOL');
+  });
+
+  it('충돌(본봉/스티치/QQ + 배색 계열): 코아사를 추천하되 확인 필요 표시', () => {
+    const r = suggestThreadTapeByKeyword('본봉사(배색)', rules);
+    expect(r?.materialSubType).toBe('COA_SA');
+    expect(r?.conflict).toBe(true);
+    expect(r?.conflictReason).toContain('배색');
+
+    const r2 = suggestThreadTapeByKeyword('본봉 오버로크 겸용사', rules);
+    expect(r2?.materialSubType).toBe('COA_SA');
+    expect(r2?.conflict).toBe(true);
+  });
+
+  it('키워드가 하나도 없으면(번수만 있음) 추천하지 않는다', () => {
+    expect(suggestThreadTapeByKeyword('오바사 60S/3H THREAD', rules)?.materialSubType).toBe('OBA_SA_SKU_I_SA'); // "오바사" 키워드는 있음
+    expect(suggestThreadTapeByKeyword('60S/3H THREAD', rules)).toBeNull(); // "오바사" 등 키워드 자체가 없음
+  });
+
+  it('빈 이름/일치 규칙 없음은 null', () => {
+    expect(suggestThreadTapeByKeyword('', rules)).toBeNull();
+    expect(suggestThreadTapeByKeyword(null, rules)).toBeNull();
+    expect(suggestThreadTapeByKeyword('오바사', [])).toBeNull();
   });
 });

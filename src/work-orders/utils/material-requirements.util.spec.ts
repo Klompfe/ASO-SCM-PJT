@@ -179,6 +179,81 @@ describe('BOM 소요량 계산 (PR-120)', () => {
     });
   });
 
+  // PR-219: [A] 부족자재 표의 단위 불일치 버그 완화 — 종류 미지정이라 packaging이 없을
+  // 때, 자재명 키워드로 추천된 종류가 있으면 "참고" 환산값(suggestedPackaging)을 함께
+  // 계산해 둔다(packaging과 별개 필드 — 확정은 아니다).
+  describe('PR-219: suggestedPackaging(종류 미지정 + 키워드 추천)', () => {
+    const matUnit = (id: number, name: string, unit: string) => ({ id, code: `M${id}`, name, unit });
+    const threadBi = (id: number, material: any, consumption: unknown, colorCode = 'BK') => ({
+      id, material, consumption, category: '실', colorCode, threadType: null,
+    });
+    const obaRule = { materialSubType: 'OBA_SA_SKU_I_SA', displayName: '오바사·스쿠이사', packagingUnitLabel: '콘', unitLengthM: 4000 };
+    const coaRule = { materialSubType: 'COA_SA', displayName: '코아사', packagingUnitLabel: '콘', unitLengthM: 2500 };
+
+    it('종류 미지정 + 이름이 "오바사"로 보임 → 참고로 76콘(4,000m/콘) 환산값을 함께 준다', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [threadBi(1, matUnit(10, '오바사 60S/3H THREAD', 'CONE'), 301270)],
+        new Map([[10, 76]]), // 발주(스타일 연결) 76 — 콘 단위로 이미 들어온 값
+        { packagingRules: [obaRule, coaRule] },
+      );
+      expect(row.packaging).toBeUndefined();
+      expect(row.conversionWarning).toBe('실/테이프 종류 미지정 — 선택해 주세요');
+      expect(row.suggestedPackaging).toMatchObject({
+        materialSubType: 'OBA_SA_SKU_I_SA', displayName: '오바사·스쿠이사', packagingUnitLabel: '콘', unitLengthM: 4000, requiredPackages: 76, shortagePackages: 0,
+      });
+      // 사용자 보고 사례 재현: 미터 필요량(301,270)에서 콘 수(76)를 그대로 빼던 shortageQty는
+      // 그대로 두되(필드 자체는 유지), 화면은 suggestedPackaging의 참고값(부족 0)을 쓴다.
+      expect(row.shortageQty).toBe(301194); // 기존 shortageQty 필드(단위 불일치) — 화면이 이 값을 직접 쓰지 않도록 하는 것이 이번 PR의 프런트 변경.
+    });
+
+    it('추천이 없으면(키워드 미매칭) suggestedPackaging도 없다', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [threadBi(1, matUnit(10, '미지정실 THREAD', 'CONE'), 10000)],
+        new Map(),
+        { packagingRules: [obaRule, coaRule] },
+      );
+      expect(row.conversionWarning).toBe('실/테이프 종류 미지정 — 선택해 주세요');
+      expect(row.suggestedPackaging).toBeUndefined();
+    });
+
+    it('추천 종류가 있어도 규칙 테이블에 없으면(데이터 누락) suggestedPackaging이 없다', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [threadBi(1, matUnit(10, '오바사', 'CONE'), 10000)],
+        new Map(),
+        { packagingRules: [coaRule] }, // OBA_SA_SKU_I_SA 규칙 없음
+      );
+      expect(row.conversionWarning).toBe('실/테이프 종류 미지정 — 선택해 주세요');
+      expect(row.suggestedPackaging).toBeUndefined();
+    });
+
+    it('색상별로 올림한 뒤 합산한다(확정 packaging과 같은 식)', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [
+          threadBi(1, matUnit(10, '오바사', 'CONE'), 4001, 'RED'),
+          threadBi(2, matUnit(10, '오바사', 'CONE'), 4001, 'BLUE'),
+        ],
+        new Map(),
+        { packagingRules: [obaRule] },
+      );
+      expect(row.suggestedPackaging?.requiredPackages).toBe(4); // ceil(4001/4000)+ceil(4001/4000) = 2+2=4
+    });
+
+    it('종류가 확정된(packaging) 행은 suggestedPackaging이 생기지 않는다(기존 동작 유지)', () => {
+      const [row] = calculateMaterialRequirements(
+        1,
+        [{ id: 1, material: matUnit(10, '오바사', 'CONE'), consumption: 301270, category: '실', colorCode: 'BK', threadType: 'OBA_SA_SKU_I_SA' }],
+        new Map(),
+        { packagingRules: [obaRule] },
+      );
+      expect(row.packaging).toBeDefined();
+      expect(row.suggestedPackaging).toBeUndefined();
+    });
+  });
+
   // PR-186: BOM 행(threadType/tapeType)이 전부 미지정인 운영 데이터 문제 — 자재(Item) 단위로
   // 한 번만 종류를 지정해도(Item.unit이 'EA'여도) 환산되게 하는 Item-레벨 폴백 경로.
   describe('PR-186: 자재(Item) 단위 종류 지정 폴백', () => {

@@ -90,8 +90,9 @@ export class PurchaseOrdersController {
   @Get('material-context')
   @ApiOperation({ summary: '발주 생성 폼용 — 품목이 연결된 스타일의 생산유형(CMT/FOB) 조회(BOM 미연결이면 둘 다 null)' })
   @ApiQuery({ name: 'itemId', required: true, type: Number })
-  getMaterialProductionContext(@Query('itemId', ParseIntPipe) itemId: number) {
-    return this.poService.getMaterialProductionContext(itemId);
+  @ApiQuery({ name: 'styleNo', required: false, type: String, description: 'PR-219: 폼에서 연결한 스타일 — 있으면 그 스타일 기준으로 판정(없으면 기존 폴백)' })
+  getMaterialProductionContext(@Query('itemId', ParseIntPipe) itemId: number, @Query('styleNo') styleNo?: string) {
+    return this.poService.getMaterialProductionContext(itemId, styleNo);
   }
 
   // PR-196: "미연결 발주 정리" 화면 — 고정 경로라 ':id'보다 먼저 선언해야 한다.

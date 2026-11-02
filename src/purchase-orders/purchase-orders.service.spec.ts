@@ -466,6 +466,39 @@ describe('PurchaseOrdersService', () => {
       const result = await service.getMaterialProductionContext(46);
       expect(result).toEqual({ styleNo: null, productionType: null });
     });
+
+    // PR-219: [B] 발주 폼에서 스타일을 연결했으면(styleNo 파라미터) 다른 스타일의 생산유형이
+    // 섞여 있어도 "그 스타일" 기준으로 판정한다(사용자 결정) — 하위호환(styleNo 생략 시
+    // 기존 폴백)도 함께 확인한다.
+    describe('PR-219: styleNo 파라미터(스타일 기준 판정)', () => {
+      it('styleNo를 주면 섞여 있어도(다른 스타일은 FOB) 그 스타일의 생산유형으로 판정한다', async () => {
+        mockBomItemRepo.createQueryBuilder.mockReturnValue(
+          buildQbReturning([{ styleNo: 'MB1', productionType: 'CMT' }, { styleNo: 'MB2', productionType: 'FOB' }]),
+        );
+        const result = await service.getMaterialProductionContext(50, 'MB1');
+        expect(result).toEqual({ styleNo: 'MB1', productionType: 'CMT' });
+      });
+
+      it('styleNo를 줬는데 그 스타일이 활성 BOM 목록에 없으면(이 자재를 안 씀) 기존 폴백으로 돌아간다', async () => {
+        mockBomItemRepo.createQueryBuilder.mockReturnValue(
+          buildQbReturning([{ styleNo: 'MB1', productionType: 'CMT' }, { styleNo: 'MB2', productionType: 'FOB' }]),
+        );
+        const result = await service.getMaterialProductionContext(51, 'MB-NOT-USING-THIS');
+        expect(result).toEqual({ styleNo: null, productionType: null }); // 폴백: 섞여 있어 null
+      });
+
+      it('styleNo를 생략하면 기존 응답과 완전히 같다(하위호환)', async () => {
+        mockBomItemRepo.createQueryBuilder.mockReturnValue(buildQbReturning([{ styleNo: 'ST-001', productionType: 'CMT' }]));
+        const result = await service.getMaterialProductionContext(52);
+        expect(result).toEqual({ styleNo: 'ST-001', productionType: 'CMT' });
+      });
+
+      it('BOM에 이 자재가 전혀 없으면(활성 BOM 조회 결과 자체가 빈 배열) styleNo를 줘도 둘 다 null', async () => {
+        mockBomItemRepo.createQueryBuilder.mockReturnValue(buildQbReturning([]));
+        const result = await service.getMaterialProductionContext(53, 'MB1');
+        expect(result).toEqual({ styleNo: null, productionType: null });
+      });
+    });
   });
 
   // PR-180: 발주 구분 제안 — getMaterialProductionContext와 같은 findActiveStyleProductionTypes()를 공유한다.

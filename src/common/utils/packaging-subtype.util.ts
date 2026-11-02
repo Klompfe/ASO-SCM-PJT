@@ -74,3 +74,75 @@ export function buildThreadTapeSuggestion(itemName: string | null | undefined, r
   const [m] = matches;
   return { materialSubType: m.rule.materialSubType, displayName: m.rule.displayName, reason: `자재명에 "${m.token}" 포함` };
 }
+
+// PR-219: 발주 폼의 "실/테이프 종류 추천" — buildThreadTapeSuggestion(displayName 토큰
+// 직접 일치)보다 넓은 "봉제 전문가 관점" 동의어 키워드로 추천한다. 번수(60S/3 등)로는
+// 추측하지 않는다(안전모드 원칙 유지). 자동 저장하지 않는다 — 참고 계산에만 쓰고, 사람이
+// 확인 후 버튼을 눌러야 기존 classifyThreadTape API로 저장된다.
+export interface ThreadTapeKeywordSuggestion {
+  materialSubType: string;
+  displayName: string;
+  reason: string;
+  // 이름에 상충되는 키워드가 함께 있어 추천은 내지만 신뢰도가 낮음(사람 확인 필요).
+  conflict?: boolean;
+  conflictReason?: string;
+}
+
+const OBA_KEYWORDS = ['오바', '오버로크', '배색사', '배색 실'];
+const COA_KEYWORDS = ['본봉', '스티치'];
+const JINUIDO_KEYWORDS = ['지누이도'];
+const BAESAEK_KEYWORD = '배색';
+
+export function suggestThreadTapeByKeyword(
+  itemName: string | null | undefined,
+  rules: PackagingRuleNameLike[],
+): ThreadTapeKeywordSuggestion | null {
+  const name = itemName ?? '';
+  if (!name) return null;
+  const upper = name.toUpperCase();
+  const hasOba = OBA_KEYWORDS.some((k) => name.includes(k));
+  const hasCoa = COA_KEYWORDS.some((k) => name.includes(k)) || upper.includes('QQ');
+  const hasJinuido = JINUIDO_KEYWORDS.some((k) => name.includes(k));
+  const hasBaesaek = name.includes(BAESAEK_KEYWORD);
+
+  const findRule = (subType: string) => rules.find((r) => r.materialSubType === subType);
+
+  // 다데/암홀(테이프류)은 전용 키워드라 충돌 걱정 없이 displayName을 그대로 쓴다.
+  const dadeRule = findRule('DADE');
+  if (dadeRule && name.includes(dadeRule.displayName)) {
+    return { materialSubType: dadeRule.materialSubType, displayName: dadeRule.displayName, reason: '다데/암홀 테이프' };
+  }
+  const amholRule = findRule('AMHOL');
+  if (amholRule && name.includes(amholRule.displayName)) {
+    return { materialSubType: amholRule.materialSubType, displayName: amholRule.displayName, reason: '다데/암홀 테이프' };
+  }
+
+  if (hasJinuido) {
+    const rule = findRule('POLY_JINUIDO');
+    if (rule) return { materialSubType: rule.materialSubType, displayName: rule.displayName, reason: '지누이도' };
+  }
+
+  // 충돌: 본봉/스티치/QQ(코아사 계열)와 오버로크/배색 계열이 함께 있으면 코아사를
+  // 추천하되(둘 중 하나는 골라야 하므로) 확인 필요 배지를 단다.
+  if (hasCoa && (hasOba || hasBaesaek)) {
+    const rule = findRule('COA_SA');
+    if (rule) {
+      return {
+        materialSubType: rule.materialSubType,
+        displayName: rule.displayName,
+        reason: '본봉·스티치용 실',
+        conflict: true,
+        conflictReason: hasOba ? '이름에 오버로크/배색 계열 키워드도 있어 확인 필요' : '이름에 배색도 있어 확인 필요',
+      };
+    }
+  }
+  if (hasOba) {
+    const rule = findRule('OBA_SA_SKU_I_SA');
+    if (rule) return { materialSubType: rule.materialSubType, displayName: rule.displayName, reason: '오버로크·배색용 실' };
+  }
+  if (hasCoa) {
+    const rule = findRule('COA_SA');
+    if (rule) return { materialSubType: rule.materialSubType, displayName: rule.displayName, reason: '본봉·스티치용 실' };
+  }
+  return null;
+}

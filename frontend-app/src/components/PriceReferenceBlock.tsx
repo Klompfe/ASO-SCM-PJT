@@ -99,7 +99,9 @@ export const PriceReferenceBlock: React.FC<{
           단가표에서 이 자재와 맞는 항목을 찾지 못했습니다{itemName ? `(자재명: ${itemName})` : ''}. 단가는 직접 입력하세요.
         </p>
       )}
-      {result && result.candidates.length > 1 && (
+      {/* PR-219: 후보가 정확히 1건일 때도 보이게 — 이전엔 length > 1이라 1건짜리 후보가
+          조용히 숨겨져 있었다(참고가 떠야 하는데 입력칸만 남아 보임). */}
+      {result && result.candidates.length > 0 && (
         <ul className="text-xs space-y-1">
           {result.candidates.map((c, i) => (
             <li key={i} className="flex items-center justify-between border rounded px-2 py-1">

@@ -66,6 +66,15 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                 {r.itemName}{r.itemCode && <span className="block text-xs text-gray-400">{r.itemCode}</span>}
                 {r.packaging && <span className="block text-xs text-amber-700">{r.packaging.conversionFormula}</span>}
                 {r.conversionWarning && <span className="block text-xs text-amber-700" data-testid={`conversion-warning-${r.itemId}`}>⚠ {r.conversionWarning}</span>}
+                {/* PR-219: 종류 미지정이라 packaging이 비어 있어도, 자재명 키워드로 추천된
+                    종류가 있으면 "참고"로 환산값을 보여준다(아래 필요/발주/부족 칸) —
+                    그 환산 근거(추천 종류·신뢰도)는 여기서 함께 밝힌다. */}
+                {r.suggestedPackaging && (
+                  <span className="block text-xs text-indigo-600" data-testid={`suggested-packaging-${r.itemId}`}>
+                    참고: {r.suggestedPackaging.displayName} 추천({r.suggestedPackaging.reason})
+                    {r.suggestedPackaging.conflict && <span className="text-amber-700"> — {r.suggestedPackaging.conflictReason}</span>}
+                  </span>
+                )}
                 {(otherStylePendingCountByItem?.get(r.itemId) ?? 0) > 0 && (
                   <span className="block text-xs text-gray-400" data-testid={`other-style-pending-${r.itemId}`}>
                     참고: 다른 스타일 미입고 발주 {otherStylePendingCountByItem!.get(r.itemId)}건 있음
@@ -74,8 +83,18 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                 )}
               </td>
               <td className={td}>{r.categories.join(', ') || '-'}</td>
-              <td className={`${td} text-right`}>{r.packaging ? `${fmt(r.requiredQty)}m (${formatRequirementQty(r.requiredQty, r.packaging)})` : formatRequirementQty(r.requiredQty, r.packaging)}</td>
-              <td className={`${td} text-right`}>{formatCountOrQty(r.orderedQty, r.packaging ? r.orderedQty : undefined, r.packaging?.packagingUnitLabel)}</td>
+              <td className={`${td} text-right`}>
+                {r.packaging ? `${fmt(r.requiredQty)}m (${formatRequirementQty(r.requiredQty, r.packaging)})`
+                  : r.suggestedPackaging ? `${fmt(r.requiredQty)}m (참고 ${formatRequirementQty(r.requiredQty, r.suggestedPackaging)})`
+                  : r.conversionWarning ? `${fmt(r.requiredQty)}m`
+                  : formatRequirementQty(r.requiredQty, r.packaging)}
+              </td>
+              <td className={`${td} text-right`}>
+                {r.packaging ? formatCountOrQty(r.orderedQty, r.orderedQty, r.packaging.packagingUnitLabel)
+                  : r.suggestedPackaging ? `참고 ${formatCountOrQty(r.orderedQty, r.orderedQty, r.suggestedPackaging.packagingUnitLabel)}`
+                  : r.conversionWarning ? '종류 확인 필요'
+                  : formatCountOrQty(r.orderedQty, undefined, undefined)}
+              </td>
               <td className={`${td} text-right text-gray-400`} data-testid={`unlinked-ordered-${r.itemId}`}>
                 {(r.unlinkedOrderedQty ?? 0) > 0 ? (
                   <>
@@ -86,7 +105,16 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                   </>
                 ) : '-'}
               </td>
-              <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCountOrQty(r.shortageQty, r.packaging?.shortagePackages, r.packaging?.packagingUnitLabel)}</td>
+              {/* PR-219: [A]의 단위 불일치 버그 — 종류 미지정 실/테이프는 미터 필요량에서
+                  콘/롤 수를 그대로 빼지 않는다. 추천 종류가 있으면 그 종류 기준 "참고"
+                  부족(콘/롤)을, 추천도 없으면 숫자 대신 "종류 확인 필요"를 보여준다.
+                  종류가 지정된 행(r.packaging)의 기존 동작은 바꾸지 않는다(PR-216/218 회귀 없음). */}
+              <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {r.packaging ? formatCountOrQty(r.shortageQty, r.packaging.shortagePackages, r.packaging.packagingUnitLabel)
+                  : r.suggestedPackaging ? <span className="text-indigo-600">참고 {r.suggestedPackaging.shortagePackages}{r.suggestedPackaging.packagingUnitLabel}</span>
+                  : r.conversionWarning ? <span className="text-amber-700" data-testid={`shortage-unknown-${r.itemId}`}>종류 확인 필요</span>
+                  : formatCountOrQty(r.shortageQty, undefined, undefined)}
+              </td>
               <td className={td}>
                 {editable?.has(r.itemId) && onEdit ? (
                   <button type="button" className="bg-amber-600 text-white px-2 py-1 rounded text-xs hover:bg-amber-700 whitespace-nowrap" onClick={() => { const e = editable.get(r.itemId)!; onEdit(e.order, e.pendingCount); }}>수정하기</button>

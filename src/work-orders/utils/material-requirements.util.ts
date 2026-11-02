@@ -1,5 +1,5 @@
 import { classifyPackagingUnit } from '../../export-shipments/utils/meter-price-conversion.util';
-import { effectiveSubType, looksLikeThreadOrTape } from '../../common/utils/packaging-subtype.util';
+import { effectiveSubType, looksLikeThreadOrTape, suggestThreadTapeByKeyword } from '../../common/utils/packaging-subtype.util';
 
 export interface RequirementMaterialLike {
   id: number;
@@ -79,6 +79,19 @@ export interface MaterialRequirementRow {
   // 종류가 없고(미검토) 실/테이프로 보이거나, 종류는 있는데 규칙에 없거나, 단위가 콘/롤인데
   // 종류가 없을 때(기존 PR-185 폴백) — 추측해서 환산하지 않고 경고만 준다.
   conversionWarning?: string;
+  // PR-219: conversionWarning이 "종류 미지정"일 때, 자재명 키워드로 추천된 종류가 있고
+  // 그 종류에 포장 규칙이 있으면 "참고" 환산값을 함께 보여준다([A] 부족자재 표의 단위
+  // 불일치 버그 — 미터 필요량에서 콘 수를 그대로 빼던 문제의 완화). 종류를 확정하지는
+  // 않는다(packaging과 별개 필드 — 실제 지정 전까지는 추천값일 뿐).
+  suggestedPackaging?: SuggestedPackagingConversion;
+}
+
+export interface SuggestedPackagingConversion extends PackagingConversion {
+  materialSubType: string;
+  displayName: string;
+  reason: string;
+  conflict?: boolean;
+  conflictReason?: string;
 }
 
 // pg decimal은 문자열로 올 수 있어 Number()로 통일한다. 소수 4자리로 반올림해 부동소수 오차(0.1*3 등)를 없앤다.
@@ -90,6 +103,50 @@ const round4 = (n: number): number => Math.round(n * 10000) / 10000;
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 const MISSING_SUBTYPE_WARNING = '실/테이프 종류 미지정 — 선택해 주세요';
+
+// 색상별로 ceil(필요미터 ÷ 단위길이)한 뒤 합산 — 확정된 종류(packaging)와 PR-219의 추천
+// 종류(suggestedPackaging) 계산이 완전히 같은 식이라 한 곳으로 합친다(중복 구현 금지).
+function buildPackagingConversion(
+  colorMeters: Map<string, number>,
+  requiredQtyTotal: number,
+  orderedQty: number,
+  rule: PackagingUnitRuleLike,
+): PackagingConversion {
+  const unitLengthM = Number(rule.unitLengthM);
+  const label = rule.packagingUnitLabel;
+  let requiredPackages = 0;
+  const parts: string[] = [];
+  for (const [color, meters] of colorMeters.entries()) {
+    const packages = Math.ceil(meters / unitLengthM);
+    requiredPackages += packages;
+    parts.push(`${color}: ${meters.toLocaleString('ko-KR')}m→${packages}${label}`);
+  }
+  const shortagePackages = Math.max(0, requiredPackages - orderedQty);
+  const conversionFormula =
+    colorMeters.size > 1
+      ? `색상별 ${parts.join(', ')} = 합계 ${requiredPackages}${label}`
+      : `${requiredQtyTotal.toLocaleString('ko-KR')}m ÷ ${unitLengthM}m/${label} = ${round2(requiredQtyTotal / unitLengthM)} → ${requiredPackages}${label}`;
+  return { packagingUnitLabel: label, unitLengthM, requiredPackages, shortagePackages, conversionFormula };
+}
+
+// PR-219: [A] 부족자재 표의 단위 불일치 버그 완화 — 종류 미지정이라 packaging이 비어 있을
+// 때, 미터 필요량에서 콘/롤 수를 그대로 빼는 대신, 자재명 키워드로 추천된 종류가 있으면
+// 그 종류 기준 "참고" 환산값을 함께 계산해 둔다(확정은 아니다 — 화면이 "참고" 배지와
+// 함께 보여준다).
+function buildSuggestedPackaging(row: WorkingRow, rules: PackagingUnitRuleLike[]): SuggestedPackagingConversion | undefined {
+  const suggestion = suggestThreadTapeByKeyword(row.materialName, rules);
+  if (!suggestion) return undefined;
+  const rule = rules.find((r) => r.materialSubType === suggestion.materialSubType);
+  if (!rule) return undefined;
+  return {
+    ...buildPackagingConversion(row.colorMeters, row.requiredQty, row.orderedQty, rule),
+    materialSubType: suggestion.materialSubType,
+    displayName: suggestion.displayName,
+    reason: suggestion.reason,
+    conflict: suggestion.conflict,
+    conflictReason: suggestion.conflictReason,
+  };
+}
 
 interface WorkingRow extends MaterialRequirementRow {
   colorMeters: Map<string, number>;
@@ -175,21 +232,7 @@ export function calculateMaterialRequirements(
     if (subtype && rule) {
       // PR-186: 종류가 정해지고 규칙이 있으면 Item.unit과 무관하게 환산한다 — 단위 라벨은
       // 규칙의 packagingUnitLabel(콘/롤)을 쓴다(Item.unit이 'EA'여도 상관없다).
-      const unitLengthM = Number(rule.unitLengthM);
-      const label = rule.packagingUnitLabel;
-      let requiredPackages = 0;
-      const parts: string[] = [];
-      for (const [color, meters] of row.colorMeters.entries()) {
-        const packages = Math.ceil(meters / unitLengthM);
-        requiredPackages += packages;
-        parts.push(`${color}: ${meters.toLocaleString('ko-KR')}m→${packages}${label}`);
-      }
-      const shortagePackages = Math.max(0, requiredPackages - row.orderedQty);
-      const conversionFormula =
-        row.colorMeters.size > 1
-          ? `색상별 ${parts.join(', ')} = 합계 ${requiredPackages}${label}`
-          : `${row.requiredQty.toLocaleString('ko-KR')}m ÷ ${unitLengthM}m/${label} = ${round2(row.requiredQty / unitLengthM)} → ${requiredPackages}${label}`;
-      row.packaging = { packagingUnitLabel: label, unitLengthM, requiredPackages, shortagePackages, conversionFormula };
+      row.packaging = buildPackagingConversion(row.colorMeters, row.requiredQty, row.orderedQty, rule);
     } else if (subtype && !rule) {
       // 종류는 있는데(BOM 행 또는 Item 지정) 규칙 테이블에 없음(데이터 누락) — 추측 금지.
       row.conversionWarning = MISSING_SUBTYPE_WARNING;
@@ -197,9 +240,11 @@ export function calculateMaterialRequirements(
       // PR-186: 종류 미지정 + 이름이 실/테이프로 보임 + 아직 검토 안 함 → 미터 수량을
       // 제안하지 않고 경고만(Item.unit이 'EA'여도 여기서 걸린다 — 운영 데이터 실측 결과).
       row.conversionWarning = MISSING_SUBTYPE_WARNING;
+      row.suggestedPackaging = buildSuggestedPackaging(row, rules);
     } else if (!row.reviewed && classifyPackagingUnit(row.unit)) {
       // PR-185 B-2에서 쓰던 폴백 — 단위 자체가 콘/롤로 표기돼 있는데 종류가 없는 경우.
       row.conversionWarning = MISSING_SUBTYPE_WARNING;
+      row.suggestedPackaging = buildSuggestedPackaging(row, rules);
     }
     // reviewed=true(= "실/테이프 아님"으로 확정)이고 종류도 없으면 일반 자재로 둔다(아무 필드도 안 채움).
 

@@ -54,8 +54,10 @@ export interface MaterialProductionContext {
   productionType: 'CMT' | 'FOB' | null;
 }
 
-export const getMaterialProductionContext = (itemId: number): Promise<MaterialProductionContext> =>
-  apiClient.get('/purchase-orders/material-context', { params: { itemId } });
+// PR-219: styleNo를 넘기면 서버가 "그 스타일" 기준으로 생산유형을 판정한다(생략하면
+// 기존처럼 이 자재를 쓰는 모든 활성 BOM 스타일 기준 — 하위호환).
+export const getMaterialProductionContext = (itemId: number, styleNo?: string): Promise<MaterialProductionContext> =>
+  apiClient.get('/purchase-orders/material-context', { params: { itemId, styleNo: styleNo || undefined } });
 
 export interface GetPurchaseOrdersFilter {
   supplierId?: number;

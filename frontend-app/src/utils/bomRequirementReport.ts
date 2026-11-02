@@ -33,6 +33,16 @@ export interface MaterialRequirementRow {
   lineCount: number;
   packaging?: MaterialRequirementPackaging;
   conversionWarning?: string;
+  // PR-219: conversionWarning이 종류 미지정일 때, 자재명 키워드로 추천된 종류가 있고
+  // 그 종류의 포장 규칙이 있으면 서버가 함께 내려주는 "참고" 환산값([A] 단위 불일치
+  // 버그 완화 — 미터 필요량에서 콘/롤 수를 그대로 빼지 않기 위함). 확정값이 아니다.
+  suggestedPackaging?: MaterialRequirementPackaging & {
+    materialSubType: string;
+    displayName: string;
+    reason: string;
+    conflict?: boolean;
+    conflictReason?: string;
+  };
 }
 
 export type RequirementReason = 'NO_STYLE_NO' | 'NO_BOM' | null;

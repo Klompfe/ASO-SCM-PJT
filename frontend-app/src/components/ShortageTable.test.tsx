@@ -90,3 +90,42 @@ describe('ShortageTable "다른 스타일 미입고 발주" 참고 안내 (PR-19
     expect(html).not.toContain('참고: 다른 스타일 미입고 발주');
   });
 });
+
+// PR-219: [A] 부족자재 표의 단위 불일치 버그 완화 — conversionWarning만 있을 때(종류
+// 미지정) 미터 필요량에서 콘 수를 그대로 빼지 않는다. suggestedPackaging이 있으면
+// "참고" 콘/롤 수치를, 없으면 부족 칸에 "종류 확인 필요"를 보여준다.
+describe('ShortageTable 단위 불일치 완화 (PR-219)', () => {
+  it('conversionWarning만 있고 suggestedPackaging이 없으면 부족 칸에 숫자 대신 "종류 확인 필요"를 보여준다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, {
+        rows: [row({ requiredQty: 301270, orderedQty: 76, shortageQty: 301194, conversionWarning: '실/테이프 종류 미지정 — 선택해 주세요' })],
+        onPick: vi.fn(),
+      }),
+    );
+    expect(html).toContain('종류 확인 필요');
+    expect(html).not.toContain('301,194'); // 미터-콘 뒤섞인 틀린 부족 수량이 보이면 안 됨
+  });
+
+  it('suggestedPackaging이 있으면 참고 콘/롤 수치를 보여주고(부족 0), 추천 종류/근거도 함께 보인다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, {
+        rows: [row({
+          itemName: '오바사 60S/3H THREAD',
+          requiredQty: 301270,
+          orderedQty: 76,
+          shortageQty: 301194,
+          conversionWarning: '실/테이프 종류 미지정 — 선택해 주세요',
+          suggestedPackaging: {
+            packagingUnitLabel: '콘', unitLengthM: 4000, requiredPackages: 76, shortagePackages: 0,
+            conversionFormula: '301,270m ÷ 4000m/콘 = 75.32 → 76콘',
+            materialSubType: 'OBA_SA_SKU_I_SA', displayName: '오바사·스쿠이사', reason: '오버로크·배색용 실',
+          },
+        })],
+        onPick: vi.fn(),
+      }),
+    );
+    expect(html).toContain('참고 0콘');
+    expect(html).toContain('오바사·스쿠이사 추천');
+    expect(html).not.toContain('301,194');
+  });
+});

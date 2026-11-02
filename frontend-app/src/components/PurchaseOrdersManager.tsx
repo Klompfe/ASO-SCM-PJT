@@ -15,10 +15,12 @@ import {
 } from '../api/purchaseOrders.service';
 import { downloadBase64File } from '../utils/fileDownload';
 import { getSuppliers } from '../api/suppliers.service';
-import { getItems, getItem } from '../api/items.service';
+import { getItems, getItem, classifyThreadTape } from '../api/items.service';
 import { getMasterStyles } from '../api/styles.service';
 import { getStyleRequirements } from '../api/workOrders.service';
 import { getBrandPriceRules } from '../api/brandPriceRules.service';
+import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
+import { getCurrentUser, type CurrentUser } from '../api/auth.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
@@ -27,6 +29,7 @@ import {
   sumPurchaseOrderLines, suggestStyleLinkedQuantity, suggestUnlinkedQuantity, trackBadgeLabel, isQuantityFilled, type SupplierRef,
 } from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
+import { looksLikeThreadOrTape, suggestThreadTapeByKeyword, ceilWithEpsilon } from '../utils/materialRequirementDisplay';
 import { PackingReceiptsModal } from './PackingReceiptsModal';
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { ShipmentsManager } from './ShipmentsManager';
@@ -85,6 +88,29 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [panelRefresh, setPanelRefresh] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const itemRequestSeq = useRef(0);
+  // PR-219: [B] 폼 오류 — handleCreate 검증/제출 오류는 "발주 생성" 버튼 가까이에 보여준다
+  // (기존 error state는 목록 조회 실패 등 화면 위쪽 상태 전용으로 남긴다. 둘 다 top에
+  // 띄우면 같은 문구가 중복으로 보일 수 있어 통일함 — PR-219-report.md 참고).
+  const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<'supplier' | 'item' | 'quantity' | 'unitPrice' | 'orderType', boolean>>({
+    supplier: false, item: false, quantity: false, unitPrice: false, orderType: false,
+  });
+  const supplierFieldRef = useRef<HTMLDivElement>(null);
+  const itemFieldRef = useRef<HTMLDivElement>(null);
+  const quantityInputRef = useRef<HTMLInputElement>(null);
+  const unitPriceInputRef = useRef<HTMLInputElement>(null);
+  // PR-219: 실/테이프 종류 추천(전문가 관점 키워드) — 포장단위 규칙과 로그인 사용자 역할을
+  // 미리 불러와 둔다. 역할은 기존 실/테이프 종류 지정 화면(ThreadTapeClassificationManager)과
+  // 같은 기준(MANAGER/ADMIN)으로 "이 종류로 품목에 저장" 버튼을 보여줄지 정한다.
+  const [packagingRules, setPackagingRules] = useState<MaterialPackagingUnitRule[]>([]);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const canClassify = currentUser?.role === 'MANAGER' || currentUser?.role === 'ADMIN';
+  // 선택된 품목(Item)의 기존 종류 지정 상태 — 스타일 미연결 트랙 또는 BOM 행에 종류가
+  // 없을 때의 폴백 기준(effectiveSubType과 같은 우선순위: BOM 행 > Item).
+  const [itemSubtypeInfo, setItemSubtypeInfo] = useState<{ materialSubType: string | null; packagingReviewedAt: string | null } | null>(null);
+  // 저장 전 "임시 선택"(사용자가 추천 영역에서 고른 종류) — 저장하지 않고 참고 계산에만 쓴다.
+  const [tempSubtype, setTempSubtype] = useState<string | null>(null);
+  const [classifying, setClassifying] = useState(false);
   // 비동기 이력 조회가 끝난 시점의 "현재" 폼 값을 읽기 위한 ref(렌더마다 갱신)
   const formValuesRef = useRef({ supplier: null as SupplierRef | null, unitPrice: 0, autofilled: false });
   const [filterSupplier, setFilterSupplier] = useState<SupplierRef | null>(null);
@@ -177,15 +203,21 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         setAvailableBrands([...new Set(list.map((r: any) => r.brandName))] as string[]);
       })
       .catch(() => setAvailableBrands([]));
+    getMaterialPackagingUnitRules()
+      .then((res) => setPackagingRules(Array.isArray(res) ? res : ((res as any)?.data ?? [])))
+      .catch(() => setPackagingRules([]));
+    getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null));
   }, []);
 
   // 품목을 고르면 그 품목의 가장 최근 발주 이력으로 공급업체/단가를 미리 채운다(수정 가능). 이력이 없으면 공란.
-  const selectItem = useCallback(async (picked: ItemRef | null, opts?: { quantityInput?: string }) => {
+  const selectItem = useCallback(async (picked: ItemRef | null, opts?: { quantityInput?: string; styleNo?: string }) => {
     setItem(picked);
     setAutofillNote(null);
     setItemProductionType(null);
     setPriceRef(emptyPriceRef);
     setPriceRefPackagingUnitLabel(null);
+    setItemSubtypeInfo(null);
+    setTempSubtype(null);
     if (opts?.quantityInput !== undefined) setQuantityInput(opts.quantityInput);
     if (!picked) {
       setOrderType(null);
@@ -213,11 +245,21 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       // 이력 조회 실패는 발주 자체를 막지 않는다 — 자동 채움만 건너뛴다.
     }
     try {
-      const ctx = await getMaterialProductionContext(picked.id);
+      // PR-219: 스타일을 연결한 경우 그 스타일 기준으로 CMT/FOB를 판정한다(사용자 결정 —
+      // 다른 스타일의 생산유형이 섞여 있어도 "지금 연결한 스타일"이 우선한다).
+      const ctx = await getMaterialProductionContext(picked.id, opts?.styleNo);
       if (seq !== itemRequestSeq.current) return;
       setItemProductionType(ctx.productionType);
     } catch {
       // 생산유형 조회 실패는 FOB와 동일(단가 필수)로 안전하게 처리 — itemProductionType은 null 그대로 둔다.
+    }
+    try {
+      // PR-219: 실/테이프 종류 추천 영역(Item.materialSubType/packagingReviewedAt 기준 폴백)용.
+      const full = await getItem(picked.id);
+      if (seq !== itemRequestSeq.current) return;
+      setItemSubtypeInfo({ materialSubType: full.materialSubType ?? null, packagingReviewedAt: full.packagingReviewedAt ?? null });
+    } catch {
+      // 조회 실패해도 발주 자체는 막지 않는다 — 추천 영역만 "직접 선택"으로 남는다.
     }
   }, []);
 
@@ -226,12 +268,17 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // PR-187 C: rowOverride를 받을 수 있게 한다 — handlePickMaterial이 setStyleMaterialRows
   // 직후 바로 호출하면 styleMaterialRows state는 다음 렌더까지 갱신되지 않아(React의
   // 비동기 state 업데이트), 방금 고른 row를 못 찾고 수량이 비워지지 않는 버그가 있었다.
-  const selectStyleMaterial = (picked: ItemRef | null, rowOverride?: MaterialRequirementRow) => {
+  const selectStyleMaterial = (picked: ItemRef | null, rowOverride?: MaterialRequirementRow, styleNoOverride?: string) => {
     if (!picked) { void selectItem(null); return; }
     const row = rowOverride ?? styleMaterialRows.find((r) => r.itemId === picked.id);
     if (!row) { void selectItem(picked); return; }
     const sugg = suggestStyleLinkedQuantity(row);
-    void selectItem({ ...picked, unit: sugg.unitLabel ?? undefined }, { quantityInput: sugg.quantity != null ? String(sugg.quantity) : '' });
+    // PR-219: styleSearch state는 setStyleSearch 직후라면 아직 갱신 전일 수 있어(React
+    // 비동기 state), handlePickMaterial처럼 styleNo를 아는 호출부는 명시적으로 넘긴다.
+    void selectItem(
+      { ...picked, unit: sugg.unitLabel ?? undefined },
+      { quantityInput: sugg.quantity != null ? String(sugg.quantity) : '', styleNo: styleNoOverride ?? styleSearch?.styleNo ?? undefined },
+    );
   };
 
   useEffect(() => {
@@ -250,7 +297,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     if (styleNo) {
       setStyleSearch({ styleNo });
       setStyleMaterialRows([row]);
-      selectStyleMaterial({ id: row.itemId, name: row.itemName, code: row.itemCode }, row);
+      selectStyleMaterial({ id: row.itemId, name: row.itemName, code: row.itemCode }, row, styleNo);
     } else {
       // PR-187 C: 스타일 미연결 경로도 같은 원칙(종류 미지정 실/테이프는 미터 수량을
       // 추측해서 채우지 않는다)을 따른다 — 일반 자재는 기존처럼 ceil(부족)/최소 1.
@@ -300,31 +347,48 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillStyleNo, onStylePrefillConsumed]);
 
+  // PR-219: 검증 실패 시 해당 칸에 빨간 테두리를 주고 첫 오류 칸으로 스크롤/포커스한다
+  // (기존엔 setError만 페이지 맨 위에 떠서 "발주 생성" 버튼 근처에서는 반응이 없는
+  // 것처럼 보였다 — PILOT-18 조사 결과).
+  const focusField = (field: keyof typeof fieldErrors) => {
+    const map: Record<keyof typeof fieldErrors, React.RefObject<HTMLElement | null>> = {
+      supplier: supplierFieldRef, item: itemFieldRef, quantity: quantityInputRef, unitPrice: unitPriceInputRef, orderType: formRef,
+    };
+    const el = map[field].current;
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (el && 'focus' in el) (el as HTMLElement).focus?.();
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    if (!supplier || !item) {
-      setError('공급업체와 품목을 선택해 주세요.');
-      return;
-    }
+    setFormError(null);
+    const noFieldErrors = { supplier: false, item: false, quantity: false, unitPrice: false, orderType: false };
+    const fail = (message: string, field: keyof typeof fieldErrors) => {
+      setFormError(message);
+      setFieldErrors({ ...noFieldErrors, [field]: true });
+      focusField(field);
+    };
+    if (!supplier) { fail('공급업체를 선택해 주세요.', 'supplier'); return; }
+    if (!item) { fail('품목을 선택해 주세요.', 'item'); return; }
     const hasLines = poLines.length > 0;
     // PR-185 B: 수량은 더 이상 기본값이 없다 — 라인이 없으면 반드시 입력해야 한다.
     if (!hasLines && !isQuantityFilled(quantityInput)) {
-      setError('수량을 입력해 주세요(0보다 큰 숫자).');
+      fail('수량을 입력해 주세요(0보다 큰 숫자).', 'quantity');
       return;
     }
     if (isUnitPriceRequired(itemProductionType) && (!newPo.unitPrice || newPo.unitPrice <= 0)) {
-      setError('품목 단가를 입력해 주세요.');
+      fail('품목 단가를 입력해 주세요.', 'unitPrice');
       return;
     }
     if (hasLines && poLines.some((l) => !Number.isInteger(Number(l.qty)) || Number(l.qty) < 1)) {
-      setError('색상/사이즈 줄의 수량은 1 이상의 정수여야 합니다.');
+      fail('색상/사이즈 줄의 수량은 1 이상의 정수여야 합니다.', 'quantity');
       return;
     }
     if (!canCreateWithOrderType(orderType)) {
-      setError('발주 구분(실발주/가발주)을 선택해 주세요.');
+      fail('발주 구분(실발주/가발주)을 선택해 주세요.', 'orderType');
       return;
     }
+    setFieldErrors(noFieldErrors);
     try {
       // CMT 건에서 단가를 비워둔 경우(0) undefined로 보낸다 — "입력 안 함"과 "0원"을 구분한다.
       const unitPrice = newPo.unitPrice && newPo.unitPrice > 0 ? newPo.unitPrice : undefined;
@@ -358,10 +422,13 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setAutofillNote(null);
       setOrderType(null);
       setOrderTypeHint(null);
+      setTempSubtype(null);
+      setItemSubtypeInfo(null);
       setPanelRefresh((n) => n + 1); // 스타일 부족 자재 표의 "이미 발주" 수량 갱신
       loadPurchaseOrders();
     } catch (err: any) {
-      setError(getErrorMessage(err, '발주 생성에 실패했습니다.'));
+      // PR-219: 서버 오류도 같은 폼 오류 박스(버튼 근처)에 보여준다.
+      setFormError(getErrorMessage(err, '발주 생성에 실패했습니다.'));
     }
   };
 
@@ -387,6 +454,53 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setError(getErrorMessage(err, '발주 취소에 실패했습니다.'));
     }
   };
+
+  // PR-219: 실/테이프 종류 — BOM 행(스타일 연결 트랙)이 우선, 없으면 Item 지정(폴백) —
+  // effectiveSubType(백엔드)과 같은 우선순위. 저장된 값이 있으면 추천 영역은 숨긴다(기존
+  // 동작 그대로, PR-216/218 회귀 없음).
+  const styleLinkedRow = styleSearch && item ? styleMaterialRows.find((r) => r.itemId === item.id) : undefined;
+  const existingSubtype = styleSearch ? (styleLinkedRow?.materialSubType ?? null) : (itemSubtypeInfo?.materialSubType ?? null);
+  const subtypeReviewed = !!itemSubtypeInfo?.packagingReviewedAt;
+  const threadTapeSuggestion = item ? suggestThreadTapeByKeyword(item.name, packagingRules) : null;
+  const needsSubtypeUi = !!item && !existingSubtype && !subtypeReviewed && looksLikeThreadOrTape(item.name, packagingRules);
+  const effectiveSubtype = existingSubtype ?? tempSubtype ?? null;
+  const effectiveSubtypeRule = effectiveSubtype ? packagingRules.find((r) => r.materialSubType === effectiveSubtype) : undefined;
+  // PR-219 ⑤: [B] 수량 참고 — 종류가 이미 지정돼 있으면(styleLinkedRow.packaging) 기존
+  // "이 자재로 발주하기"/자동 채움 경로가 이미 처리하므로 중복으로 보여주지 않는다.
+  const qtyRef = styleLinkedRow && !styleLinkedRow.packaging && effectiveSubtypeRule
+    ? (() => {
+        const packages = ceilWithEpsilon(styleLinkedRow.requiredQty, effectiveSubtypeRule.unitLengthM);
+        const shortage = Math.max(0, packages - styleLinkedRow.orderedQty);
+        return {
+          packages,
+          shortage,
+          formula: `필요 ${styleLinkedRow.requiredQty.toLocaleString('ko-KR')}m ÷ ${effectiveSubtypeRule.unitLengthM}m/${effectiveSubtypeRule.packagingUnitLabel} = ${packages}${effectiveSubtypeRule.packagingUnitLabel} (참고)`,
+        };
+      })()
+    : null;
+
+  const handleSaveSubtype = async () => {
+    if (!item || !tempSubtype || !canClassify) return;
+    setClassifying(true);
+    try {
+      await classifyThreadTape([{ itemId: item.id, materialSubType: tempSubtype }]);
+      setItemSubtypeInfo({ materialSubType: tempSubtype, packagingReviewedAt: new Date().toISOString() });
+      toast.success('실/테이프 종류가 저장되었습니다.');
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '종류 저장에 실패했습니다.'));
+    } finally {
+      setClassifying(false);
+    }
+  };
+
+  // PR-219: 추천값을 임시 선택의 기본값으로 미리 채운다(저장은 아님) — 품목/추천이 바뀔
+  // 때만 다시 채우고, 사용자가 드롭다운에서 고른 값은 덮어쓰지 않는다.
+  useEffect(() => {
+    if (needsSubtypeUi && threadTapeSuggestion && tempSubtype === null) {
+      setTempSubtype(threadTapeSuggestion.materialSubType);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id, needsSubtypeUi, threadTapeSuggestion?.materialSubType]);
 
   const statusBadge = (status: string) => {
     const style =
@@ -444,11 +558,11 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             />
             {styleSearch && <span className="text-xs text-gray-400 mt-1">{styleRowsLoading ? '자재 목록 불러오는 중...' : `${styleMaterialRows.length}종 자재`}</span>}
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col" ref={itemFieldRef} tabIndex={-1}>
             <label className="text-sm text-gray-600 mb-1">품목(원자재){styleSearch && <span className="text-blue-600 font-normal"> — 이 스타일 BOM 자재만</span>}</label>
             <SearchSelectField<ItemRef>
               value={item}
-              onChange={(picked) => { if (styleSearch) selectStyleMaterial(picked); else void selectItem(picked); }}
+              onChange={(picked) => { if (styleSearch) selectStyleMaterial(picked, undefined, styleSearch.styleNo); else void selectItem(picked); }}
               search={styleSearch ? searchStyleMaterials : searchRawMaterials}
               getKey={(i) => i.id}
               getLabel={(i) => `${i.name} (${i.code})`}
@@ -456,10 +570,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               ariaLabel="품목"
               placeholder="품목 검색"
               title="품목(원자재) 검색"
-              className="w-64"
+              className={`w-64 ${fieldErrors.item ? 'ring-2 ring-red-500 rounded' : ''}`}
             />
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col" ref={supplierFieldRef} tabIndex={-1}>
             <label className="text-sm text-gray-600 mb-1">공급업체</label>
             <div className="flex items-stretch gap-1">
               <SearchSelectField<SupplierRef>
@@ -472,7 +586,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 ariaLabel="공급업체"
                 placeholder="공급업체 검색"
                 title="공급업체 검색"
-                className="w-64"
+                className={`w-64 ${fieldErrors.supplier ? 'ring-2 ring-red-500 rounded' : ''}`}
               />
               <button
                 type="button"
@@ -499,14 +613,15 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 종류가 지정돼 있으면 "콘/롤 기준"임을 알 수 있게(수량 자동 채움은 아님). */}
             <label className="text-sm text-gray-600 mb-1">수량{(priceRefPackagingUnitLabel || item?.unit) && <span className="text-gray-400 font-normal"> ({priceRefPackagingUnitLabel || item?.unit})</span>}</label>
             <input
+              ref={quantityInputRef}
               type="number"
               min={1}
-              className="border border-gray-300 rounded px-3 py-2 w-32 disabled:bg-gray-100"
+              className={`border rounded px-3 py-2 w-32 disabled:bg-gray-100 ${fieldErrors.quantity ? 'border-red-500' : 'border-gray-300'}`}
               value={poLines.length > 0 ? sumPurchaseOrderLines(poLines) : quantityInput}
               readOnly={poLines.length > 0}
               required={poLines.length === 0}
               title={poLines.length > 0 ? '색상/사이즈 줄 합계로 자동 계산됩니다' : undefined}
-              onChange={(e) => setQuantityInput(e.target.value)}
+              onChange={(e) => { setQuantityInput(e.target.value); setFieldErrors((f) => ({ ...f, quantity: false })); }}
               aria-label="수량"
             />
           </div>
@@ -514,7 +629,17 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             <label className="text-sm text-gray-600 mb-1">
               단가{!isUnitPriceRequired(itemProductionType) && <span className="text-gray-400 font-normal"> (CMT — 선택, 선적서류 작성 시 입력 가능)</span>}
             </label>
-            <input type="number" min={0} step="any" className="border border-gray-300 rounded px-3 py-2 w-32" value={newPo.unitPrice} onChange={(e) => { setNewPo({ ...newPo, unitPrice: Number(e.target.value) }); setAutofilled(false); }} aria-label="단가" />
+            <input
+              ref={unitPriceInputRef}
+              type="number"
+              min={0}
+              step="any"
+              className={`border rounded px-3 py-2 w-32 ${fieldErrors.unitPrice ? 'border-red-500' : 'border-gray-300'}`}
+              value={newPo.unitPrice}
+              onChange={(e) => { setNewPo({ ...newPo, unitPrice: Number(e.target.value) }); setAutofilled(false); setFieldErrors((f) => ({ ...f, unitPrice: false })); }}
+              aria-label="단가"
+            />
+            {fieldErrors.unitPrice && <p className="text-xs text-red-600 mt-1" data-testid="unit-price-inline-hint">단가를 입력해 주세요</p>}
           </div>
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">구분</label>
@@ -550,14 +675,71 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           </div>
           <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700" disabled={loading}>발주 생성</button>
         </div>
+        {/* PR-219: 검증/제출 오류를 "발주 생성" 버튼 바로 아래(이 자리)에 띄운다 — 폼을
+            아래로 스크롤해 작성 중일 때도 보이게. 화면 맨 위 박스(error state)는 발주
+            목록 조회 등 폼 밖의 상태 전용으로 남긴다(PR-219-report.md 참고). */}
+        {formError && <div className="p-3 bg-red-100 text-red-700 rounded text-sm" data-testid="form-error">{formError}</div>}
         {autofillNote && <p className="text-xs text-blue-700" data-testid="autofill-note">{autofillNote}</p>}
         {orderTypeHint && <p className="text-xs text-gray-500" data-testid="order-type-hint">구분 제안: {orderTypeHint}</p>}
+        {/* PR-219: 실/테이프 종류가 미지정이고 이름상 실/테이프로 보이는 품목 — 전문가
+            관점 키워드 추천을 보여주고, 임시 선택(저장 안 함)을 바꾸면 아래 수량/단가
+            참고가 즉시 그 종류로 다시 계산된다. 이미 종류가 지정된 품목은 이 영역을
+            숨긴다(PR-216/218 기존 동작 유지). */}
+        {needsSubtypeUi && (
+          <div className="border border-indigo-200 bg-indigo-50 rounded p-2 space-y-1" data-testid="subtype-suggestion-box">
+            {threadTapeSuggestion ? (
+              <p className="text-xs text-indigo-800">
+                추천: <b>{threadTapeSuggestion.displayName}</b>
+                {effectiveSubtypeRule && ` (${effectiveSubtypeRule.unitLengthM}m/${effectiveSubtypeRule.packagingUnitLabel})`}
+                {' — 근거: '}{threadTapeSuggestion.reason}
+                {threadTapeSuggestion.conflict && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 text-xs">확인 필요 — {threadTapeSuggestion.conflictReason}</span>}
+              </p>
+            ) : (
+              <p className="text-xs text-indigo-800">추천 없음 — 이름에서 종류를 하나로 판별할 수 없습니다. 직접 선택해 주세요.</p>
+            )}
+            <div className="flex items-center gap-2">
+              <select
+                className="border rounded px-2 py-1 text-sm"
+                aria-label="실/테이프 종류 임시 선택"
+                value={tempSubtype ?? ''}
+                onChange={(e) => setTempSubtype(e.target.value || null)}
+              >
+                <option value="">- 선택 안 함 -</option>
+                {packagingRules.map((r) => <option key={r.materialSubType} value={r.materialSubType}>{r.displayName}</option>)}
+              </select>
+              <span className="text-xs text-indigo-600">저장 전 참고값</span>
+              {canClassify ? (
+                <button
+                  type="button"
+                  disabled={!tempSubtype || classifying}
+                  onClick={() => { if (window.confirm(`품목 "${item?.name}"의 실/테이프 종류를 저장하시겠습니까? (이후 BOM/발주/선적 계산에 반영됩니다)`)) void handleSaveSubtype(); }}
+                  className="text-xs bg-indigo-600 text-white px-2 py-1 rounded disabled:opacity-50"
+                >이 종류로 품목에 저장</button>
+              ) : (
+                <span className="text-xs text-amber-700" data-testid="subtype-save-denied">관리자/매니저만 저장할 수 있습니다.</span>
+              )}
+            </div>
+          </div>
+        )}
+        {/* PR-219 ⑤: 스타일 연결 트랙에서 종류(저장 또는 임시 선택)가 있으면 필요량을
+            콘/롤로 환산한 "참고" 수량과 "이 값 사용" 버튼을 보여준다. */}
+        {qtyRef && (
+          <div className="border border-gray-200 bg-white rounded p-2 flex items-center gap-2 text-xs text-gray-700" data-testid="qty-reference-box">
+            <span>{qtyRef.formula}{qtyRef.shortage !== qtyRef.packages ? ` · 부족 ${qtyRef.shortage}${effectiveSubtypeRule?.packagingUnitLabel}` : ''}</span>
+            <button
+              type="button"
+              className="text-blue-600 border border-blue-300 rounded px-2 py-0.5 hover:bg-blue-50"
+              onClick={() => setQuantityInput(String(qtyRef.shortage > 0 ? qtyRef.shortage : qtyRef.packages))}
+            >이 값 사용</button>
+          </div>
+        )}
         {item && (
           <PriceReferenceBlock
             itemId={item.id}
             itemName={item.name}
             styleNo={styleSearch?.styleNo}
             brandName={styleSearch ? undefined : (brandOverride || undefined)}
+            materialSubType={effectiveSubtype ?? undefined}
             value={priceRef}
             onChange={setPriceRef}
             onPackagingUnitLabel={setPriceRefPackagingUnitLabel}

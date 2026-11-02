@@ -155,17 +155,27 @@ export class PurchaseOrdersService {
   // 섞여 있거나 BOM 연결이 없으면 productionType: null(프론트는 FOB와 동일하게 취급해
   // 단가 필수 — 안전한 기본값, 기존 정책 유지). styleNo는 스타일이 정확히 하나일
   // 때만 채운다(여럿이면 "그 스타일"이라 할 단일 값이 없음 — 현재 프론트는 안 쓰는 값).
+  // PR-219: [B] 발주 폼에서 스타일을 이미 연결한 경우(파라미터 styleNo) — 자재를 쓰는
+  // "모든" 활성 BOM 스타일이 아니라 "그 스타일"의 생산유형으로 판정한다(사용자 결정 —
+  // 다른 스타일의 생산유형이 섞여 있어도 지금 연결한 스타일이 CMT면 단가 선택 입력이어야
+  // 한다). styleNo를 넘겼는데 그 스타일의 활성 BOM에 이 자재가 없으면(또는 styleNo
+  // 생략) 기존 폴백 로직 그대로 — 기존 호출(스타일 없이)의 응답은 바뀌지 않는다(하위호환).
   async getMaterialProductionContext(
     itemId: number,
+    styleNo?: string,
   ): Promise<{ styleNo: string | null; productionType: string | null }> {
     const styles = await this.findActiveStyleProductionTypes(itemId);
+    if (styleNo) {
+      const match = styles.find((s) => s.styleNo === styleNo);
+      if (match) return { styleNo: match.styleNo, productionType: match.productionType };
+    }
     if (styles.length === 0) {
       return { styleNo: null, productionType: null };
     }
     const distinctTypes = new Set(styles.map((s) => s.productionType));
     const productionType = distinctTypes.size === 1 ? [...distinctTypes][0] : null;
-    const styleNo = styles.length === 1 ? styles[0].styleNo : null;
-    return { styleNo, productionType };
+    const resolvedStyleNo = styles.length === 1 ? styles[0].styleNo : null;
+    return { styleNo: resolvedStyleNo, productionType };
   }
 
   // PR-179: 일괄발주. 모든 행의 공급업체/품목을 먼저 확인해 하나라도 없으면 아무것도 쓰지 않고

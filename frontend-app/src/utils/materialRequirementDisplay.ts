@@ -77,6 +77,73 @@ export function buildThreadTapeSuggestion(itemName: string | null | undefined, r
   return { materialSubType: matches[0].rule.materialSubType, displayName: matches[0].rule.displayName };
 }
 
+// PR-219: [B] 발주 폼의 "실/테이프 종류 추천" — src/common/utils/packaging-subtype.util.ts
+// (백엔드)의 suggestThreadTapeByKeyword와 같은 키워드 표를 미러링한다(프론트/백엔드가
+// 별도 TS 프로젝트라 그대로 import할 수 없다 — 이 파일 기존 패턴과 동일).
+export interface ThreadTapeKeywordSuggestion {
+  materialSubType: string;
+  displayName: string;
+  reason: string;
+  conflict?: boolean;
+  conflictReason?: string;
+}
+
+const OBA_KEYWORDS = ['오바', '오버로크', '배색사', '배색 실'];
+const COA_KEYWORDS = ['본봉', '스티치'];
+const JINUIDO_KEYWORDS = ['지누이도'];
+const BAESAEK_KEYWORD = '배색';
+
+export function suggestThreadTapeByKeyword(
+  itemName: string | null | undefined,
+  rules: PackagingRuleLike[],
+): ThreadTapeKeywordSuggestion | null {
+  const name = itemName ?? '';
+  if (!name) return null;
+  const upper = name.toUpperCase();
+  const hasOba = OBA_KEYWORDS.some((k) => name.includes(k));
+  const hasCoa = COA_KEYWORDS.some((k) => name.includes(k)) || upper.includes('QQ');
+  const hasJinuido = JINUIDO_KEYWORDS.some((k) => name.includes(k));
+  const hasBaesaek = name.includes(BAESAEK_KEYWORD);
+
+  const findRule = (subType: string) => rules.find((r) => r.materialSubType === subType);
+
+  const dadeRule = findRule('DADE');
+  if (dadeRule && name.includes(dadeRule.displayName)) {
+    return { materialSubType: dadeRule.materialSubType, displayName: dadeRule.displayName, reason: '다데/암홀 테이프' };
+  }
+  const amholRule = findRule('AMHOL');
+  if (amholRule && name.includes(amholRule.displayName)) {
+    return { materialSubType: amholRule.materialSubType, displayName: amholRule.displayName, reason: '다데/암홀 테이프' };
+  }
+
+  if (hasJinuido) {
+    const rule = findRule('POLY_JINUIDO');
+    if (rule) return { materialSubType: rule.materialSubType, displayName: rule.displayName, reason: '지누이도' };
+  }
+
+  if (hasCoa && (hasOba || hasBaesaek)) {
+    const rule = findRule('COA_SA');
+    if (rule) {
+      return {
+        materialSubType: rule.materialSubType,
+        displayName: rule.displayName,
+        reason: '본봉·스티치용 실',
+        conflict: true,
+        conflictReason: hasOba ? '이름에 오버로크/배색 계열 키워드도 있어 확인 필요' : '이름에 배색도 있어 확인 필요',
+      };
+    }
+  }
+  if (hasOba) {
+    const rule = findRule('OBA_SA_SKU_I_SA');
+    if (rule) return { materialSubType: rule.materialSubType, displayName: rule.displayName, reason: '오버로크·배색용 실' };
+  }
+  if (hasCoa) {
+    const rule = findRule('COA_SA');
+    if (rule) return { materialSubType: rule.materialSubType, displayName: rule.displayName, reason: '본봉·스티치용 실' };
+  }
+  return null;
+}
+
 // 부동소수점 오차로 경계값(예: 2500.0000000001)에서 한 단위 더 올라가지 않게 하는 보정.
 // 기존 계산 로직(material-requirements.util.ts)에는 이 보정이 없다 — 저장된 계산 결과는
 // 건드리지 않고, 이 화면에서 새로 계산하는 값에만 적용한다.

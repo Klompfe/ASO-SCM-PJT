@@ -123,6 +123,52 @@ describe('CMT 발주 단가 선택 입력 + 소수점 정밀도 완화 회귀 �
         .expect(200);
       expect(res.body.data).toEqual({ styleNo: null, productionType: null });
     });
+
+    // PR-219: 자재가 FOB/CMT 스타일 양쪽에 걸쳐 있으면(공용 자재) 기존엔 섞여 있다는
+    // 이유로 productionType: null(=FOB와 동일, 단가 필수)이 됐다 — [B] 발주 폼에서
+    // "지금 연결한 스타일"을 styleNo로 넘기면 그 스타일 기준으로 판정해야 한다.
+    it('같은 자재가 FOB/CMT 스타일에 걸쳐 있어도 styleNo를 주면 그 스타일 기준으로 판정한다', async () => {
+      const sharedName = `Shared Mixed Material ${Date.now()}`;
+      const cmtStyleNo = `MIXED-CMT-${Date.now()}`;
+      const fobStyleNo = `MIXED-FOB-${Date.now()}`;
+      const itemId = await setupItemWithStyle({ itemName: sharedName, styleNo: cmtStyleNo, productionType: 'CMT' });
+      // 같은 자재명으로 두 번째(FOB) 스타일에도 연결 — mapping/commit이 자재명으로 Item을
+      // 재사용하는지 확인하기 위해 같은 itemId가 재사용되는지도 함께 검증한다.
+      const fobCommit = await request(app.getHttpServer())
+        .post('/mapping/commit')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          styleNo: fobStyleNo,
+          overviewData: { styleNo: fobStyleNo, factory: '베트남', totalQty: 100, buyer: 'PO CMT Price E2E Buyer', productionType: 'FOB', shipDate: '' },
+          bomItems: [{ category: 'FABRIC', itemName: sharedName, spec: '150cm', consumption: 1, requiredQty: 100 }],
+        })
+        .expect(201);
+      expect(fobCommit.body.data).toBeDefined();
+
+      // 섞여 있으면(styleNo 없이 조회) null이어야 한다(기존 폴백 — 이 테스트의 전제 확인).
+      const mixed = await request(app.getHttpServer())
+        .get('/purchase-orders/material-context')
+        .query({ itemId })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(mixed.body.data.productionType).toBeNull();
+
+      // CMT 스타일을 명시하면 CMT로 판정돼야 한다.
+      const cmt = await request(app.getHttpServer())
+        .get('/purchase-orders/material-context')
+        .query({ itemId, styleNo: cmtStyleNo })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(cmt.body.data).toEqual({ styleNo: cmtStyleNo, productionType: 'CMT' });
+
+      // FOB 스타일을 명시하면 FOB로 판정돼야 한다.
+      const fob = await request(app.getHttpServer())
+        .get('/purchase-orders/material-context')
+        .query({ itemId, styleNo: fobStyleNo })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(fob.body.data).toEqual({ styleNo: fobStyleNo, productionType: 'FOB' });
+    });
   });
 
   describe('단가 선택/필수 — 서버는 어느 쪽이든 단가 없이 저장을 허용한다(필수 여부 판단은 프론트 책임)', () => {

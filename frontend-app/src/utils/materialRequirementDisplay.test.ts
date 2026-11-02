@@ -4,6 +4,7 @@ import {
   formatCountOrQty,
   looksLikeThreadOrTape,
   buildThreadTapeSuggestion,
+  suggestThreadTapeByKeyword,
   ceilWithEpsilon,
   ceilToInt,
   computeRawRowPackaging,
@@ -137,5 +138,51 @@ describe('formatBomItemQty (PR-218, ItemsManager의 BOM 조회처럼 threadType/
   it('규칙이 미터(M) 기준인데 자재 단위가 다르면(예: Y) 환산하지 않고 UNIT_MISMATCH', () => {
     const result = formatBomItemQty(100, { subtype: 'DADE', itemName: '다데', itemUnit: 'Y' }, RULES);
     expect(result.kind).toBe('UNIT_MISMATCH');
+  });
+});
+
+// PR-219: [B] 발주 폼의 "실/테이프 종류 추천(전문가 관점 키워드)" — 백엔드
+// (src/common/utils/packaging-subtype.util.ts)의 suggestThreadTapeByKeyword와 같은
+// 키워드 표 미러. 백엔드 테스트(packaging-subtype.util.spec.ts)와 같은 케이스로 맞춘다.
+describe('suggestThreadTapeByKeyword (PR-219)', () => {
+  const RULES_WITH_JINUIDO: PackagingRuleLike[] = [
+    ...RULES,
+    { materialSubType: 'POLY_JINUIDO', displayName: '폴리지누이도', packagingUnitLabel: '콘', unitLengthM: 500 },
+  ];
+
+  it('오바/오버로크/배색사/배색 실 → 오바사', () => {
+    expect(suggestThreadTapeByKeyword('오바사 60S/3', RULES)?.materialSubType).toBe('OBA_SA_SKU_I_SA');
+    expect(suggestThreadTapeByKeyword('오버로크 실 40S', RULES)?.materialSubType).toBe('OBA_SA_SKU_I_SA');
+    expect(suggestThreadTapeByKeyword('배색사 30S', RULES)?.materialSubType).toBe('OBA_SA_SKU_I_SA');
+  });
+
+  it('본봉/스티치/QQ → 코아사', () => {
+    expect(suggestThreadTapeByKeyword('본봉사 60S/3', RULES)?.materialSubType).toBe('COA_SA');
+    expect(suggestThreadTapeByKeyword('스티치 실', RULES)?.materialSubType).toBe('COA_SA');
+    expect(suggestThreadTapeByKeyword('QQ 40수', RULES)?.materialSubType).toBe('COA_SA');
+  });
+
+  it('지누이도 → 폴리지누이도', () => {
+    expect(suggestThreadTapeByKeyword('지누이도사', RULES_WITH_JINUIDO)?.materialSubType).toBe('POLY_JINUIDO');
+  });
+
+  it('다데/암홀은 기존 displayName 매칭 그대로', () => {
+    expect(suggestThreadTapeByKeyword('다데 테이프', RULES)?.materialSubType).toBe('DADE');
+    expect(suggestThreadTapeByKeyword('암홀 테이프', RULES)?.materialSubType).toBe('AMHOL');
+  });
+
+  it('충돌(본봉/스티치/QQ + 배색 계열) — 코아사를 추천하되 확인 필요 표시', () => {
+    const r = suggestThreadTapeByKeyword('본봉사(배색)', RULES);
+    expect(r?.materialSubType).toBe('COA_SA');
+    expect(r?.conflict).toBe(true);
+  });
+
+  it('키워드가 하나도 없으면(번수만 있음) 추천하지 않는다', () => {
+    expect(suggestThreadTapeByKeyword('60S/3H THREAD', RULES)).toBeNull();
+  });
+
+  it('빈 이름은 null', () => {
+    expect(suggestThreadTapeByKeyword('', RULES)).toBeNull();
+    expect(suggestThreadTapeByKeyword(null, RULES)).toBeNull();
   });
 });
