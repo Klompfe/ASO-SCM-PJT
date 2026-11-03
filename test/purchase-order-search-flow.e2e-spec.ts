@@ -131,9 +131,10 @@ describe('발주 등록 화면 검색 선택 (PR-126)', () => {
       await post('/master-styles').send({ styleNo: 'SR-STYLE', factory: '베트남', buyer: 'B', totalQty: 300, brand: 'x', itemType: 'JK', productionType: 'FOB', targetRdd: '2026-12-01' }).expect(201);
       const style = await dataSource.getRepository(MasterStyle).findOneOrFail({ where: { styleNo: 'SR-STYLE' } });
       const bom = await dataSource.getRepository(Bom).save(dataSource.getRepository(Bom).create({ bomNo: 'B-SR', version: 'V1', isActive: true, style }));
+      // PR-220b: colorCode는 ''(공통 취급) — 색상별 수량(colorQuantities) 검증이 아니다.
       for (const [k, cons] of [['fabric', 1.25], ['lining', 0.8], ['button', 6]] as const) {
         await dataSource.getRepository(BomItem).save(
-          dataSource.getRepository(BomItem).create({ bom, material: { id: mat[k] } as Item, category: '겉감', colorCode: 'BK', spec: 'S', consumption: cons, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
+          dataSource.getRepository(BomItem).create({ bom, material: { id: mat[k] } as Item, category: '겉감', colorCode: '', spec: 'S', consumption: cons, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
         );
       }
       await post('/master-styles').send({ styleNo: 'SR-NOBOM', factory: '베트남', buyer: 'B', totalQty: 10, brand: 'x', itemType: 'JK', productionType: 'FOB', targetRdd: '2026-12-01' }).expect(201);

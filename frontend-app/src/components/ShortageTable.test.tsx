@@ -162,3 +162,23 @@ describe('ShortageTable 작지 수량 출처/불일치 표시 (PR-220)', () => {
     expect(html).not.toContain('확인이 필요합니다');
   });
 });
+
+// PR-220b: 색상 있는 BOM 행에 작지 수량/색상×사이즈 수량표 근거가 전혀 없으면 숫자를
+// 만들지 않는다(needsColorQty) — 필요/발주/부족 칸 모두 "색상별 수량 확인 필요"로 뜬다.
+describe('ShortageTable needsColorQty 표시 (PR-220b)', () => {
+  it('needsColorQty:true면 필요/발주/부족 칸이 모두 "색상별 수량 확인 필요"다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, {
+        rows: [row({ needsColorQty: true, basis: 'unknown', conversionWarning: '색상별 수량 확인 필요 — 작지 재업로드(수량 포함) 또는 MATERIAL LIST 재업로드로 색상×사이즈 수량을 채워 주세요' })],
+        onPick: vi.fn(),
+      }),
+    );
+    expect(html).toContain('색상별 수량 확인 필요');
+    expect(html).toContain('작지 재업로드');
+  });
+
+  it('needsColorQty가 없으면(기본) "색상별 수량 확인 필요" 문구가 없다', () => {
+    const html = renderToStaticMarkup(createElement(ShortageTable, { rows: [row()], onPick: vi.fn() }));
+    expect(html).not.toContain('색상별 수량 확인 필요');
+  });
+});

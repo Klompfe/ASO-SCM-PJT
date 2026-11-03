@@ -97,13 +97,15 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
               </td>
               <td className={td}>{r.categories.join(', ') || '-'}</td>
               <td className={`${td} text-right`}>
-                {r.packaging ? `${fmt(r.requiredQty)}m (${formatRequirementQty(r.requiredQty, r.packaging)})`
+                {r.needsColorQty ? <span className="text-amber-700 text-xs" data-testid={`needs-color-qty-${r.itemId}`}>색상별 수량 확인 필요</span>
+                  : r.packaging ? `${fmt(r.requiredQty)}m (${formatRequirementQty(r.requiredQty, r.packaging)})`
                   : r.suggestedPackaging ? `${fmt(r.requiredQty)}m (참고 ${formatRequirementQty(r.requiredQty, r.suggestedPackaging)})`
                   : r.conversionWarning ? `${fmt(r.requiredQty)}m`
                   : formatRequirementQty(r.requiredQty, r.packaging)}
               </td>
               <td className={`${td} text-right`}>
-                {r.packaging ? formatCountOrQty(r.orderedQty, r.orderedQty, r.packaging.packagingUnitLabel)
+                {r.needsColorQty ? <span className="text-amber-700 text-xs">색상별 수량 확인 필요</span>
+                  : r.packaging ? formatCountOrQty(r.orderedQty, r.orderedQty, r.packaging.packagingUnitLabel)
                   : r.suggestedPackaging ? `참고 ${formatCountOrQty(r.orderedQty, r.orderedQty, r.suggestedPackaging.packagingUnitLabel)}`
                   : r.conversionWarning ? '종류 확인 필요'
                   : formatCountOrQty(r.orderedQty, undefined, undefined)}
@@ -123,12 +125,17 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                   부족(콘/롤)을, 추천도 없으면 숫자 대신 "종류 확인 필요"를 보여준다.
                   종류가 지정된 행(r.packaging)의 기존 동작은 바꾸지 않는다(PR-216/218 회귀 없음). */}
               <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {r.packaging ? formatCountOrQty(r.shortageQty, r.packaging.shortagePackages, r.packaging.packagingUnitLabel)
+                {r.needsColorQty ? <span className="text-amber-700 font-normal" data-testid={`shortage-unknown-${r.itemId}`}>색상별 수량 확인 필요</span>
+                  : r.packaging ? formatCountOrQty(r.shortageQty, r.packaging.shortagePackages, r.packaging.packagingUnitLabel)
                   : r.suggestedPackaging ? <span className="text-indigo-600">참고 {r.suggestedPackaging.shortagePackages}{r.suggestedPackaging.packagingUnitLabel}</span>
                   : r.conversionWarning ? <span className="text-amber-700" data-testid={`shortage-unknown-${r.itemId}`}>종류 확인 필요</span>
                   : formatCountOrQty(r.shortageQty, undefined, undefined)}
               </td>
               <td className={td}>
+                {/* PR-220b: needsColorQty 행은 [B] 기본 수량을 비운다(스타일 전체 수량으로
+                    대체하지 않음) — onPick 호출 자체는 유지하고, 수량 공백 처리는
+                    PurchaseOrdersManager.handlePickMaterial/suggestUnlinkedQuantity·
+                    suggestStyleLinkedQuantity 쪽에서 needsColorQty를 보고 판단한다. */}
                 {editable?.has(r.itemId) && onEdit ? (
                   <button type="button" className="bg-amber-600 text-white px-2 py-1 rounded text-xs hover:bg-amber-700 whitespace-nowrap" onClick={() => { const e = editable.get(r.itemId)!; onEdit(e.order, e.pendingCount); }}>수정하기</button>
                 ) : (

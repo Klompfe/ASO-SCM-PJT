@@ -93,10 +93,17 @@ export interface MaterialRequirementRow {
   // PR-220: 이 자재의 필요량이 작지 수량(sheetQty)을 썼는지(이 자재의 BOM 행이 전부/일부/
   // 전혀 sheetQty를 썼는지), 계산값(요척×기획수량, 항상 제공 — 비교·화면 표시용)과,
   // 작지 수량과 계산값이 크게 다를 때의 확인 필요 표시.
-  basis?: 'sheet' | 'computed' | 'mixed';
+  // PR-220b: 'color-qty'(색상×사이즈 수량표 기준) 'unknown'(색상 있는 행인데 sheetQty도
+  // 수량표도 없어 숫자를 만들 수 없음) 추가.
+  basis?: 'sheet' | 'color-qty' | 'computed' | 'mixed' | 'unknown';
   computedQty?: number;
   sheetQty?: number;
   mismatch?: boolean;
+  // PR-220b: 이 자재에 색상이 있는 BOM 행이 있는데 sheetQty도 색상×사이즈 수량표도 없어
+  // (스타일 전체 수량으로 추측하지 않고) 필요량을 확정할 수 없다는 표시. true면
+  // requiredQty/shortageQty/packaging은 참고용이 아니라 "불완전한 값"이다 — 화면은 숫자
+  // 대신 "색상별 수량 확인 필요"를 보여줘야 한다.
+  needsColorQty?: boolean;
 }
 
 export interface SuggestedPackagingConversion extends PackagingConversion {
@@ -116,9 +123,22 @@ const round4 = (n: number): number => Math.round(n * 10000) / 10000;
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 const MISSING_SUBTYPE_WARNING = '실/테이프 종류 미지정 — 선택해 주세요';
+const NEEDS_COLOR_QTY_WARNING = '색상별 수량 확인 필요 — 작지 재업로드(수량 포함) 또는 MATERIAL LIST 재업로드로 색상×사이즈 수량을 채워 주세요';
 const normUnit = (u: string | null | undefined): string => (u ?? '').trim().toUpperCase();
 // PR-220: 작지 수량과 계산값(요척×기획수량)의 차이율이 이 값을 넘으면 mismatch(확인 필요).
 const SHEET_QTY_MISMATCH_THRESHOLD_PCT = 0.05;
+
+// PR-220b: 색상 비교 정규화 — 앞뒤 공백 제거 + 대소문자 무시 + 내부 연속 공백을 1칸으로만.
+// 약어↔전체명(BL↔BLUE 등) 추측 매칭은 하지 않는다(요구사항) — 정확히 이 정규화 규칙으로
+// 같아야만 매칭된다.
+export function normalizeColorForMatch(color: string | null | undefined): string {
+  return (color ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+const FREE_COLOR_KEY = 'FREE';
+// PR-220b: mapping-commit.service.ts의 normalizeKeyPart()가 "색상 없음"을 빈 문자열이
+// 아니라 리터럴 'N/A'로 저장하는 기존 관례(colorCode가 nullable이 아니라 항상 문자열인
+// 컬럼이라 그렇게 정규화됨) — 이 값도 공통(FREE)과 같은 "색상 구분 없음"으로 본다.
+const NA_COLOR_KEY = 'N/A';
 
 // 색상별로 ceil(필요미터 ÷ 단위길이)한 뒤 합산 — 확정된 종류(packaging)와 PR-219의 추천
 // 종류(suggestedPackaging) 계산이 완전히 같은 식이라 한 곳으로 합친다(중복 구현 금지).
@@ -175,6 +195,9 @@ interface WorkingRow extends MaterialRequirementRow {
   sheetBasisCount: number;
   computedBasisCount: number;
   sheetQtySum: number;
+  // PR-220b: 색상×사이즈 수량표를 쓴 행 개수, 근거 없어 숫자를 못 만든(unknown) 행 개수.
+  colorQtyBasisCount: number;
+  unknownBasisCount: number;
 }
 
 // BOM 전개: 자재별 필요 총수량 = consumption(제품 1개당) × targetQuantity. 기존 재고 차감 로직
@@ -188,10 +211,26 @@ export function calculateMaterialRequirements(
   targetQuantity: number,
   bomItems: RequirementBomItem[],
   orderedByItemId: Map<number, number>,
-  opts?: { unlinkedByItemId?: Map<number, number>; packagingRules?: PackagingUnitRuleLike[] },
+  opts?: {
+    unlinkedByItemId?: Map<number, number>;
+    packagingRules?: PackagingUnitRuleLike[];
+    // PR-220b: 스타일의 색상×사이즈 수량표(PR-212) 색상별 합계 — 호출자가 스타일당 1회만
+    // 조회해 그대로 넘긴다(이 함수는 추가 조회를 하지 않는다, N+1 금지). 없으면(빈 배열)
+    // "수량표 없음"으로 취급한다.
+    colorQuantities?: { color: string; qty: number }[];
+  },
 ): MaterialRequirementRow[] {
   const target = num(targetQuantity);
   const map = new Map<number, WorkingRow>();
+
+  // PR-220b: 정규화된 색상 키 → 수량표 합계. 같은 정규화 키로 겹치는 원본 색상 표기가
+  // 있으면(데이터 입력 편차) 합산한다 — 추측 매칭이 아니라 정규화 규칙 안에서의 합.
+  const colorQtyMap = new Map<string, number>();
+  for (const c of opts?.colorQuantities ?? []) {
+    const key = normalizeColorForMatch(c.color);
+    if (!key) continue;
+    colorQtyMap.set(key, round4((colorQtyMap.get(key) ?? 0) + num(c.qty)));
+  }
 
   for (const bi of [...bomItems].sort((a, b) => a.id - b.id)) {
     if (!bi.material) continue;
@@ -208,8 +247,32 @@ export function calculateMaterialRequirements(
     const rowUnit = normUnit(bi.material.unit);
     const sheetUnit = normUnit(bi.sheetQtyUnit);
     const unitMatches = hasValidSheetQty && !!rowUnit && !!sheetUnit && rowUnit === sheetUnit;
-    const rowBasis: 'sheet' | 'computed' = unitMatches ? 'sheet' : 'computed';
-    const rowQty = rowBasis === 'sheet' ? sheetQtyRaw : computedRowQty;
+
+    // PR-220b: sheetQty가 없으면(또는 단위가 안 맞으면) 더 이상 무조건 "스타일 전체
+    // 수량×요척"으로 폴백하지 않는다 — 색상이 있는 행(공통/FREE 아님)은 색상×사이즈
+    // 수량표에서 그 색상의 합계를 찾아 쓰고, 없으면 숫자를 만들지 않는다(unknown).
+    const colorRaw = (bi.colorCode ?? '').trim();
+    const colorKeyNorm = normalizeColorForMatch(colorRaw);
+    const isCommonColor = !colorKeyNorm || colorKeyNorm === FREE_COLOR_KEY || colorKeyNorm === NA_COLOR_KEY;
+
+    let rowBasis: 'sheet' | 'color-qty' | 'computed' | 'unknown';
+    let rowQty: number;
+    if (unitMatches) {
+      rowBasis = 'sheet';
+      rowQty = sheetQtyRaw;
+    } else if (isCommonColor) {
+      rowBasis = 'computed';
+      rowQty = computedRowQty;
+    } else {
+      const colorQty = colorQtyMap.get(colorKeyNorm);
+      if (colorQty != null) {
+        rowBasis = 'color-qty';
+        rowQty = perUnit * colorQty;
+      } else {
+        rowBasis = 'unknown';
+        rowQty = 0; // 합계에 0으로 "섞여 들어가지" 않도록 requiredQty/colorMeters에는 더하지 않는다(아래).
+      }
+    }
 
     const cur: WorkingRow =
       map.get(bi.material.id) ??
@@ -235,26 +298,37 @@ export function calculateMaterialRequirements(
         sheetBasisCount: 0,
         computedBasisCount: 0,
         sheetQtySum: 0,
+        colorQtyBasisCount: 0,
+        unknownBasisCount: 0,
       };
     cur.consumptionPerUnit = round4(cur.consumptionPerUnit + perUnit);
-    cur.requiredQty = round4(cur.requiredQty + rowQty);
     cur.lineCount += 1;
     if (rowBasis === 'sheet') {
       cur.sheetBasisCount += 1;
       cur.sheetQtySum = round4(cur.sheetQtySum + sheetQtyRaw);
-    } else {
+      cur.requiredQty = round4(cur.requiredQty + rowQty);
+    } else if (rowBasis === 'color-qty') {
+      cur.colorQtyBasisCount += 1;
+      cur.requiredQty = round4(cur.requiredQty + rowQty);
+    } else if (rowBasis === 'computed') {
       cur.computedBasisCount += 1;
+      cur.requiredQty = round4(cur.requiredQty + rowQty);
+    } else {
+      // unknown: requiredQty에 더하지 않는다(0으로 섞여 들어가지 않게 — 부분합일 뿐임을
+      // needsColorQty로 명시하고, 화면은 숫자 자체를 보여주지 않는다).
+      cur.unknownBasisCount += 1;
     }
     const category = (bi.category ?? '').trim();
     if (category && !cur.categories.includes(category)) cur.categories.push(category);
-    const color = (bi.colorCode ?? '').trim();
-    if (color && !cur.colors.includes(color)) cur.colors.push(color);
+    if (colorRaw && !cur.colors.includes(colorRaw)) cur.colors.push(colorRaw);
 
     // 색상별 올림(ceil)을 위해 색상별 필요 미터를 따로 누적한다(색상 구분 없는 행은 '-' 하나로 취급).
-    // PR-220: 작지 수량을 쓴 행은 그 값을, 아니면 기존 계산값을 누적한다 — 포장(콘/롤)
-    // 올림 로직 자체(행/색상 단위 올림 후 합산)는 바꾸지 않고 입력 수량만 바뀐다.
-    const colorKey = color || '-';
-    cur.colorMeters.set(colorKey, round4((cur.colorMeters.get(colorKey) ?? 0) + rowQty));
+    // PR-220/220b: sheet/color-qty/computed 행만 누적한다 — unknown 행은 색상별 포장
+    // 올림에도 참여하지 않는다(이 자재는 포장 환산 자체를 건너뛴다, 아래 참고).
+    if (rowBasis !== 'unknown') {
+      const colorKey = colorRaw || '-';
+      cur.colorMeters.set(colorKey, round4((cur.colorMeters.get(colorKey) ?? 0) + rowQty));
+    }
 
     // PR-186: BOM 행에 종류가 있으면 그것, 없으면 자재(Item) 단위 지정(effectiveSubType).
     const subtype = effectiveSubType(bi, bi.material);
@@ -271,44 +345,64 @@ export function calculateMaterialRequirements(
     row.unlinkedOrderedQty = round4(num(opts?.unlinkedByItemId?.get(row.itemId)));
     row.shortageQty = Math.max(0, round4(row.requiredQty - row.orderedQty));
 
-    const subtype = row.subtypeMixed ? null : row.subtype;
-    row.materialSubType = subtype ?? null;
-    const rule = subtype ? rules.find((r) => r.materialSubType === subtype) : undefined;
+    // PR-220b: 이 자재의 BOM 행 중 "색상은 있는데 근거(작지 수량/수량표)가 없는" 행이
+    // 하나라도 있으면, requiredQty는 나머지 행들만의 부분합일 뿐이라 신뢰할 수 없다 —
+    // 포장 환산(packaging/conversionWarning/suggestedPackaging)도 전부 건너뛰고
+    // needsColorQty만 표시한다(요구사항: "needsColorQty 행은 포장 환산도 하지 않는다").
+    row.needsColorQty = row.unknownBasisCount > 0;
 
-    if (subtype && rule) {
-      // PR-186: 종류가 정해지고 규칙이 있으면 Item.unit과 무관하게 환산한다 — 단위 라벨은
-      // 규칙의 packagingUnitLabel(콘/롤)을 쓴다(Item.unit이 'EA'여도 상관없다).
-      row.packaging = buildPackagingConversion(row.colorMeters, row.requiredQty, row.orderedQty, rule);
-    } else if (subtype && !rule) {
-      // 종류는 있는데(BOM 행 또는 Item 지정) 규칙 테이블에 없음(데이터 누락) — 추측 금지.
-      row.conversionWarning = MISSING_SUBTYPE_WARNING;
-    } else if (!row.reviewed && looksLikeThreadOrTape(row.materialName, rules)) {
-      // PR-186: 종류 미지정 + 이름이 실/테이프로 보임 + 아직 검토 안 함 → 미터 수량을
-      // 제안하지 않고 경고만(Item.unit이 'EA'여도 여기서 걸린다 — 운영 데이터 실측 결과).
-      row.conversionWarning = MISSING_SUBTYPE_WARNING;
-      row.suggestedPackaging = buildSuggestedPackaging(row, rules);
-    } else if (!row.reviewed && classifyPackagingUnit(row.unit)) {
-      // PR-185 B-2에서 쓰던 폴백 — 단위 자체가 콘/롤로 표기돼 있는데 종류가 없는 경우.
-      row.conversionWarning = MISSING_SUBTYPE_WARNING;
-      row.suggestedPackaging = buildSuggestedPackaging(row, rules);
+    if (row.needsColorQty) {
+      row.materialSubType = row.subtypeMixed ? null : (row.subtype ?? null);
+      row.conversionWarning = NEEDS_COLOR_QTY_WARNING;
+    } else {
+      const subtype = row.subtypeMixed ? null : row.subtype;
+      row.materialSubType = subtype ?? null;
+      const rule = subtype ? rules.find((r) => r.materialSubType === subtype) : undefined;
+
+      if (subtype && rule) {
+        // PR-186: 종류가 정해지고 규칙이 있으면 Item.unit과 무관하게 환산한다 — 단위 라벨은
+        // 규칙의 packagingUnitLabel(콘/롤)을 쓴다(Item.unit이 'EA'여도 상관없다).
+        row.packaging = buildPackagingConversion(row.colorMeters, row.requiredQty, row.orderedQty, rule);
+      } else if (subtype && !rule) {
+        // 종류는 있는데(BOM 행 또는 Item 지정) 규칙 테이블에 없음(데이터 누락) — 추측 금지.
+        row.conversionWarning = MISSING_SUBTYPE_WARNING;
+      } else if (!row.reviewed && looksLikeThreadOrTape(row.materialName, rules)) {
+        // PR-186: 종류 미지정 + 이름이 실/테이프로 보임 + 아직 검토 안 함 → 미터 수량을
+        // 제안하지 않고 경고만(Item.unit이 'EA'여도 여기서 걸린다 — 운영 데이터 실측 결과).
+        row.conversionWarning = MISSING_SUBTYPE_WARNING;
+        row.suggestedPackaging = buildSuggestedPackaging(row, rules);
+      } else if (!row.reviewed && classifyPackagingUnit(row.unit)) {
+        // PR-185 B-2에서 쓰던 폴백 — 단위 자체가 콘/롤로 표기돼 있는데 종류가 없는 경우.
+        row.conversionWarning = MISSING_SUBTYPE_WARNING;
+        row.suggestedPackaging = buildSuggestedPackaging(row, rules);
+      }
+      // reviewed=true(= "실/테이프 아님"으로 확정)이고 종류도 없으면 일반 자재로 둔다(아무 필드도 안 채움).
     }
-    // reviewed=true(= "실/테이프 아님"으로 확정)이고 종류도 없으면 일반 자재로 둔다(아무 필드도 안 채움).
 
-    // PR-220: 출처 표시 + 계산값 비교. computedQty는 basis와 무관하게 항상 제공한다
-    // (화면의 "계산수량" 열, 작지 수량 유무와 상관없이 비교 기준으로 쓸 수 있게).
+    // PR-220/220b: 출처 표시 + 계산값 비교. computedQty는 basis와 무관하게 항상 제공한다
+    // (화면의 "계산수량" 열, 작지 수량/수량표 유무와 상관없이 비교 기준으로 쓸 수 있게).
     row.computedQty = round4(row.consumptionPerUnit * target);
     if (row.sheetBasisCount > 0) {
-      row.basis = row.computedBasisCount > 0 ? 'mixed' : 'sheet';
       row.sheetQty = row.sheetQtySum;
       const diffPct = row.computedQty !== 0 ? Math.abs(row.computedQty - row.requiredQty) / Math.abs(row.computedQty) : 0;
       row.mismatch = diffPct > SHEET_QTY_MISMATCH_THRESHOLD_PCT;
+    }
+    const usedBases: Array<'sheet' | 'color-qty' | 'computed'> = [];
+    if (row.sheetBasisCount > 0) usedBases.push('sheet');
+    if (row.colorQtyBasisCount > 0) usedBases.push('color-qty');
+    if (row.computedBasisCount > 0) usedBases.push('computed');
+    if (row.unknownBasisCount > 0 && usedBases.length > 0) {
+      row.basis = 'mixed';
+    } else if (row.unknownBasisCount > 0) {
+      row.basis = 'unknown';
     } else {
-      row.basis = 'computed';
+      row.basis = usedBases.length === 1 ? usedBases[0] : 'mixed';
     }
 
     const {
       colorMeters: _colorMeters, subtype: _subtype, subtypeMixed: _subtypeMixed, unit: _unit, materialName: _materialName, reviewed: _reviewed,
       sheetBasisCount: _sheetBasisCount, computedBasisCount: _computedBasisCount, sheetQtySum: _sheetQtySum,
+      colorQtyBasisCount: _colorQtyBasisCount, unknownBasisCount: _unknownBasisCount,
       ...clean
     } = row;
     result.push(clean);

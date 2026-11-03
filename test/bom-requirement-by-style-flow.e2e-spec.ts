@@ -52,9 +52,11 @@ describe('BOM 소요명세서: 스타일 기준 (PR-129)', () => {
     }
     const style = await mkStyle('BS-STYLE', 300);
     const bom = await dataSource.getRepository(Bom).save(dataSource.getRepository(Bom).create({ bomNo: 'B-BS', version: 'V1', isActive: true, style }));
+    // PR-220b: colorCode는 ''(공통 취급) — 색상별 수량(colorQuantities) 근거 없이 'BK'
+    // 같은 실제 색상 값을 쓰면 needsColorQty가 되어 이 테스트의 본래 검증(부족분 계산)이 깨진다.
     for (const [k, cons] of [['fabric', 1.25], ['lining', 0.8], ['button', 6]] as const) {
       await dataSource.getRepository(BomItem).save(
-        dataSource.getRepository(BomItem).create({ bom, material: { id: item[k] } as Item, category: '겉감', colorCode: 'BK', spec: 'S', consumption: cons, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
+        dataSource.getRepository(BomItem).create({ bom, material: { id: item[k] } as Item, category: '겉감', colorCode: '', spec: 'S', consumption: cons, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
       );
     }
     await mkStyle('BS-NOBOM', 10);
@@ -62,7 +64,7 @@ describe('BOM 소요명세서: 스타일 기준 (PR-129)', () => {
     const noQtyStyle = await dataSource.getRepository(MasterStyle).findOneOrFail({ where: { styleNo: 'BS-NOQTY' } });
     const bom2 = await dataSource.getRepository(Bom).save(dataSource.getRepository(Bom).create({ bomNo: 'B-BSQ', version: 'V1', isActive: true, style: noQtyStyle }));
     await dataSource.getRepository(BomItem).save(
-      dataSource.getRepository(BomItem).create({ bom: bom2, material: { id: item.fabric } as Item, category: '겉감', colorCode: 'BK', spec: 'S', consumption: 2, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
+      dataSource.getRepository(BomItem).create({ bom: bom2, material: { id: item.fabric } as Item, category: '겉감', colorCode: '', spec: 'S', consumption: 2, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
     );
     // 원단 100 발주(취소 999는 제외). PR-185: orderedQty는 styleNo로 연결된 발주만 세므로
     // BS-STYLE에 연결해 등록한다(기존엔 그 자재의 전체 발주 합계였다).

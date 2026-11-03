@@ -196,12 +196,27 @@ export const BomRequirementReport: React.FC = () => {
                     {r.itemCode && <span className="block text-xs text-gray-400">{r.itemCode}</span>}
                     {r.packaging && <span className="block text-xs text-amber-700">{r.packaging.conversionFormula}</span>}
                     {r.conversionWarning && <span className="block text-xs text-amber-700" data-testid={`conversion-warning-${r.itemId}`}>⚠ {r.conversionWarning}</span>}
+                    {/* PR-220b: 색상×사이즈 수량표 기준으로 계산됐는지 표시(출처 배지) — needsColorQty가 아니어야 의미 있다. */}
+                    {!r.needsColorQty && r.basis === 'color-qty' && (
+                      <span className="block text-xs text-emerald-700" data-testid={`basis-color-qty-${r.itemId}`}>수량표 기준</span>
+                    )}
+                    {!r.needsColorQty && (r.basis === 'sheet' || r.basis === 'mixed') && (
+                      <span className="block text-xs text-emerald-700" data-testid={`basis-sheet-${r.itemId}`}>작지 기준</span>
+                    )}
                   </td>
                   <td className={td}>{r.categories.join(', ') || '-'}</td>
                   <td className={`${td} text-right`}>{fmt(r.consumptionPerUnit)}</td>
-                  <td className={`${td} text-right`}>{formatRequirementQty(r.requiredQty, r.packaging)}</td>
-                  <td className={`${td} text-right`}>{formatCountOrQty(r.orderedQty, r.packaging ? r.orderedQty : undefined, r.packaging?.packagingUnitLabel)}</td>
-                  <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCountOrQty(r.shortageQty, r.packaging?.shortagePackages, r.packaging?.packagingUnitLabel)}</td>
+                  {r.needsColorQty ? (
+                    <td className={`${td} text-amber-700 text-xs`} colSpan={3} data-testid={`needs-color-qty-${r.itemId}`}>
+                      색상별 수량 확인 필요 — 작지 재업로드(수량 포함) 또는 MATERIAL LIST 재업로드로 색상×사이즈 수량을 채워 주세요
+                    </td>
+                  ) : (
+                    <>
+                      <td className={`${td} text-right`}>{formatRequirementQty(r.requiredQty, r.packaging)}</td>
+                      <td className={`${td} text-right`}>{formatCountOrQty(r.orderedQty, r.packaging ? r.orderedQty : undefined, r.packaging?.packagingUnitLabel)}</td>
+                      <td className={`${td} text-right font-semibold ${r.shortageQty > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCountOrQty(r.shortageQty, r.packaging?.shortagePackages, r.packaging?.packagingUnitLabel)}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>

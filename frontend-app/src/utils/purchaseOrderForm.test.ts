@@ -273,6 +273,18 @@ describe('suggestStyleLinkedQuantity', () => {
     expect(r.unitLabel).toBeNull();
     expect(r.note).toBe('실/테이프 종류 미지정 — 선택해 주세요');
   });
+
+  // PR-220b: needsColorQty 행도 (conversionWarning이 이미 "색상별 수량 확인 필요"로
+  // 채워져 있으므로) 같은 경로로 수량을 비운다 — 스타일 전체 수량으로 대체하지 않는다.
+  it('needsColorQty 행은 수량을 비우고 "색상별 수량 확인 필요" 안내를 준다', () => {
+    const r = suggestStyleLinkedQuantity(baseRow({
+      needsColorQty: true,
+      conversionWarning: '색상별 수량 확인 필요 — 작지 재업로드(수량 포함) 또는 MATERIAL LIST 재업로드로 색상×사이즈 수량을 채워 주세요',
+    }));
+    expect(r.quantity).toBeNull();
+    expect(r.unitLabel).toBeNull();
+    expect(r.note).toContain('색상별 수량 확인 필요');
+  });
 });
 
 // PR-187 C: "이 자재로 발주하기"(스타일 미연결 경로)도 경고/콘·롤 행에서는 미터 수량을
@@ -287,6 +299,11 @@ describe('suggestUnlinkedQuantity (PR-187 C)', () => {
 
   it('경고 행(conversionWarning)은 수량이 비어야 한다(null)', () => {
     expect(suggestUnlinkedQuantity(baseRow({ conversionWarning: '실/테이프 종류 미지정 — 선택해 주세요' }))).toBeNull();
+  });
+
+  // PR-220b: needsColorQty 행도 마찬가지로 수량을 비운다.
+  it('needsColorQty 행은 수량이 비어야 한다(null)', () => {
+    expect(suggestUnlinkedQuantity(baseRow({ needsColorQty: true, conversionWarning: '색상별 수량 확인 필요 — 작지 재업로드(수량 포함) 또는 MATERIAL LIST 재업로드로 색상×사이즈 수량을 채워 주세요' }))).toBeNull();
   });
 
   it('packaging이 있으면 shortagePackages를 제안하고, 0이면 비운다', () => {

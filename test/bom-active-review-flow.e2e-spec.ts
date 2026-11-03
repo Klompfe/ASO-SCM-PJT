@@ -49,7 +49,9 @@ describe('BOM 중복 검토 + 활성 BOM 선택 (PR-121)', () => {
     const b = await dataSource.getRepository(Bom).save(dataSource.getRepository(Bom).create({ bomNo: 'BOM-1', version: 'V1', isActive, style }));
     for (const [materialId, consumption] of lines) {
       await dataSource.getRepository(BomItem).save(
-        dataSource.getRepository(BomItem).create({ bom: b, material: { id: materialId } as Item, category: '겉감', colorCode: 'BK', spec: 'S', consumption, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
+        // PR-220b: colorCode는 ''(공통 취급) — 이 테스트는 활성 BOM 선택/소요량 재계산을
+        // 검증하는 것이지 색상별 수량(colorQuantities)을 검증하는 게 아니다.
+        dataSource.getRepository(BomItem).create({ bom: b, material: { id: materialId } as Item, category: '겉감', colorCode: '', spec: 'S', consumption, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
       );
     }
     return b.id;

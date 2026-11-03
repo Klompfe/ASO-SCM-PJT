@@ -58,5 +58,8 @@ import { SalesContractPricesModule } from '../sales-contract-prices/sales-contra
     OrderShipmentsService,
     OrderProgressSummaryService,
   ],
+  // PR-220b: WorkOrdersModule이 getColorSizeQuantities()(색상별 수량, PR-212)를 재사용하기
+  // 위해 StylesService를 내보낸다 — 새 조회 로직을 중복 작성하지 않기 위함.
+  exports: [StylesService],
 })
 export class StylesModule {}

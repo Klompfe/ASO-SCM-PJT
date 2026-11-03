@@ -11,6 +11,7 @@ import { Bom } from '../boms/entities/bom.entity';
 import { Inventory } from '../inventories/entities/inventory.entity';
 import { StatusCodesService } from '../status-codes/status-codes.service';
 import { MaterialPackagingUnitRulesService } from '../material-packaging-unit-rules/material-packaging-unit-rules.service';
+import { StylesService } from '../styles/styles.service';
 
 describe('WorkOrdersService', () => {
   let service: WorkOrdersService;
@@ -62,6 +63,11 @@ describe('WorkOrdersService', () => {
   const mockMaterialPackagingUnitRulesService = {
     findAll: jest.fn().mockResolvedValue([]),
   };
+  // PR-220b: 색상×사이즈 수량표(PR-212) 조회 — 기존 테스트는 수량표 없이도 그대로
+  // 통과해야 하므로(색상 없는 BOM 행이 대부분) 빈 결과.
+  const mockStylesService = {
+    getColorSizeQuantities: jest.fn().mockResolvedValue({ styleNo: '', sizes: [], rows: [], totalByColor: [], grandTotal: 0 }),
+  };
 
 
 
@@ -77,6 +83,7 @@ describe('WorkOrdersService', () => {
     mockQueryRunnerManager.save.mockImplementation((_entity: any, data: any) => Promise.resolve(data));
     mockQueryRunnerManager.create.mockImplementation((_entity: any, data: any) => data);
     mockStatusCodesService.findAll.mockResolvedValue([]);
+    mockStylesService.getColorSizeQuantities.mockResolvedValue({ styleNo: '', sizes: [], rows: [], totalByColor: [], grandTotal: 0 });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,6 +103,10 @@ describe('WorkOrdersService', () => {
         {
           provide: MaterialPackagingUnitRulesService,
           useValue: mockMaterialPackagingUnitRulesService,
+        },
+        {
+          provide: StylesService,
+          useValue: mockStylesService,
         },
       ],
     }).compile();

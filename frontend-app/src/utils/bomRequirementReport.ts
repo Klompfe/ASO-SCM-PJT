@@ -45,10 +45,15 @@ export interface MaterialRequirementRow {
   };
   // PR-220: 이 자재의 필요량이 작지 수량(sheetQty, 작업지시서 AI 인식)을 썼는지, 계산값
   // (요척×기획수량, 항상 제공)과 작지 수량이 크게 다를 때의 확인 필요 표시.
-  basis?: 'sheet' | 'computed' | 'mixed';
+  // PR-220b: 'color-qty'(색상×사이즈 수량표 기준)/'unknown'(색상 있는 행인데 작지
+  // 수량도 수량표도 없어 필요량을 확정할 수 없음) 추가.
+  basis?: 'sheet' | 'color-qty' | 'computed' | 'mixed' | 'unknown';
   computedQty?: number;
   sheetQty?: number;
   mismatch?: boolean;
+  // PR-220b: true면 requiredQty/shortageQty/packaging은 불완전한 값이다 — 화면은 숫자
+  // 대신 "색상별 수량 확인 필요"를 보여줘야 한다(스타일 전체 수량으로 추측하지 않음).
+  needsColorQty?: boolean;
 }
 
 export type RequirementReason = 'NO_STYLE_NO' | 'NO_BOM' | null;
@@ -69,14 +74,17 @@ export interface MaterialRequirements {
 // 합계·필터가 안 되므로, 포장단위가 없을 때는 숫자형 그대로(정수로만 올림), 포장단위가
 // 있을 때만(원래도 단위 때문에 섞여 있었다) "3콘" 문자열로 둔다. "제품 1개당
 // 소요량"(비율값, 요척)은 수량이 아니라 올림 대상이 아니므로 그대로 둔다.
+// PR-220b: needsColorQty 행은 숫자(스타일 전체 수량으로 추측한 값)가 아니라 확인 필요
+// 문구를 셀에 그대로 넣는다 — 엑셀 합계가 깨지더라도 틀린 숫자보다 "확인 필요"가 안전하다.
+const NEEDS_COLOR_QTY_CELL = '색상별 수량 확인 필요';
 export const requirementColumns: ExcelColumn<MaterialRequirementRow>[] = [
   { header: '자재명', accessor: (r) => r.itemName },
   { header: '자재코드', accessor: (r) => r.itemCode },
   { header: '카테고리', accessor: (r) => r.categories.join(', ') },
   { header: '제품 1개당 소요량', accessor: (r) => r.consumptionPerUnit },
-  { header: '필요 총수량', accessor: (r) => (r.packaging ? `${r.packaging.requiredPackages}${r.packaging.packagingUnitLabel}` : ceilToInt(r.requiredQty)) },
-  { header: '이미 발주 수량', accessor: (r) => (r.packaging ? `${r.orderedQty}${r.packaging.packagingUnitLabel}` : ceilToInt(r.orderedQty)) },
-  { header: '부족 수량', accessor: (r) => (r.packaging ? `${r.packaging.shortagePackages}${r.packaging.packagingUnitLabel}` : ceilToInt(r.shortageQty)) },
+  { header: '필요 총수량', accessor: (r) => (r.needsColorQty ? NEEDS_COLOR_QTY_CELL : r.packaging ? `${r.packaging.requiredPackages}${r.packaging.packagingUnitLabel}` : ceilToInt(r.requiredQty)) },
+  { header: '이미 발주 수량', accessor: (r) => (r.needsColorQty ? NEEDS_COLOR_QTY_CELL : r.packaging ? `${r.orderedQty}${r.packaging.packagingUnitLabel}` : ceilToInt(r.orderedQty)) },
+  { header: '부족 수량', accessor: (r) => (r.needsColorQty ? NEEDS_COLOR_QTY_CELL : r.packaging ? `${r.packaging.shortagePackages}${r.packaging.packagingUnitLabel}` : ceilToInt(r.shortageQty)) },
 ];
 
 // BOM이 없을 때 화면에 띄우는 안내 문구. (에러가 아니라 정상적인 보고서 상태다.)

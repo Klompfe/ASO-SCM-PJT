@@ -78,8 +78,11 @@ describe('BOM 소요명세서 (PR-120)', () => {
     const style = await mkStyle('REQ-STYLE-1');
     item.finished = await mkItem('REQ-FG-1', 'FINISHED_GOOD', { styleNo: 'REQ-STYLE-1' });
     // 같은 스타일에 Bom이 2건(실제 운영 데이터와 같은 상황): 오래된 것은 원단 1.0만, 최신 것이 진짜 BOM
-    await mkBom(style, [[item.fabric, 1, '겉감', 'BK']], 'BOM-REQ-001');
-    await mkBom(style, [[item.fabric, 1.25, '겉감', 'BK'], [item.lining, 0.8, '안감', 'BK'], [item.button, 6, '부자재', 'BK']], 'BOM-REQ-001');
+    // PR-220b: colorCode는 ''(공통 취급) — 이 테스트는 BOM 선택 규칙/부족분 계산을
+    // 검증하는 것이지 색상별 수량(colorQuantities)을 검증하는 게 아니므로, 'BK' 같은
+    // 실제 색상 값을 쓰면 색상×사이즈 수량표 근거 없이 needsColorQty가 되어 버린다.
+    await mkBom(style, [[item.fabric, 1, '겉감', '']], 'BOM-REQ-001');
+    await mkBom(style, [[item.fabric, 1.25, '겉감', ''], [item.lining, 0.8, '안감', ''], [item.button, 6, '부자재', '']], 'BOM-REQ-001');
 
     // 발주: 원단 500(PENDING) + 250(RECEIVED) + 9999(CANCELLED → 제외), 안감 100, 단추 없음
     await mkPo(item.fabric, 500);

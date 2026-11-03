@@ -41,7 +41,8 @@ describe('다품번 일괄발주 (PR-194)', () => {
   const mkBomWithFabric = async (style: MasterStyle, consumption: number) => {
     const bom = await dataSource.getRepository(Bom).save(dataSource.getRepository(Bom).create({ bomNo: `B-${style.styleNo}`, version: 'V1', isActive: true, style }));
     await dataSource.getRepository(BomItem).save(
-      dataSource.getRepository(BomItem).create({ bom, material: { id: fabricItemId } as Item, category: '겉감', colorCode: 'BK', spec: 'S', consumption, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
+      // PR-220b: colorCode는 ''(공통 취급) — 색상별 수량(colorQuantities) 검증이 아니다.
+      dataSource.getRepository(BomItem).create({ bom, material: { id: fabricItemId } as Item, category: '겉감', colorCode: '', spec: 'S', consumption, requiredQty: 0, supplier: null, unitPrice: 0, remarks: '' }),
     );
   };
 

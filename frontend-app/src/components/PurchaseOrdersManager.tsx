@@ -111,6 +111,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // 저장 전 "임시 선택"(사용자가 추천 영역에서 고른 종류) — 저장하지 않고 참고 계산에만 쓴다.
   const [tempSubtype, setTempSubtype] = useState<string | null>(null);
   const [classifying, setClassifying] = useState(false);
+  // PR-220b: 고른 BOM 행이 색상별 수량 근거(작지 수량/색상×사이즈 수량표)가 없어
+  // needsColorQty였으면, 수량 칸을 비운 이유를 [B]에서도 보여준다(스타일 전체 수량으로
+  // 대체하지 않았다는 안내 — [A]의 경고와 같은 문구).
+  const [needsColorQtyNote, setNeedsColorQtyNote] = useState<string | null>(null);
   // 비동기 이력 조회가 끝난 시점의 "현재" 폼 값을 읽기 위한 ref(렌더마다 갱신)
   const formValuesRef = useRef({ supplier: null as SupplierRef | null, unitPrice: 0, autofilled: false });
   const [filterSupplier, setFilterSupplier] = useState<SupplierRef | null>(null);
@@ -222,6 +226,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     if (!picked) {
       setOrderType(null);
       setOrderTypeHint(null);
+      setNeedsColorQtyNote(null);
       return;
     }
     const seq = ++itemRequestSeq.current;
@@ -273,6 +278,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     const row = rowOverride ?? styleMaterialRows.find((r) => r.itemId === picked.id);
     if (!row) { void selectItem(picked); return; }
     const sugg = suggestStyleLinkedQuantity(row);
+    // PR-220b: needsColorQty 행은 conversionWarning이 이미 이 문구로 채워져 있어
+    // suggestStyleLinkedQuantity가 quantity: null을 돌려준다(수량 칸 비움) — [B]에도
+    // 같은 안내를 보여준다.
+    setNeedsColorQtyNote(row.needsColorQty ? (row.conversionWarning ?? null) : null);
     // PR-219: styleSearch state는 setStyleSearch 직후라면 아직 갱신 전일 수 있어(React
     // 비동기 state), handlePickMaterial처럼 styleNo를 아는 호출부는 명시적으로 넘긴다.
     void selectItem(
@@ -302,6 +311,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       // PR-187 C: 스타일 미연결 경로도 같은 원칙(종류 미지정 실/테이프는 미터 수량을
       // 추측해서 채우지 않는다)을 따른다 — 일반 자재는 기존처럼 ceil(부족)/최소 1.
       const qty = suggestUnlinkedQuantity(row);
+      setNeedsColorQtyNote(row.needsColorQty ? (row.conversionWarning ?? null) : null);
       void selectItem({ id: row.itemId, name: row.itemName, code: row.itemCode }, { quantityInput: qty != null ? String(qty) : '' });
     }
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -424,6 +434,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setOrderTypeHint(null);
       setTempSubtype(null);
       setItemSubtypeInfo(null);
+      setNeedsColorQtyNote(null);
       setPanelRefresh((n) => n + 1); // 스타일 부족 자재 표의 "이미 발주" 수량 갱신
       loadPurchaseOrders();
     } catch (err: any) {
@@ -562,7 +573,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             <label className="text-sm text-gray-600 mb-1">품목(원자재){styleSearch && <span className="text-blue-600 font-normal"> — 이 스타일 BOM 자재만</span>}</label>
             <SearchSelectField<ItemRef>
               value={item}
-              onChange={(picked) => { if (styleSearch) selectStyleMaterial(picked, undefined, styleSearch.styleNo); else void selectItem(picked); }}
+              onChange={(picked) => { if (styleSearch) selectStyleMaterial(picked, undefined, styleSearch.styleNo); else { setNeedsColorQtyNote(null); void selectItem(picked); } }}
               search={styleSearch ? searchStyleMaterials : searchRawMaterials}
               getKey={(i) => i.id}
               getLabel={(i) => `${i.name} (${i.code})`}
@@ -624,6 +635,11 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               onChange={(e) => { setQuantityInput(e.target.value); setFieldErrors((f) => ({ ...f, quantity: false })); }}
               aria-label="수량"
             />
+            {/* PR-220b: 색상별 수량 근거(작지 수량/색상×사이즈 수량표)가 없어 수량을
+                스타일 전체 수량으로 추측해 채우지 않았다는 안내 — [A]와 같은 문구. */}
+            {needsColorQtyNote && (
+              <p className="text-xs text-amber-700 mt-1 max-w-[200px]" data-testid="needs-color-qty-note">{needsColorQtyNote}</p>
+            )}
           </div>
           <div className="flex flex-col">
             <label className="text-sm text-gray-600 mb-1">

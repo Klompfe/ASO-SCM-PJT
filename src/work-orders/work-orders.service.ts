@@ -13,6 +13,7 @@ import { calculateMaterialRequirements, MaterialRequirementRow } from './utils/m
 import { pickActiveBom } from '../boms/utils/active-bom.util';
 import { StatusCodesService } from '../status-codes/status-codes.service';
 import { MaterialPackagingUnitRulesService } from '../material-packaging-unit-rules/material-packaging-unit-rules.service';
+import { StylesService } from '../styles/styles.service';
 
 const STATUS_DOMAIN = 'WORK_ORDER';
 
@@ -43,6 +44,8 @@ export class WorkOrdersService {
     private readonly dataSource: DataSource,
     private readonly statusCodesService: StatusCodesService,
     private readonly materialPackagingUnitRulesService: MaterialPackagingUnitRulesService,
+    // PR-220b: 색상별 BOM 행의 필요량을 색상별 수량(PR-212)으로 계산하기 위해 재사용.
+    private readonly stylesService: StylesService,
   ) {}
 
   async create(dto: CreateWorkOrderDto): Promise<WorkOrder> {
@@ -336,7 +339,14 @@ export class WorkOrdersService {
 
     // PR-185 B-2: 실/테이프 자재는 콘/롤 단위로 환산한다 — material_packaging_unit_rules(PR-175).
     const packagingRules = await this.materialPackagingUnitRulesService.findAll();
-    const rows = calculateMaterialRequirements(targetQuantity, items, ordered, { unlinkedByItemId: unlinked, packagingRules });
+    // PR-220b: 색상별 BOM 행(공통/FREE 아님)은 작지 수량(sheetQty)이 없으면 스타일 전체
+    // 수량이 아니라 "이 색상"의 수량(PR-212 색상×사이즈 수량표)을 써야 한다 — 스타일당
+    // 1회만 조회(N+1 금지), 조회 실패/빈 결과는 util 쪽에서 "수량표 없음"으로 취급한다.
+    const colorQuantities = await this.stylesService
+      .getColorSizeQuantities(styleNo)
+      .then((r) => r.totalByColor)
+      .catch(() => []);
+    const rows = calculateMaterialRequirements(targetQuantity, items, ordered, { unlinkedByItemId: unlinked, packagingRules, colorQuantities });
     return {
       reason: null,
       bom: { id: latest.id, bomNo: latest.bomNo, version: latest.version, isActive: latest.isActive !== false },

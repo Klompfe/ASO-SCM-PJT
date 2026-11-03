@@ -43,6 +43,18 @@ describe('BOM 소요명세서 화면 유틸 (PR-120)', () => {
     expect(p[1]).toEqual(['원단A', 'M1', '겉감', 1.25, 1250, 750, 500]);
     expect(p[2]).toEqual(['단추', 'M2', '부자재, 단추', 6, 6000, 8000, 0]);
   });
+
+  // PR-220b: needsColorQty 행은 숫자(스타일 전체 수량으로 추측한 값)가 아니라 확인 필요
+  // 문구가 엑셀 셀에도 그대로 들어간다 — 틀린 숫자를 엑셀로 내보내지 않기 위함.
+  it('needsColorQty 행은 필요/발주/부족 칸 모두 "색상별 수량 확인 필요" 문구다', () => {
+    const needsColorQtyRow: MaterialRequirementRow = {
+      itemId: 3, itemCode: 'M3', itemName: 'KHAKI KH', categories: ['겉감'], colors: ['KH'],
+      consumptionPerUnit: 1, requiredQty: 0, orderedQty: 0, shortageQty: 0, lineCount: 1, needsColorQty: true, basis: 'unknown',
+    };
+    expect(requirementColumns.find((c) => c.header === '필요 총수량')!.accessor(needsColorQtyRow)).toBe('색상별 수량 확인 필요');
+    expect(requirementColumns.find((c) => c.header === '이미 발주 수량')!.accessor(needsColorQtyRow)).toBe('색상별 수량 확인 필요');
+    expect(requirementColumns.find((c) => c.header === '부족 수량')!.accessor(needsColorQtyRow)).toBe('색상별 수량 확인 필요');
+  });
 });
 
 // PR-129: 스타일(자재명세) 기준 소요명세서
