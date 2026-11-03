@@ -123,3 +123,105 @@ ALTER TABLE "bom_item_details" DROP COLUMN "sheetQty";
 ## 9. 하지 않은 것(요구사항 그대로)
 
 Gemini/실제 API 호출(전부 합성 JSON으로 테스트), 기존 인식 안전장치·필드 의미 변경, 포장 규칙 값 변경, 단위(Y↔M) 환산, 운영 DB 접근, 마이그레이션 실행, main 병합.
+
+---
+
+# PR-220b — 색상별 자재는 "전체 수량 폴백" 금지, 수량표(PR-212) 색상 합계로 계산
+
+같은 브랜치(`feat/sheet-qty-per-bom-row`)에 이어서 커밋. **main에 병합하지 않았습니다.** 새 마이그레이션 없음(PR-220의 마이그레이션 1개만 유지).
+
+## 배경
+
+PR-220은 **작지 수량(sheetQty)이 있을 때만** 1518 버그를 고쳤다. 그런데 사용자 확정 사실대로 "주요 자재 대부분은 공통 사용이 없고 색상별로 쓰인다" — sheetQty가 없는(엑셀 업로드 등) 색상별 행은 PR-220 이후에도 여전히 "스타일 전체 수량 × 요척"으로 계산되고 있었다(폴백 자체가 버그였다). PR-220b는 이 폴백을 없애고, 색상이 있는 행은 **색상×사이즈 수량표(PR-212, `style_color_size_quantities`)의 그 색상 합계**를 쓰도록 바꾼다.
+
+## 1. 행별 필요량 확정 규칙 (구현된 그대로)
+
+`material-requirements.util.ts`의 `calculateMaterialRequirements`가 각 BOM 행마다 아래 순서로 판정한다(`basis` 필드로 출처 표시):
+
+| 순서 | 조건 | 결과 | basis |
+|---|---|---|---|
+| 1 | `sheetQty` 있고 단위 일치(PR-220) | `sheetQty` 그대로 | `'sheet'` |
+| 2 | colorCode가 공통이 아니고(아래 "공통 판정" 참고), 수량표에 같은 색상 합계가 있음 | `perUnit × 수량표 합계` | `'color-qty'` |
+| 3 | colorCode가 공통(빈 값/`FREE`/`N/A`) | `perUnit × 스타일 전체 수량`(기존 계산, 회귀 없음) | `'computed'` |
+| 4 | colorCode가 있는데 1·2 둘 다 근거 없음 | **숫자를 만들지 않음**(requiredQty에 더하지 않음) | `'unknown'`, `needsColorQty: true` |
+
+자재(아이템) 단위로는 그 자재의 BOM 행들이 쓴 basis 조합에 따라 `'sheet'|'color-qty'|'computed'|'mixed'|'unknown'` 중 하나가 최종 `basis`로 매겨진다(`unknownBasisCount>0`이면 다른 근거가 하나라도 있으면 `'mixed'`, 전혀 없으면 `'unknown'`).
+
+**색상 비교 정규화**(요구사항 그대로 구현): 앞뒤 공백 제거 + 대소문자 무시 + 내부 연속 공백을 1칸으로. **약어↔전체명(BL↔BLUE) 추측 매칭은 하지 않는다** — `normalizeColorForMatch()`로 BOM 행의 `colorCode`와 수량표의 `color`를 각각 정규화해 정확히 같을 때만 매칭한다.
+
+**"공통" 판정에 `'N/A'`를 추가한 이유(구현 중 발견)**: 요구사항에는 빈 값/`FREE`만 있었지만, `mapping-commit.service.ts`의 `normalizeKeyPart()`가 "색상 없음"을 빈 문자열이 아니라 **리터럴 `'N/A'`**로 저장하는 기존 관례를 쓰고 있었다(`colorCode` 컬럼이 `NOT NULL` 문자열이라 빈 값을 넣을 수 없어 이렇게 정규화됨). 이 관례를 놓치면 **엑셀로 업로드된 기존 운영 데이터 중 색상 정보가 없던 행 대다수가 전부 `needsColorQty`로 바뀌는** 심각한 회귀가 났다(아래 3절의 e2e 회귀가 이를 실측으로 드러냄). `NA_COLOR_KEY`로 `FREE`와 동일하게 공통 취급하도록 추가했다.
+
+색상별로 갈라진 행끼리는 (기존처럼) 서로 합산되지 않는다 — 각 행이 자기 색상의 수량표 합계(또는 sheetQty, 또는 unknown=0)만 쓰고, 같은 자재의 여러 행은 그 **올바른** 기여분끼리만 합산된다. 테이프·실 포장 올림(행/색상 단위 올림 후 합산)은 순서를 그대로 두고 입력 수량만 바뀐다. `needsColorQty` 행은 포장 환산(`packaging`/`suggestedPackaging`)도 하지 않는다(요구사항 그대로) — 종류가 확정돼 있어도 수량 자체가 불명확하면 환산을 만들지 않는다.
+
+`colorQuantities`는 `WorkOrdersService.expandStyleRequirements()`가 **스타일당 1회**(`StylesService.getColorSizeQuantities(styleNo)`, PR-212 기존 서비스 재사용) 조회해 `calculateMaterialRequirements`에 그대로 넘긴다 — BOM 행 개수와 무관하게 N+1 조회가 생기지 않는다. 조회 실패는 `.catch(() => [])`로 "수량표 없음"으로 취급한다(발주 화면이 조회 실패로 막히지 않음). 이를 위해 `StylesModule`에서 `StylesService`를 `exports`하고 `WorkOrdersModule`이 `imports`하도록 모듈 연결을 추가했다(순환 의존 없음 — 확인됨).
+
+## 2. 화면 4곳 반영
+
+| 화면 | 변경 |
+|---|---|
+| **[A] 부족자재 표**(`StyleShortagePanel.tsx`) | `needsColorQty`면 필요/발주/부족 칸 모두 숫자 대신 "색상별 수량 확인 필요"(기존 `conversionWarning` 배지가 그대로 이 문구를 보여줌). `basis==='color-qty'`면 "수량표 기준" 배지 추가(기존 "작지 수량 기준"과 같은 자리). |
+| **BOM 조회**(`자재·발주 > 자재`의 "BOM 소요명세서", `BomRequirementReport.tsx`) | 이 화면이 실제로 `calculateMaterialRequirements`를 쓰는 지점이다(원시 BOM 행 표는 레거시 `requiredQty` 컬럼을 그대로 보여줘 PR-220 이전부터 이미 정확했다 — PR-220 보고서 4절 참고). `needsColorQty` 행은 3개 수량 칸을 합쳐 "색상별 수량 확인 필요" 안내로, 아니면 `basis`에 따라 "수량표 기준"/"작지 기준" 배지를 추가. 엑셀 내보내기(`requirementColumns`)도 같은 행에서 숫자 대신 문구를 쓴다(엑셀 합계가 깨지는 것보다 틀린 숫자가 안전하지 않다는 판단). |
+| **자재명세 초안**(수주등록, `SalesOrderUploadModal.tsx`) | PR-220에서 이미 작지수량/단위 입력칸과 계산값 비교를 추가해 둬서, 추가 변경 없음 — 이 화면은 저장 전 AI 원문 검토용이라 `calculateMaterialRequirements`(스타일 조회 시점)를 타지 않는다. |
+| **[B] 발주 입력 칸**(`PurchaseOrdersManager.tsx`) | `suggestStyleLinkedQuantity`/`suggestUnlinkedQuantity`가 `conversionWarning`(이미 `needsColorQty`일 때 "색상별 수량 확인 필요" 문구로 채워짐)이 있으면 수량을 비우는 기존 로직을 그대로 타므로 **수량 칸 기본값은 이미 비워진다**(추가 코드 불필요, 확인만). 다만 그 "왜 비었는지"가 [B] 안에서는 전혀 안 보였던 기존 공백을 채우기 위해 — [A]에서 "이 자재로 발주하기"를 누르거나 스타일 연결 트랙에서 품목을 고르면 수량 칸 아래에 같은 안내 문구를 보여주는 `needsColorQtyNote` 상태를 새로 추가했다. |
+
+## 3. 테스트 변경 — 기존 테스트가 깨진 이유와 수정 내역
+
+**원인**: 많은 기존 테스트(백엔드 유닛/e2e)가 "색상"을 실제로 검증하려는 게 아니라 그냥 `colorCode: 'BK'` 같은 placeholder를 아무 의미 없이 채워 넣고 있었다(이 PR 이전에는 colorCode가 계산에 전혀 영향을 주지 않았으므로). PR-220b는 이제 그 값을 "진짜 색상"으로 해석해 수량표 근거를 요구하므로, 이런 테스트들이 전부 `needsColorQty`(requiredQty=0)로 깨졌다. **기대값을 바꾸는 대신**(지시서 허용) **placeholder를 공통(`''`)으로 바꿔 원래 의도(색상과 무관한 계산 검증)를 보존**했다 — 숫자 자체를 바꾼 것은 "같은 자재가 실제로 여러 색상으로 쓰이는" 소수의 테스트뿐이다.
+
+| 파일 | 수정 내역 | 이유 |
+|---|---|---|
+| `material-requirements.util.spec.ts` (유닛) | `bi()`/`threadBi()`/`tapeBi()` 기본 colorCode `'BK'`→`''`; RED/BLUE 등 실제 다색 테스트는 `sheetQty` 또는 `colorQuantities`를 추가해 근거를 줌; "PR-220 0번" 두 테스트는 (이제 둘 다 재현되지 않으므로) "needsColorQty가 되는지" 검증으로 전환; `sheetQty` 단위-무효 3종 테스트는 colorCode를 `''`로 바꿔 "단위 게이트" 자체만 보도록 분리; "mixed" 테스트는 두 번째 행에 `colorQuantities`를 줘 `sheet+color-qty` 혼합으로 재설계(기대값 760+1518→760+758) | placeholder 색상 제거, 각 테스트의 원래 의도 보존 |
+| `test/bom-requirements-flow.e2e-spec.ts` | `mkBom` 호출 2곳의 `'BK'`→`''` | 부족분/BOM선택 규칙 검증(색상 무관) |
+| `test/bom-requirement-by-style-flow.e2e-spec.ts` | `'BK'`→`''` 2곳 | 동일 |
+| `test/bom-active-review-flow.e2e-spec.ts` | `'BK'`→`''` | 활성 BOM 선택/재계산 검증(색상 무관) |
+| `test/multi-style-bulk-order-flow.e2e-spec.ts` | `'BK'`→`''` | 다품번 일괄발주 소요량 집계 검증(색상 무관) |
+| `test/purchase-order-search-flow.e2e-spec.ts` | `'BK'`→`''` | 스타일 기준 부족 자재 흐름 검증(색상 무관) |
+| `test/bom-excel-reconcile-flow.e2e-spec.ts` | **수정 없음** — `colorCode: 'N/A'`가 "공통"으로 인식되도록 **프로덕션 코드**(`NA_COLOR_KEY`)를 고쳐서 해결 | 이 테스트가 실제 `mapping-commit.service.ts`의 `normalizeKeyPart()` 관례(색상 없으면 `'N/A'`)를 그대로 재현하고 있었다 — 테스트가 아니라 유틸이 그 관례를 놓치고 있었던 것 |
+
+이 표에 없는, colorCode를 명시적으로 쓰는 다른 e2e(`mapping-flow`, `mapping-reapprove-merge-flow`, `sales-order-commit-analysis-merge-flow`, `sales-orders-routes-flow`, `bom-label-set-flow`, `import-shipments-first-documentation-flow` 등)는 전부 `calculateMaterialRequirements`를 호출하지 않는 경로(BOM 저장/병합/비교 자체)만 검증해 영향이 없었다(격리 실행으로 확인).
+
+## 4. 기존 운영 데이터 영향
+
+| 이전 상황 | 이 PR 이후 | 사용자가 할 일 |
+|---|---|---|
+| 색상 있는 행 + `sheetQty` 없음 + 수량표 없음 — 이전엔 **틀린 숫자**(스타일 전체 수량)가 보였음 | "색상별 수량 확인 필요"로 바뀜(숫자 없음) | 작지 재업로드(수량 포함, PR-220) 또는 MATERIAL LIST 재업로드(색상×사이즈 수량표, PR-212)로 수량 근거를 채워 주세요. |
+| 색상 없는/`FREE`/`N/A` 행 | 변화 없음(기존 계산 그대로) | 없음 |
+| 이미 `sheetQty`가 있는 행(PR-220 적용분) | 변화 없음 | 없음 |
+
+## 5. 테스트 숫자
+
+| 구분 | PR-220 기준 | PR-220b 후 |
+|---|---|---|
+| 백엔드 `jest` | 1128 | **1143**(+15) |
+| 프런트 `vitest run` | 553 | **558**(+5) |
+| e2e | (아래 참고) | (아래 참고) |
+
+새 테스트: `calculateMaterialRequirements`의 `colorQuantities`/`needsColorQty`/`basis` 확장 14건(②③④⑤⑥⑦⑧ + N/A 공통 처리 1건, `it.each` 5건 포함), `work-orders.service.spec.ts`에 `StylesService` 목 추가(기존 테스트 유지 목적), 프런트 `needsColorQty` 표시 4건(`ShortageTable`/`bomRequirementReport`/`purchaseOrderForm`), e2e 신규 1건(`sales-order-color-qty-flow.e2e-spec.ts`, 엑셀 매핑 경로로 색상×사이즈 수량표만으로 760/758이 계산되는지).
+
+### e2e — 흔들림, 재시도 기준으로 보고(자체 통과 처리하지 않음)
+
+지시서대로 **처음부터 `--maxWorkers=1`로 전체 1회** 실행했다.
+
+- 1차(전체, `--maxWorkers=1`): **549/569 통과**(20건 실패) — 전부 `beforeAll`/개별 테스트의 5초 타임아웃(부팅 경합) 또는 대용량 파일 테스트(DPKL) 타임아웃형이었다.
+- 실패한 스펙을 **개별/소그룹으로 재실행하면 전부 통과**한다 — 이번 PR이 실제로 건드린 계산 경로(`bom-requirements-flow`, `bom-requirement-by-style-flow`, `bom-active-review-flow`, `bom-excel-reconcile-flow`, `multi-style-bulk-order-flow`, `purchase-order-search-flow`, 신규 `sales-order-color-qty-flow`)를 포함해 **모두 격리 실행에서 100% 통과**를 확인했다(수정 과정에서 처음엔 7개 파일이 실제로 깨졌었고, 위 3절 표의 수정으로 전부 해결됨 — 자체 판단이 아니라 격리 재실행으로 검증).
+- 남은 실패(이번 PR과 무관한 파일들, 예: `export-performance-flow`, `import-shipments-dpkl-flow`, `packing-receipts-report`, `purchase-orders-report-filter`, `search-select-audit-followup-flow`)는 매 전체 실행마다 **다른 무작위 조합**으로 나타나(머신 동시 실행 자원 경합, PR-219/MERGE-21에서도 같은 패턴이 보고됨) 이 PR의 회귀가 아니라고 판단하지만, **하한(569) 미달이라는 사실 자체는 숨기지 않고 보고**합니다 — 병합 시점에 사용자가 재확인해 주세요.
+
+`git diff eb5c41c --stat` 확인: 새 마이그레이션 0건(PR-220의 1개만 유지), `package.json`/락 파일 변경 0건.
+
+## 6. 변경 파일(PR-220b 추가분)
+
+| 파일 | 내용 |
+|---|---|
+| `src/work-orders/utils/material-requirements.util.ts` | 핵심 — `colorQuantities`/`needsColorQty`/`basis` 확장(color-qty/unknown/mixed), `normalizeColorForMatch`, `NA_COLOR_KEY` |
+| `src/work-orders/work-orders.service.ts` | `StylesService` 주입, 스타일당 1회 `getColorSizeQuantities` 조회 |
+| `src/work-orders/work-orders.module.ts`, `src/styles/styles.module.ts` | 모듈 연결(StylesService export/import) |
+| `frontend-app/src/utils/bomRequirementReport.ts` | `MaterialRequirementRow`에 `needsColorQty`, 엑셀 컬럼 "색상별 수량 확인 필요" 처리 |
+| `frontend-app/src/components/StyleShortagePanel.tsx`, `BomRequirementReport.tsx` | needsColorQty/수량표 기준 배지 |
+| `frontend-app/src/components/PurchaseOrdersManager.tsx` | `needsColorQtyNote` — [B] 수량 칸 안내 |
+| `test/sales-order-color-qty-flow.e2e-spec.ts` (신규) | 엑셀 매핑 경로 색상×사이즈 수량표 e2e |
+| 그 외 5개 e2e 파일 | 3절 표의 colorCode placeholder 수정 |
+| 각 `*.spec.ts`/`*.test.ts` | 위 변경에 대한 테스트 |
+
+## 7. 하지 않은 것(요구사항 그대로)
+
+새 마이그레이션, 약어↔전체명 추측 매칭, 색상 행에 전체 수량 폴백(이번 PR의 핵심 제거 대상), 포장 규칙 값·올림 순서 변경, Y↔M 환산, Gemini 호출, main 병합.
