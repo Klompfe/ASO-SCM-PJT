@@ -347,4 +347,173 @@ describe('BOM 소요량 계산 (PR-120)', () => {
       expect(row.materialSubType).toBeNull();
     });
   });
+
+  // PR-220 0번: 1518 버그 원인 확정 + 재현. 사용자 보고(스타일 MB74BLM107Z, 겉감 BL/KH,
+  // 각 요척 1.0, 작지 760/758, 스타일 기획수량 1,518)와 같은 모양의 합성 데이터로
+  // material-requirements.util.ts:202(수정 전) `cur.requiredQty = round4(cur.requiredQty +
+  // perUnit * target)`가 색상/행별 실제 수량과 무관하게 "스타일 전체 물량(target)"을
+  // 모든 BOM 행에 그대로 곱하는 것을 재현한다 — BL/KH가 서로 다른 Item(실제 사용자
+  // 사례: 색상이 품목명에 포함돼 품목 자체가 색상별로 나뉨, 예 "KHAKI KH")이든 같은
+  // Item의 색상별 행(엑셀 업로드처럼 자재명은 같고 colorCode만 다름)이든 동일하게
+  // 재현된다 — 원인은 "색상 행 합산" 자체가 아니라 "행마다 색상과 무관한 동일한
+  // target을 곱한다"는 것이기 때문이다(아래 두 케이스 모두로 확인).
+  describe('PR-220 0번: 1518 버그 원인 확정 (sheetQty 없는 데이터, 수정 전 동작 재현 + 수정 후 회귀 없음 확인)', () => {
+    it('겉감이 색상별로 서로 다른 Item(사용자 실사례: "KHAKI KH" 등)이면 각 Item이 독립적으로 perUnit×target을 계산해 둘 다 1,518이 된다(sheetQty 없음 — 기존 계산, 회귀 없음 확인용)', () => {
+      const rows = calculateMaterialRequirements(
+        1518, // 스타일 기획수량(target) — 모든 행에 그대로 곱해진다(버그의 근원)
+        [
+          { id: 1, material: mat(20, 'BLUE BL'), consumption: 1.0, category: '겉감', colorCode: 'BL' },
+          { id: 2, material: mat(21, 'KHAKI KH'), consumption: 1.0, category: '겉감', colorCode: 'KH' },
+        ],
+        new Map(),
+      );
+      expect(rows.map((r) => [r.itemName, r.requiredQty])).toEqual([
+        ['BLUE BL', 1518],
+        ['KHAKI KH', 1518], // 사용자가 실제로 본 값 — 작지 인쇄값(758)이 아니라 스타일 전체 물량(1518)
+      ]);
+      // sheetQty가 없는 데이터이므로 이 PR의 수정으로 결과가 달라지면 안 된다(회귀 없음).
+      expect(rows.every((r) => r.basis === 'computed')).toBe(true);
+    });
+
+    it('겉감이 같은 Item의 색상별 BOM 행(엑셀 업로드 모양)이면 두 행의 perUnit×target이 그대로 합산돼 3,036(=1518×2)이 된다(sheetQty 없음 — 이 역시 기존 계산, 이번 PR에서 고치는 대상이 아님)', () => {
+      const [row] = calculateMaterialRequirements(
+        1518,
+        [
+          { id: 1, material: mat(22, '겉감'), consumption: 1.0, category: '겉감', colorCode: 'BL' },
+          { id: 2, material: mat(22, '겉감'), consumption: 1.0, category: '겉감', colorCode: 'KH' },
+        ],
+        new Map(),
+      );
+      expect(row.requiredQty).toBe(3036); // 1518 + 1518 — "같은 자재로 합산"은 올바르지만 각 행의 입력 자체가 이미 틀려 있다
+      expect(row.basis).toBe('computed');
+    });
+  });
+
+  // PR-220: sheetQty(작지 수량)가 있으면 그 값을 행의 필요량으로 쓴다 — 위 0번에서 확정한
+  // 원인(행마다 색상과 무관한 target을 곱함)을, "그 행에 실제로 인쇄된 수량"으로 대체해
+  // 고친다. 수용 기준 1·2(사용자 보고 사례 재현)와 3(sheetQty 없는 행은 회귀 없음, 위에서
+  // 이미 확인)·4(단위 불일치 시 폴백+mismatch)를 테스트한다.
+  describe('PR-220: sheetQty를 필요량에 반영 (단위 일치 시에만, 없으면 기존 계산으로 폴백)', () => {
+    const matUnit = (id: number, name: string, unit: string) => ({ id, code: `M${id}`, name, unit });
+
+    it('수용 기준: 겉감 BL/KH(요척 1.0, 작지 760/758, 기획수량 1518) — 각 Item의 필요량이 1518이 아니라 작지 그대로 760/758이 된다', () => {
+      const rows = calculateMaterialRequirements(
+        1518,
+        [
+          { id: 1, material: matUnit(20, 'BLUE BL', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'BL', sheetQty: 760, sheetQtyUnit: 'Y' },
+          { id: 2, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 758, sheetQtyUnit: 'Y' },
+        ],
+        new Map(),
+      );
+      expect(rows.map((r) => [r.itemName, r.requiredQty, r.basis])).toEqual([
+        ['BLUE BL', 760, 'sheet'],
+        ['KHAKI KH', 758, 'sheet'],
+      ]);
+      expect(rows.every((r) => r.requiredQty !== 1518)).toBe(true);
+    });
+
+    it('[B] 발주 폼 수량 제안과 같은 경로이므로, 부족분도 작지 기준(760/758)으로 정확히 계산된다', () => {
+      const rows = calculateMaterialRequirements(
+        1518,
+        [{ id: 1, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 758, sheetQtyUnit: 'Y' }],
+        new Map([[21, 700]]), // 이미 700Y 발주
+      );
+      expect(rows[0]).toMatchObject({ requiredQty: 758, orderedQty: 700, shortageQty: 58 });
+    });
+
+    it('단위가 다르면(행 단위 Y, 작지 단위 M) 추측 환산하지 않고 기존 계산으로 폴백한다', () => {
+      const [row] = calculateMaterialRequirements(
+        1518,
+        [{ id: 1, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 758, sheetQtyUnit: 'M' }],
+        new Map(),
+      );
+      expect(row.requiredQty).toBe(1518); // 폴백 — sheetQty를 쓰지 않음
+      expect(row.basis).toBe('computed');
+    });
+
+    it('단위가 불명(둘 중 하나라도 빈 값)이면 역시 폴백한다', () => {
+      const [row] = calculateMaterialRequirements(
+        1518,
+        [{ id: 1, material: mat(21, 'KHAKI KH'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 758, sheetQtyUnit: null }],
+        new Map(),
+      );
+      expect(row.requiredQty).toBe(1518);
+      expect(row.basis).toBe('computed');
+    });
+
+    it('sheetQty가 0/음수/NaN이면(못 읽음 포함) 폴백한다', () => {
+      for (const bad of [0, -1, NaN, null, undefined]) {
+        const [row] = calculateMaterialRequirements(
+          1518,
+          [{ id: 1, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: bad as any, sheetQtyUnit: 'Y' }],
+          new Map(),
+        );
+        expect(row.requiredQty).toBe(1518);
+        expect(row.basis).toBe('computed');
+      }
+    });
+
+    it('computedQty는 basis와 무관하게 항상 제공된다(화면의 "계산수량" 비교용)', () => {
+      const [sheetRow] = calculateMaterialRequirements(
+        1518,
+        [{ id: 1, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 758, sheetQtyUnit: 'Y' }],
+        new Map(),
+      );
+      expect(sheetRow.computedQty).toBe(1518); // 요척(1.0)×기획수량(1518)
+      expect(sheetRow.sheetQty).toBe(758);
+
+      const [computedRow] = calculateMaterialRequirements(1518, [bi(1, mat(21, 'KHAKI KH'), 1.0)], new Map());
+      expect(computedRow.computedQty).toBe(1518);
+      expect(computedRow.sheetQty).toBeUndefined();
+    });
+
+    it('작지 수량과 계산값이 크게 다르면(±5% 초과) mismatch: true로 확인 필요를 표시한다', () => {
+      const [row] = calculateMaterialRequirements(
+        1518,
+        // 계산값 1518, 작지 1200 — 차이율 약 21% > 5%
+        [{ id: 1, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 1200, sheetQtyUnit: 'Y' }],
+        new Map(),
+      );
+      expect(row.mismatch).toBe(true);
+      expect(row.requiredQty).toBe(1200); // mismatch여도 작지 수량을 그대로 쓴다(사람이 확인하라는 표시일 뿐, 자동으로 계산값으로 바꾸지 않음)
+    });
+
+    it('작지 수량이 계산값과 거의 같으면(5% 이내) mismatch: false', () => {
+      const [row] = calculateMaterialRequirements(
+        100,
+        [{ id: 1, material: matUnit(21, 'A', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'A', sheetQty: 101, sheetQtyUnit: 'Y' }],
+        new Map(),
+      );
+      expect(row.mismatch).toBe(false);
+    });
+
+    it('포장 환산(콘/롤)은 sheetQty 기준 입력으로도 기존 색상별 올림 순서를 그대로 따른다', () => {
+      const obaRule = { materialSubType: 'OBA_SA_SKU_I_SA', displayName: '오바사·스쿠이사', packagingUnitLabel: '콘', unitLengthM: 4000 };
+      const rows = calculateMaterialRequirements(
+        1518,
+        [
+          { id: 1, material: matUnit(30, '오바사', 'M'), consumption: 1.0, category: '실', colorCode: 'BL', threadType: 'OBA_SA_SKU_I_SA', sheetQty: 4001, sheetQtyUnit: 'M' },
+          { id: 2, material: matUnit(30, '오바사', 'M'), consumption: 1.0, category: '실', colorCode: 'KH', threadType: 'OBA_SA_SKU_I_SA', sheetQty: 4001, sheetQtyUnit: 'M' },
+        ],
+        new Map(),
+        { packagingRules: [obaRule] },
+      );
+      // 색상별 올림: ceil(4001/4000)=2, ceil(4001/4000)=2 → 합계 4 (전체 합산 올림이면 ceil(8002/4000)=3과 달라야 함)
+      expect(rows[0].packaging?.requiredPackages).toBe(4);
+      expect(rows[0].basis).toBe('sheet');
+    });
+
+    it('재업로드 등에서 일부 행만 sheetQty가 있으면(mixed) basis는 "mixed"이고 requiredQty는 행별로 올바른 값을 합산한다', () => {
+      const [row] = calculateMaterialRequirements(
+        1518,
+        [
+          { id: 1, material: matUnit(21, '혼합자재', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'BL', sheetQty: 760, sheetQtyUnit: 'Y' },
+          { id: 2, material: matUnit(21, '혼합자재', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH' }, // sheetQty 없음 → 이 행은 계산값
+        ],
+        new Map(),
+      );
+      expect(row.basis).toBe('mixed');
+      expect(row.requiredQty).toBe(760 + 1518); // BL은 작지(760), KH는 계산값(1×1518)
+    });
+  });
 });

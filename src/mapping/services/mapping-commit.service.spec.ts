@@ -182,6 +182,23 @@ describe('MappingCommitService', () => {
       const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
       expect(bomItemSave[1].material).toEqual(existingMaterial);
     });
+
+    // PR-220: 신규 스타일(처음 커밋)에서도 sheetQty/sheetQtyUnit이 저장되는지 — 수주
+    // 등록(작지 AI) 경로가 commitAnalysis를 통해 이 필드를 채워 보내는 경로의 기초.
+    it('bomItems에 유효한 sheetQty/sheetQtyUnit이 있으면 신규 BomItem에 그대로 저장된다', async () => {
+      await service.commit({
+        ...validPayload,
+        bomItems: [{ ...validPayload.bomItems[0], sheetQty: 760, sheetQtyUnit: 'Y' }],
+      });
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1]).toEqual(expect.objectContaining({ sheetQty: 760, sheetQtyUnit: 'Y' }));
+    });
+
+    it('bomItems에 sheetQty가 없으면(엑셀 매핑 경로) 신규 BomItem의 sheetQty/sheetQtyUnit은 null이다', async () => {
+      await service.commit(validPayload);
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1]).toEqual(expect.objectContaining({ sheetQty: null, sheetQtyUnit: null }));
+    });
   });
 
   describe('CommitMappingDto 유효성 검증 (필수 필드 누락 시 명확한 검증 에러)', () => {
@@ -429,6 +446,51 @@ describe('MappingCommitService', () => {
       );
       const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
       expect(bomItemSaveCalls.some(([, data]: any) => data.colorCode === 'BK')).toBe(false);
+    });
+
+    // PR-220: sheetQty/sheetQtyUnit은 "기존 BomItem은 건드리지 않는다" 규칙의 예외다 —
+    // 소요량 계산 기준(발주수량)에 쓰이는 값이라, 재업로드로 유효한(유한한 양수) 작지
+    // 수량이 들어오면 그 두 컬럼만 갱신한다(다른 필드는 여전히 그대로).
+    describe('sheetQty/sheetQtyUnit (PR-220 — 작지 수량, 재업로드에서 null로 덮어쓰지 않음)', () => {
+      it('재업로드에서 기존 (자재명,색상,규격)에 유효한 sheetQty가 오면 그 BomItem의 sheetQty/sheetQtyUnit만 갱신해 저장한다', async () => {
+        const payload = rebuildPayload();
+        payload.bomItems[0] = { ...payload.bomItems[0], sheetQty: 760, sheetQtyUnit: 'Y' }; // 기존 BK 행
+        await service.commit(payload);
+
+        const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+        const bkSave = bomItemSaveCalls.find(([, data]: any) => data.colorCode === 'BK' || data.id === 501);
+        expect(bkSave).toBeDefined();
+        expect(bkSave![1]).toMatchObject({ sheetQty: 760, sheetQtyUnit: 'Y' });
+        // 다른 필드(요척 등)는 건드리지 않는다 — existingBomItem 그대로.
+        expect(bkSave![1].consumption).toBe(1);
+      });
+
+      it.each([undefined, null, 0, -1, NaN])('재업로드에서 sheetQty가 %p(못 읽음/0/음수)이면 기존 BomItem을 전혀 저장하지 않는다(null로 지우지 않음)', async (bad) => {
+        const payload = rebuildPayload();
+        payload.bomItems[0] = { ...payload.bomItems[0], sheetQty: bad as any, sheetQtyUnit: 'Y' };
+        await service.commit(payload);
+
+        const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+        expect(bomItemSaveCalls.some(([, data]: any) => data.colorCode === 'BK' || data.id === 501)).toBe(false);
+      });
+
+      it('새로 추가되는 BomItem(신규 컬러 CR)에는 sheetQty/sheetQtyUnit이 함께 저장된다', async () => {
+        const payload = rebuildPayload();
+        payload.bomItems[1] = { ...payload.bomItems[1], sheetQty: 758, sheetQtyUnit: 'Y' }; // 신규 CR 행
+        await service.commit(payload);
+
+        const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+        const crSave = bomItemSaveCalls.find(([, data]: any) => data.colorCode === 'CR');
+        expect(crSave![1]).toMatchObject({ sheetQty: 758, sheetQtyUnit: 'Y' });
+      });
+
+      it('sheetQty를 전혀 보내지 않으면(엑셀 매핑 경로) 새 BomItem도 sheetQty/sheetQtyUnit이 null로 저장된다(변경 없음)', async () => {
+        await service.commit(rebuildPayload()); // CR 행에 sheetQty 없음
+
+        const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+        const crSave = bomItemSaveCalls.find(([, data]: any) => data.colorCode === 'CR');
+        expect(crSave![1]).toMatchObject({ sheetQty: null, sheetQtyUnit: null });
+      });
     });
 
     it('totalQty가 값을 보내면 새 값으로 갱신된다(factory와 달리 예외 없음)', async () => {

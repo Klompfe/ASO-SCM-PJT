@@ -148,7 +148,49 @@ describe('SalesOrdersService', () => {
       expect(bomItem).toEqual({
         category: '겉감', itemName: 'KL-R114', spec: undefined, colorCode: undefined, consumption: 1.2,
         requiredQty: undefined, supplier: undefined, remarks: undefined, threadType: undefined, tapeType: undefined,
+        // PR-220: requiredQty가 null(읽지 못함)이면 sheetQty도 undefined로 넘어간다.
+        sheetQty: undefined, sheetQtyUnit: undefined,
       });
+    });
+  });
+
+  // PR-220: commitAnalysis가 AI의 requiredQty(출고량, 기존 필드)/requiredQtyUnit(새 필드)을
+  // BomItem.sheetQty/sheetQtyUnit으로도 함께 넘기는지 — 기존 requiredQty 전달(legacy 컬럼)은
+  // 그대로 유지된 채(위 테스트에서 확인) 추가로만 넘어가야 한다.
+  describe('commitAnalysis - sheetQty/sheetQtyUnit 전달 (PR-220)', () => {
+    const mockMasterStyleRepo = { findOne: jest.fn() };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === Contract ? mockContractRepo : mockMasterStyleRepo,
+      );
+      mockMasterStyleRepo.findOne.mockResolvedValue({ styleNo: 'S1', overview: { totalQty: 1518 } });
+      mockMappingCommitService.commit.mockResolvedValue({ success: true, notices: [], warnings: [] });
+      mockSalesOrderSpecsService.save.mockResolvedValue({ id: 1 });
+    });
+
+    it('requiredQty/requiredQtyUnit이 있으면 sheetQty/sheetQtyUnit으로 그대로 넘어간다', async () => {
+      await service.commitAnalysis({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 1518, targetRdd: null, documentDate: null },
+        bomItems: [{ category: '겉감', itemName: 'KHAKI KH', spec: null, colorCode: 'KH', consumption: 1, requiredQty: 758, requiredQtyUnit: 'Y', supplier: null, remarks: null }],
+        sizeSpecs: [], workNotes: null,
+      } as any);
+
+      const payload = mockMappingCommitService.commit.mock.calls[0][0];
+      expect(payload.bomItems[0]).toMatchObject({ requiredQty: 758, sheetQty: 758, sheetQtyUnit: 'Y' });
+    });
+
+    it('requiredQtyUnit이 없으면(단위를 못 읽음) sheetQtyUnit은 undefined다(sheetQty는 그대로 넘어간다)', async () => {
+      await service.commitAnalysis({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 1518, targetRdd: null, documentDate: null },
+        bomItems: [{ category: '겉감', itemName: 'KHAKI KH', spec: null, colorCode: 'KH', consumption: 1, requiredQty: 758, supplier: null, remarks: null }],
+        sizeSpecs: [], workNotes: null,
+      } as any);
+
+      const payload = mockMappingCommitService.commit.mock.calls[0][0];
+      expect(payload.bomItems[0].sheetQty).toBe(758);
+      expect(payload.bomItems[0].sheetQtyUnit).toBeUndefined();
     });
   });
 

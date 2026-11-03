@@ -62,6 +62,14 @@ const normalizeKeyPart = (v?: string | null): string => (v && v.trim()) || 'N/A'
 // 그대로 따른다).
 const LINING_DEFAULT_COMPOSITION = 'POLYESTER 100%';
 
+// PR-220: BomItem.sheetQty에 넣을 값 — "유한한 양수일 때만 갱신"(PR-211 방식, 못 읽은
+// 값/0/음수로 기존 값을 지우지 않는다). sheetQtyUnit은 sheetQty가 유효할 때만 함께 쓴다
+// (단위만 있고 수량이 없는 애매한 상태를 만들지 않기 위함).
+function resolveSheetQty(item: { sheetQty?: number; sheetQtyUnit?: string }): { sheetQty: number | null; sheetQtyUnit: string | null } {
+  const valid = Number.isFinite(item.sheetQty) && (item.sheetQty as number) > 0;
+  return valid ? { sheetQty: item.sheetQty as number, sheetQtyUnit: item.sheetQtyUnit?.trim() || null } : { sheetQty: null, sheetQtyUnit: null };
+}
+
 // "안감/조바 계열" 판별 — 오탐 방지를 위해 category === '안감'이거나 itemName에
 // "안감"/"조바"가 포함되는 경우로만 좁게 잡는다.
 function isLiningItem(category?: string | null, itemName?: string | null): boolean {
@@ -221,6 +229,16 @@ export class MappingCommitService {
                 `→ 새 값(요척 ${newConsumption}, 소요량 ${newRequiredQty}) — 자동 반영하지 않음, 확인 후 수동 변경 필요`,
             });
           }
+          // PR-220: sheetQty/sheetQtyUnit은 위 "자동 반영 보류" 규칙의 예외다 — 소요량
+          // 계산 기준(발주수량)에 쓰이는 값이라, 재업로드로 들어온 작지 수량이 유한한
+          // 양수면 갱신한다(들어온 값이 없거나 못 읽었으면 기존 값을 null로 지우지
+          // 않는다, PR-211 방식). 다른 필드(요척 등)는 여전히 건드리지 않는다.
+          const resolved = resolveSheetQty(item);
+          if (resolved.sheetQty != null) {
+            existingBomItem.sheetQty = resolved.sheetQty;
+            existingBomItem.sheetQtyUnit = resolved.sheetQtyUnit;
+            await queryRunner.manager.save(BomItem, existingBomItem);
+          }
           continue;
         }
 
@@ -236,6 +254,7 @@ export class MappingCommitService {
           });
         }
 
+        const { sheetQty, sheetQtyUnit } = resolveSheetQty(item);
         const savedBomItem = await queryRunner.manager.save(BomItem, {
           bom,
           material,
@@ -244,6 +263,9 @@ export class MappingCommitService {
           spec,
           consumption: item.consumption ?? 0,
           requiredQty: item.requiredQty ?? 0,
+          // PR-220: 엑셀 매핑 경로는 sheetQty를 보내지 않으므로 항상 null(변경 없음).
+          sheetQty,
+          sheetQtyUnit,
           // PR-098: 공급처는 작업지시서 문서 자체에는 없는 정보(실제 발주 단계에서
           // 결정)라 AI가 추정해서 채워 보내도 'N/A' 같은 문자열로 확정 저장하지 않는다
           // — "진짜로 빈 값"을 구분할 수 있어야 화면에서 "미정"으로 정확히 표시된다.

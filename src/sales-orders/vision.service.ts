@@ -97,6 +97,9 @@ export const RESPONSE_SCHEMA = {
             colorCode: { type: SchemaType.STRING, nullable: true },
             consumption: { type: SchemaType.NUMBER, nullable: true },
             requiredQty: { type: SchemaType.NUMBER, nullable: true },
+            // PR-220: requiredQty(출고량)의 단위를 원문 그대로(계산 없이) 추가로 읽는다.
+            // 기존 필드(requiredQty)의 의미·읽는 방식은 바꾸지 않는다 — 단위만 추가.
+            requiredQtyUnit: { type: SchemaType.STRING, nullable: true, description: '출고량(requiredQty) 칸 옆/안에 인쇄된 단위를 원문 그대로(Y/M/EA/KG 등). 단위가 안 보이면 null — 추측하지 마세요.' },
             supplier: { type: SchemaType.STRING, nullable: true },
             remarks: { type: SchemaType.STRING, nullable: true },
             materialSubTypeCandidate: {
@@ -149,6 +152,8 @@ documentDate와 targetRdd는 문서 안의 서로 다른 위치에 있는 서로
 handwrittenCmtPriceCandidate / handwrittenCmtPriceMemo: 바이어(buyer)가 "미도"로 명확히 인식된 문서에서만 채우세요. 문서 상단에 인쇄된 표 글자와 구분되는, 손으로 비교적 큰 글씨로 적힌 숫자가 있으면 추출하세요. "기본금액 + 230 = 7,500"처럼 계산식 형태면 candidate에는 식의 마지막 합계 숫자만, memo에는 식 전체를 보이는 그대로(원문 표기) 옮기세요(식이 없으면 memo에도 숫자만). 바이어가 미도가 아니거나, 바이어를 못 읽었거나, 그런 수기 숫자가 없거나, 여러 후보가 있어 어느 것인지 확신할 수 없으면 둘 다 반드시 null로 두고 절대 추측하지 마세요.
 
 2. bomItems(자재명세): 상단 소재 표(소재No./소재명/색상/규격/요척/출고량)와 하단 부자재 표(안감/심지/포켓감/테이프/재봉사/단추/라벨 등, 규격/소요량/비고)를 모두 각 행 하나씩 bomItems 배열 항목으로 변환하세요. category는 소재/안감/심지/부자재 등 표의 구분명, itemName은 소재명 또는 부자재명, spec은 규격/색상, consumption은 요척 또는 소요량(숫자만, 단위 제외). supplier(공급처)는 문서에 실제로 인쇄/기재된 값이 있을 때만 그대로 옮기고, 문서에 없으면 절대 추정하지 말고 반드시 null로 두세요 — 공급처는 작업지시서 시점에는 정해지지 않고 이후 발주 단계에서 결정되는 정보입니다.
+
+requiredQty(출고량)는 그 행에 인쇄된 숫자를 계산하지 말고 그대로 옮기세요(요척×수량으로 다시 계산하지 마세요). 같은 자재가 색상별로 행이 나뉘어 있으면 각 색상 행의 출고량을 각각 그대로 읽으세요(다른 색상 행의 값을 합치거나 복사하지 마세요). requiredQtyUnit은 출고량 칸 옆/안에 인쇄된 단위(Y/M/EA/KG 등)를 원문 그대로 옮기고, 단위가 안 보이면 null로 두세요(추측하지 마세요). "합계"/"TOTAL" 같은 합산 행은 개별 자재 행이 아니므로 bomItems에 넣지 마세요.
 
 materialSubTypeCandidate: 실(THREAD)이나 테이프류 자재 행에서만, 자재명 또는 규격란 텍스트에 "코아사"/"오바사"/"스쿠이사"/"지누이도"/"다데"/"암홀" 같은 글자가 그대로(또는 거의 그대로) 포함되어 있어 종류를 명확히 특정할 수 있을 때만 채우세요(스쿠이사는 오바사로, 다른 이름들은 가장 가까운 항목으로 매핑). 실/테이프가 아닌 자재이거나, 그런 단서가 없거나, 여러 후보 중 어느 것인지 확신할 수 없으면 반드시 null로 두고 절대 추측하지 마세요.
 

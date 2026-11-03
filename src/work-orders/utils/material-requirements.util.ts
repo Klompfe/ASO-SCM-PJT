@@ -26,6 +26,12 @@ export interface RequirementBomItem {
   // materialSubType보다 우선한다(effectiveSubType).
   threadType?: string | null;
   tapeType?: string | null;
+  // PR-220: 작업지시서(작지) AI 인식 경로에서만 채워지는, 이 행에 인쇄된 수량("출고량")
+  // 원문값·단위. 있고 단위가 자재(Item) 단위와 일치할 때만 이 행의 필요량으로 그대로
+  // 쓴다(perUnit × targetQuantity 대신) — 1518 버그(색상별 실제 수량을 무시하고 스타일
+  // 전체 물량을 모든 색상 행에 곱하던 문제)의 근본 수정.
+  sheetQty?: number | null;
+  sheetQtyUnit?: string | null;
 }
 
 // PR-185 B-2 / PR-186: material_packaging_unit_rules(PR-175) 한 행 — materialSubType →
@@ -84,6 +90,13 @@ export interface MaterialRequirementRow {
   // 불일치 버그 — 미터 필요량에서 콘 수를 그대로 빼던 문제의 완화). 종류를 확정하지는
   // 않는다(packaging과 별개 필드 — 실제 지정 전까지는 추천값일 뿐).
   suggestedPackaging?: SuggestedPackagingConversion;
+  // PR-220: 이 자재의 필요량이 작지 수량(sheetQty)을 썼는지(이 자재의 BOM 행이 전부/일부/
+  // 전혀 sheetQty를 썼는지), 계산값(요척×기획수량, 항상 제공 — 비교·화면 표시용)과,
+  // 작지 수량과 계산값이 크게 다를 때의 확인 필요 표시.
+  basis?: 'sheet' | 'computed' | 'mixed';
+  computedQty?: number;
+  sheetQty?: number;
+  mismatch?: boolean;
 }
 
 export interface SuggestedPackagingConversion extends PackagingConversion {
@@ -103,6 +116,9 @@ const round4 = (n: number): number => Math.round(n * 10000) / 10000;
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 const MISSING_SUBTYPE_WARNING = '실/테이프 종류 미지정 — 선택해 주세요';
+const normUnit = (u: string | null | undefined): string => (u ?? '').trim().toUpperCase();
+// PR-220: 작지 수량과 계산값(요척×기획수량)의 차이율이 이 값을 넘으면 mismatch(확인 필요).
+const SHEET_QTY_MISMATCH_THRESHOLD_PCT = 0.05;
 
 // 색상별로 ceil(필요미터 ÷ 단위길이)한 뒤 합산 — 확정된 종류(packaging)와 PR-219의 추천
 // 종류(suggestedPackaging) 계산이 완전히 같은 식이라 한 곳으로 합친다(중복 구현 금지).
@@ -155,6 +171,10 @@ interface WorkingRow extends MaterialRequirementRow {
   unit: string | null;
   materialName: string;
   reviewed: boolean;
+  // PR-220: 이 자재의 BOM 행 중 작지 수량을 쓴/안 쓴 행 개수, 쓴 행들의 합(sheetQtySum).
+  sheetBasisCount: number;
+  computedBasisCount: number;
+  sheetQtySum: number;
 }
 
 // BOM 전개: 자재별 필요 총수량 = consumption(제품 1개당) × targetQuantity. 기존 재고 차감 로직
@@ -176,6 +196,21 @@ export function calculateMaterialRequirements(
   for (const bi of [...bomItems].sort((a, b) => a.id - b.id)) {
     if (!bi.material) continue;
     const perUnit = num(bi.consumption);
+    const computedRowQty = perUnit * target;
+
+    // PR-220: 작지 수량(sheetQty)이 있고 단위가 자재(Item) 단위와 같을 때만 이 행의
+    // 필요량으로 그대로 쓴다 — 1518 버그(색상/행마다 실제 수량이 다른데 스타일 전체
+    // 물량(target)을 모든 행에 똑같이 곱하던 문제)의 근본 수정. 단위가 다르거나
+    // 불명(둘 중 하나라도 빈 값)이면 추측하지 않고 기존 계산(perUnit×target)으로
+    // 폴백한다(요구사항 — Y↔M 등 환산은 하지 않음).
+    const sheetQtyRaw = Number(bi.sheetQty);
+    const hasValidSheetQty = bi.sheetQty != null && Number.isFinite(sheetQtyRaw) && sheetQtyRaw > 0;
+    const rowUnit = normUnit(bi.material.unit);
+    const sheetUnit = normUnit(bi.sheetQtyUnit);
+    const unitMatches = hasValidSheetQty && !!rowUnit && !!sheetUnit && rowUnit === sheetUnit;
+    const rowBasis: 'sheet' | 'computed' = unitMatches ? 'sheet' : 'computed';
+    const rowQty = rowBasis === 'sheet' ? sheetQtyRaw : computedRowQty;
+
     const cur: WorkingRow =
       map.get(bi.material.id) ??
       {
@@ -197,18 +232,29 @@ export function calculateMaterialRequirements(
         unit: bi.material.unit ?? null,
         materialName: bi.material.name,
         reviewed: !!bi.material.packagingReviewedAt,
+        sheetBasisCount: 0,
+        computedBasisCount: 0,
+        sheetQtySum: 0,
       };
     cur.consumptionPerUnit = round4(cur.consumptionPerUnit + perUnit);
-    cur.requiredQty = round4(cur.requiredQty + perUnit * target);
+    cur.requiredQty = round4(cur.requiredQty + rowQty);
     cur.lineCount += 1;
+    if (rowBasis === 'sheet') {
+      cur.sheetBasisCount += 1;
+      cur.sheetQtySum = round4(cur.sheetQtySum + sheetQtyRaw);
+    } else {
+      cur.computedBasisCount += 1;
+    }
     const category = (bi.category ?? '').trim();
     if (category && !cur.categories.includes(category)) cur.categories.push(category);
     const color = (bi.colorCode ?? '').trim();
     if (color && !cur.colors.includes(color)) cur.colors.push(color);
 
     // 색상별 올림(ceil)을 위해 색상별 필요 미터를 따로 누적한다(색상 구분 없는 행은 '-' 하나로 취급).
+    // PR-220: 작지 수량을 쓴 행은 그 값을, 아니면 기존 계산값을 누적한다 — 포장(콘/롤)
+    // 올림 로직 자체(행/색상 단위 올림 후 합산)는 바꾸지 않고 입력 수량만 바뀐다.
     const colorKey = color || '-';
-    cur.colorMeters.set(colorKey, round4((cur.colorMeters.get(colorKey) ?? 0) + perUnit * target));
+    cur.colorMeters.set(colorKey, round4((cur.colorMeters.get(colorKey) ?? 0) + rowQty));
 
     // PR-186: BOM 행에 종류가 있으면 그것, 없으면 자재(Item) 단위 지정(effectiveSubType).
     const subtype = effectiveSubType(bi, bi.material);
@@ -248,7 +294,23 @@ export function calculateMaterialRequirements(
     }
     // reviewed=true(= "실/테이프 아님"으로 확정)이고 종류도 없으면 일반 자재로 둔다(아무 필드도 안 채움).
 
-    const { colorMeters: _colorMeters, subtype: _subtype, subtypeMixed: _subtypeMixed, unit: _unit, materialName: _materialName, reviewed: _reviewed, ...clean } = row;
+    // PR-220: 출처 표시 + 계산값 비교. computedQty는 basis와 무관하게 항상 제공한다
+    // (화면의 "계산수량" 열, 작지 수량 유무와 상관없이 비교 기준으로 쓸 수 있게).
+    row.computedQty = round4(row.consumptionPerUnit * target);
+    if (row.sheetBasisCount > 0) {
+      row.basis = row.computedBasisCount > 0 ? 'mixed' : 'sheet';
+      row.sheetQty = row.sheetQtySum;
+      const diffPct = row.computedQty !== 0 ? Math.abs(row.computedQty - row.requiredQty) / Math.abs(row.computedQty) : 0;
+      row.mismatch = diffPct > SHEET_QTY_MISMATCH_THRESHOLD_PCT;
+    } else {
+      row.basis = 'computed';
+    }
+
+    const {
+      colorMeters: _colorMeters, subtype: _subtype, subtypeMixed: _subtypeMixed, unit: _unit, materialName: _materialName, reviewed: _reviewed,
+      sheetBasisCount: _sheetBasisCount, computedBasisCount: _computedBasisCount, sheetQtySum: _sheetQtySum,
+      ...clean
+    } = row;
     result.push(clean);
   }
   return result;

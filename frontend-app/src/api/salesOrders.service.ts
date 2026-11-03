@@ -57,6 +57,9 @@ export interface AiBomItem {
   colorCode: string | null;
   consumption: number | null;
   requiredQty: number | null;
+  // PR-220: requiredQty(출고량, 위)의 단위를 원문 그대로(계산 없이) — commit 시
+  // BomItem.sheetQty/sheetQtyUnit으로 함께 저장되어 소요량 계산의 기준이 된다.
+  requiredQtyUnit?: string | null;
   supplier: string | null;
   remarks: string | null;
   // PR-175: AI 후보(읽기전용 참고) — 실/테이프 종류 한글 라벨 중 하나 또는 null.

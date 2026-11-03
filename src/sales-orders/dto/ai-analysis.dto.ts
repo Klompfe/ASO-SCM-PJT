@@ -108,6 +108,14 @@ export class AiBomItemDto {
   @ApiPropertyOptional() @IsOptional() @IsString() colorCode: string | null;
   @ApiPropertyOptional() @IsOptional() @IsNumber() consumption: number | null;
   @ApiPropertyOptional() @IsOptional() @IsNumber() requiredQty: number | null;
+  // PR-220: requiredQty(위 — 이미 작지의 "출고량"을 그대로 읽던 기존 필드)의 단위를
+  // 원문 그대로 추가로 읽는다(계산하지 않음). commitAnalysis가 이 값과 함께
+  // BomItem.sheetQty/sheetQtyUnit으로 넘겨 소요량 계산이 "작지에서 읽은 값"임을
+  // 안전하게 식별할 수 있게 한다 — requiredQty 자체의 의미는 바꾸지 않는다.
+  @ApiPropertyOptional({ description: '작지 수량(requiredQty)의 단위(Y/M/EA/KG 등, 원문 그대로, 계산하지 않음)' })
+  @IsOptional()
+  @IsString()
+  requiredQtyUnit?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsString() supplier: string | null;
   @ApiPropertyOptional() @IsOptional() @IsString() remarks: string | null;
 

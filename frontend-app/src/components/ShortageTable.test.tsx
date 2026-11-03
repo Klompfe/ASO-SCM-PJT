@@ -129,3 +129,36 @@ describe('ShortageTable 단위 불일치 완화 (PR-219)', () => {
     expect(html).not.toContain('301,194');
   });
 });
+
+// PR-220: 필요량이 작지 수량(sheetQty, 작업지시서 AI 인식)을 썼는지와, 작지 수량과
+// 계산값(요척×기획수량)이 크게 다를 때의 확인 필요 표시.
+describe('ShortageTable 작지 수량 출처/불일치 표시 (PR-220)', () => {
+  it('basis가 "sheet"면 "작지 수량 기준" 배지가 보인다', () => {
+    const html = renderToStaticMarkup(createElement(ShortageTable, { rows: [row({ basis: 'sheet' })], onPick: vi.fn() }));
+    expect(html).toContain('작지 수량 기준');
+  });
+
+  it('basis가 "mixed"면 "일부 작지 수량 기준" 배지가 보인다', () => {
+    const html = renderToStaticMarkup(createElement(ShortageTable, { rows: [row({ basis: 'mixed' })], onPick: vi.fn() }));
+    expect(html).toContain('일부 작지 수량 기준');
+  });
+
+  it('basis가 "computed"면(기본) 아무 배지도 보이지 않는다(회귀 없음)', () => {
+    const html = renderToStaticMarkup(createElement(ShortageTable, { rows: [row({ basis: 'computed' })], onPick: vi.fn() }));
+    expect(html).not.toContain('작지 수량 기준');
+  });
+
+  it('mismatch:true면 작지 수량과 계산값을 함께 보여주는 확인 필요 문구가 뜬다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, { rows: [row({ basis: 'sheet', mismatch: true, sheetQty: 1200, computedQty: 1518 })], onPick: vi.fn() }),
+    );
+    expect(html).toContain('확인이 필요합니다');
+    expect(html).toContain('1,200');
+    expect(html).toContain('1,518');
+  });
+
+  it('mismatch가 없으면(기본) 확인 필요 문구가 없다', () => {
+    const html = renderToStaticMarkup(createElement(ShortageTable, { rows: [row({ basis: 'sheet' })], onPick: vi.fn() }));
+    expect(html).not.toContain('확인이 필요합니다');
+  });
+});

@@ -64,6 +64,19 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
               )}
               <td className={td}>
                 {r.itemName}{r.itemCode && <span className="block text-xs text-gray-400">{r.itemCode}</span>}
+                {/* PR-220: 필요량이 작지 수량(출고량)을 썼는지 — 계산값(요척×기획수량)과
+                    다른 "자체 계산"이 아니라 작업지시서에 인쇄된 값을 썼음을 알린다. */}
+                {r.basis === 'sheet' && (
+                  <span className="block text-xs text-emerald-700" data-testid={`basis-sheet-${r.itemId}`}>작지 수량 기준</span>
+                )}
+                {r.basis === 'mixed' && (
+                  <span className="block text-xs text-emerald-700" data-testid={`basis-mixed-${r.itemId}`}>일부 작지 수량 기준</span>
+                )}
+                {r.mismatch && (
+                  <span className="block text-xs text-amber-700" data-testid={`sheet-mismatch-${r.itemId}`}>
+                    ⚠ 작지 수량({fmt(r.sheetQty ?? 0)})과 계산값(요척×기획수량, {fmt(r.computedQty ?? 0)})이 달라 확인이 필요합니다
+                  </span>
+                )}
                 {r.packaging && <span className="block text-xs text-amber-700">{r.packaging.conversionFormula}</span>}
                 {r.conversionWarning && <span className="block text-xs text-amber-700" data-testid={`conversion-warning-${r.itemId}`}>⚠ {r.conversionWarning}</span>}
                 {/* PR-219: 종류 미지정이라 packaging이 비어 있어도, 자재명 키워드로 추천된

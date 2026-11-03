@@ -43,6 +43,12 @@ export interface MaterialRequirementRow {
     conflict?: boolean;
     conflictReason?: string;
   };
+  // PR-220: 이 자재의 필요량이 작지 수량(sheetQty, 작업지시서 AI 인식)을 썼는지, 계산값
+  // (요척×기획수량, 항상 제공)과 작지 수량이 크게 다를 때의 확인 필요 표시.
+  basis?: 'sheet' | 'computed' | 'mixed';
+  computedQty?: number;
+  sheetQty?: number;
+  mismatch?: boolean;
 }
 
 export type RequirementReason = 'NO_STYLE_NO' | 'NO_BOM' | null;

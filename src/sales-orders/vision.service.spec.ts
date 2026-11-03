@@ -35,6 +35,30 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
     expect(outcome.results[0].bomItems.every((b: any) => b.materialSubTypeCandidate === null)).toBe(true);
   });
 
+  // PR-220: requiredQtyUnit(새 스키마 필드)이 합성 JSON 응답에 있으면 그대로 결과에
+  // 남아야 한다(실제 Gemini 호출 없이 — generateContent를 스텁한 합성 응답으로 검증).
+  it('bomItems에 requiredQty/requiredQtyUnit이 있으면(합성 응답) 그대로 전달된다', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    const fakeParsedResult = [
+      {
+        overview: { styleNo: 'MB74BLM107Z', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: 1518, targetRdd: null, documentDate: null },
+        bomItems: [
+          { category: '겉감', itemName: 'KHAKI KH', spec: null, colorCode: 'KH', consumption: 1, requiredQty: 758, requiredQtyUnit: 'Y', supplier: null, remarks: null, materialSubTypeCandidate: null },
+        ],
+        sizeSpecs: [],
+        workNotes: null,
+      },
+    ];
+    const fakeGenerateContent = jest.fn().mockResolvedValue({
+      response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify(fakeParsedResult), usageMetadata: { promptTokenCount: 100, totalTokenCount: 300 } },
+    });
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent: fakeGenerateContent })) };
+
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+
+    expect(outcome.results[0].bomItems[0]).toMatchObject({ requiredQty: 758, requiredQtyUnit: 'Y' });
+  });
+
   it('GEMINI_API_KEY가 빈 문자열이어도(falsy) isMock: true여야 한다', async () => {
     const service = await buildService('');
 

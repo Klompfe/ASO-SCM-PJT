@@ -775,7 +775,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           <p className="text-xs text-gray-400 mb-1">AI가 읽은 값이므로 작업지시서 원본과 대조해 주세요 — 잘못된 행은 수정하거나 제외할 수 있습니다.</p>
                           <div className="overflow-x-auto max-h-96 overflow-y-auto">
                             <table className="border text-sm">
-                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1">제외</th><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">공급사</th><th className="border p-1">비고</th><th className="border p-1">실/테이프 종류</th><th className="border p-1">확인 필요</th></tr></thead>
+                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1">제외</th><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">작지수량(출고량)</th><th className="border p-1">공급사</th><th className="border p-1">비고</th><th className="border p-1">실/테이프 종류</th><th className="border p-1">확인 필요</th></tr></thead>
                               <tbody>
                                 {result.bomItems.map((item, i) => {
                                   const candidate = item.materialSubTypeCandidate ?? null;
@@ -864,6 +864,33 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                               >{c}</button>
                                             ))}
                                           </div>
+                                        )}
+                                      </td>
+                                      <td className="border p-1">
+                                        {/* PR-220: 작지에 인쇄된 이 행의 수량("출고량") 원문값·단위 — 계산하지
+                                            않고 그대로 읽은 값이다. 발주수량 계산의 기준(sheetQty)으로
+                                            저장된다(엑셀 업로드 경로에는 없는 필드). */}
+                                        <div className="flex gap-1">
+                                          <input
+                                            type="number"
+                                            step="any"
+                                            className="border rounded px-1 py-0.5 w-14 text-xs text-right"
+                                            data-testid={`bom-sheet-qty-${index}-${i}`}
+                                            value={item.requiredQty ?? ''}
+                                            disabled={isExcluded}
+                                            onChange={(e) => updateBomItemField(index, i, 'requiredQty', e.target.value === '' ? null : Number(e.target.value))}
+                                          />
+                                          <input
+                                            className="border rounded px-1 py-0.5 w-10 text-xs"
+                                            placeholder="단위"
+                                            data-testid={`bom-sheet-qty-unit-${index}-${i}`}
+                                            value={item.requiredQtyUnit ?? ''}
+                                            disabled={isExcluded}
+                                            onChange={(e) => updateBomItemField(index, i, 'requiredQtyUnit', e.target.value || null)}
+                                          />
+                                        </div>
+                                        {item.consumption != null && (
+                                          <div className="text-[10px] text-gray-400 mt-0.5">계산값: {((item.consumption ?? 0) * (result.overview.totalQty ?? 0)).toLocaleString('ko-KR')}</div>
                                         )}
                                       </td>
                                       <td className="border p-1">

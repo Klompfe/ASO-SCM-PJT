@@ -186,6 +186,19 @@ export class CommitBomItemDto {
   @IsOptional()
   @IsString()
   tapeType?: string;
+
+  // PR-220: 작업지시서(작지) AI 인식 경로에서만 보낸다(수주 등록, SalesOrdersService.
+  // commitAnalysis). 엑셀 매핑 경로는 이 필드를 보내지 않으므로 계속 undefined로 남는다
+  // (BomItem.sheetQty/sheetQtyUnit도 null로 남아 소요량 계산이 기존 계산으로 폴백한다).
+  @ApiPropertyOptional({ description: '작지에 인쇄된 이 행의 수량(출고량) — AI 인식 경로 전용', example: 760 })
+  @IsOptional()
+  @IsNumber()
+  sheetQty?: number;
+
+  @ApiPropertyOptional({ description: '작지 수량의 단위(Y/M/EA/KG 등, 원문 그대로) — AI 인식 경로 전용', example: 'Y' })
+  @IsOptional()
+  @IsString()
+  sheetQtyUnit?: string;
 }
 
 export class CommitMappingDto {

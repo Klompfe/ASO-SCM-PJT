@@ -106,6 +106,11 @@ export class SalesOrdersService {
         // 화면에서 사람이 확인한 threadType/tapeType만 넘어온다.
         threadType: b.threadType ?? undefined,
         tapeType: b.tapeType ?? undefined,
+        // PR-220: requiredQty를 BomItem.sheetQty로도 함께 넘긴다(기존 requiredQty 컬럼은
+        // 그대로 유지 — 의미 변경 없음). 엑셀 매핑 경로는 이 필드를 보내지 않으므로
+        // sheetQty/sheetQtyUnit은 항상 null로 남는다(수주 등록 경로에서만 채워짐).
+        sheetQty: b.requiredQty ?? undefined,
+        sheetQtyUnit: b.requiredQtyUnit ?? undefined,
       })),
     });
 

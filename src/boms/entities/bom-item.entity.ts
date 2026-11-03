@@ -80,4 +80,15 @@ export class BomItem {
   // 합치지 않고 threadType과 같은 패턴을 유지해 기존 코드 영향을 최소화한다).
   @Column({ type: 'varchar', enum: TapeType, nullable: true })
   tapeType?: TapeType | null;
+
+  // PR-220: 작업지시서(작지) AI 인식 경로에서만 채워지는, 그 행에 인쇄된 수량("출고량")
+  // 원문값과 단위. requiredQty(위)는 엑셀 경로에서는 consumption×totalQty로 계산된
+  // 스냅샷이라 작업지시 물량이 바뀌면 안 맞을 수 있어 그대로 신뢰해 쓸 수 없다 — 이
+  // 둘을 분리해 소요량 계산(material-requirements.util.ts)이 "작지에서 읽은 값인지"를
+  // 안전하게 구분한다. 엑셀 경로는 항상 null(변경 없음).
+  @Column('decimal', { nullable: true })
+  sheetQty?: number | null;
+
+  @Column({ nullable: true })
+  sheetQtyUnit?: string | null;
 }
