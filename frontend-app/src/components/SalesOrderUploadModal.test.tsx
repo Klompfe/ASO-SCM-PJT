@@ -31,4 +31,14 @@ describe('SalesOrderUploadModal — PR-200 안전장치 UI가 import 에러 없�
     );
     expect(html).toContain('작업지시서');
   });
+
+  // PR-221: 창 폭을 기존 max-w-4xl(896px)에서 넓혔다 — 모바일(w-full 유지)은 그대로,
+  // 큰 화면에서만 더 넓게 쓸 수 있는 상한(1680px)만 올렸다.
+  it('모달 폭이 기존 max-w-4xl보다 넓다(PR-221)', () => {
+    const html = renderToStaticMarkup(
+      createElement(SalesOrderUploadModal, { isOpen: true, onClose: vi.fn(), onSuccess: vi.fn() }),
+    );
+    expect(html).toContain('max-w-[1680px]');
+    expect(html).not.toContain('max-w-4xl');
+  });
 });

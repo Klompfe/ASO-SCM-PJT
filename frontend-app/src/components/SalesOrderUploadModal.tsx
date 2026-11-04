@@ -33,6 +33,7 @@ import {
   getSaveGateInfo,
 } from '../utils/visionGuardrails';
 import { OriginalPagePreview } from './OriginalPagePreview';
+import { buildChipsTitle, selectVisibleChips } from '../utils/warningChips';
 
 interface Props {
   isOpen: boolean;
@@ -87,6 +88,9 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   // 형식이 맞고 반복 읽기가 일치해도 숫자 1개 오독은 가드레일로 못 잡는다(A4/PILOT-6) —
   // 경고와 별개로 사람이 직접 확인했는지만 보는 관문이다.
   const [verifiedStyleNo, setVerifiedStyleNo] = useState<Set<number>>(new Set());
+  // PR-221: "확인 필요" 열의 경고가 3개 넘으면 기본 2개만 보여주고 나머지는 "+N"으로
+  // 접는다 — 행(결과 인덱스-행 인덱스)별로 펼쳤는지만 기억한다(저장 로직과 무관).
+  const [expandedWarningRows, setExpandedWarningRows] = useState<Set<string>>(new Set());
 
   const refreshSimilarStyleCandidates = async (index: number, styleNo: string | null) => {
     if (!styleNo) {
@@ -400,7 +404,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-lg w-full max-w-[1680px] max-h-[90vh] flex flex-col">
         <div className="p-6 overflow-y-auto flex-1 min-h-0">
           <div className="flex justify-between items-baseline mb-4">
             <h3 className="text-xl font-bold">수주 등록(작업지시서 업로드)</h3>
@@ -775,7 +779,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           <p className="text-xs text-gray-400 mb-1">AI가 읽은 값이므로 작업지시서 원본과 대조해 주세요 — 잘못된 행은 수정하거나 제외할 수 있습니다.</p>
                           <div className="overflow-x-auto max-h-96 overflow-y-auto">
                             <table className="border text-sm">
-                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1">제외</th><th className="border p-1">구분</th><th className="border p-1">자재명</th><th className="border p-1">규격</th><th className="border p-1">소요량</th><th className="border p-1">작지수량(출고량)</th><th className="border p-1">공급사</th><th className="border p-1">비고</th><th className="border p-1">실/테이프 종류</th><th className="border p-1">확인 필요</th></tr></thead>
+                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1 min-w-[48px]">제외</th><th className="border p-1 min-w-[72px]">구분</th><th className="border p-1 min-w-[140px]">자재명</th><th className="border p-1 min-w-[72px]">규격</th><th className="border p-1 min-w-[72px]">소요량</th><th className="border p-1 min-w-[140px]">작지수량(출고량)</th><th className="border p-1 min-w-[96px]">공급사</th><th className="border p-1 min-w-[72px]">비고</th><th className="border p-1 min-w-[120px]">실/테이프 종류</th><th className="border p-1 min-w-[280px]">확인 필요</th></tr></thead>
                               <tbody>
                                 {result.bomItems.map((item, i) => {
                                   const candidate = item.materialSubTypeCandidate ?? null;
@@ -947,50 +951,97 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           <option value="AMHOL">암홀 (100M/롤)</option>
                                         </select>
                                       </td>
-                                      <td className="border p-1 text-xs space-y-0.5" data-testid={`bom-badges-${index}-${i}`}>
-                                        {rowBadges.isNewMaterial && (
-                                          <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded px-1 py-0.5">자재 마스터에 없는 새 이름</div>
-                                        )}
-                                        {rowBadges.requiredQtyMismatch && (
-                                          <div className="bg-orange-50 border border-orange-200 text-orange-800 rounded px-1 py-0.5">요척×수량이 작지의 출고량과 다름 — 확인해주세요</div>
-                                        )}
-                                        {rowBadges.duplicateLooking && (
-                                          <div className="bg-purple-50 border border-purple-200 text-purple-800 rounded px-1 py-0.5">이름만 다르고 소요량이 같은 행입니다 — 작업지시서와 대조해 주세요</div>
-                                        )}
-                                        {/* PR-200: 서버 후처리 경고(UNKNOWN_NAME/요척 불일치/중복 묶음) —
-                                            위 배지(PR-197)와 별도로 표시한다(둘 다 서로 다른 로직). */}
-                                        {unknownName && (
-                                          <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded px-1 py-0.5">
-                                            {unknownName.message}
-                                            {(unknownName.suggestions ?? []).map((s) => (
-                                              <button key={s} type="button" onClick={() => updateBomItemField(index, i, 'itemName', s)} className="ml-1 px-1 rounded bg-sky-600 text-white hover:bg-sky-700">{s}로 바꾸기</button>
-                                            ))}
-                                          </div>
-                                        )}
-                                        {/* PR-201c: "요척 N로" 제안 버튼을 없앴다 — 불일치 원인이
-                                            요척 오독만이 아니라(총수량 오독·색상 행 분할·출고량
-                                            칸에 벌 수가 들어간 경우 등) 여러 가지인데, 버튼은
-                                            항상 요척만 바꿔 실제로는 맞는 요척을 틀리게 바꾸는
-                                            사례가 운영에서 확인됐다. 경고 문구만 그대로 둔다. */}
-                                        {yocheokMismatch && (
-                                          <div className="bg-orange-50 border border-orange-200 text-orange-800 rounded px-1 py-0.5">
-                                            {yocheokMismatch.message}
-                                          </div>
-                                        )}
-                                        {duplicateWarning && duplicateGroup && (
-                                          <div className="bg-purple-50 border border-purple-200 text-purple-800 rounded px-1 py-0.5" data-testid={`duplicate-group-${index}-${i}`}>
-                                            {duplicateWarning.message}(행 {duplicateGroup.map((g) => g + 1).join(', ')})
-                                            <button
-                                              type="button"
-                                              onClick={() => setExcludedBomIndexes((prev) => {
-                                                const next = new Map(prev);
-                                                next.set(index, applyKeepOnlyThisRow(duplicateGroup, i, next.get(index) ?? new Set()));
-                                                return next;
-                                              })}
-                                              className="ml-1 px-1 rounded bg-purple-600 text-white hover:bg-purple-700"
-                                            >이 행만 남기기</button>
-                                          </div>
-                                        )}
+                                      <td className="border p-1 text-xs" data-testid={`bom-badges-${index}-${i}`}>
+                                        {(() => {
+                                          // PR-221: 기존엔 아래 배지들을 <div>로 세로로(space-y-0.5) 쌓았는데,
+                                          // 열 폭이 좁아지면 각 배지 안의 긴 문장까지 글자 단위로 줄바꿈되어
+                                          // 행이 매우 길어졌다(세로 폭 과도). 내용·분류·순서·버튼 동작은 그대로
+                                          // 두고, 칩 목록(가로로 흐르다 단어 단위로 줄바꿈) + 3개 넘으면 접기로
+                                          // 바꾼다.
+                                          const chips: { key: string; className: string; text: string; node: React.ReactNode }[] = [];
+                                          if (rowBadges.isNewMaterial) {
+                                            chips.push({ key: 'new-material', className: 'bg-sky-50 border border-sky-200 text-sky-800', text: '자재 마스터에 없는 새 이름', node: '자재 마스터에 없는 새 이름' });
+                                          }
+                                          if (rowBadges.requiredQtyMismatch) {
+                                            chips.push({ key: 'required-qty-mismatch', className: 'bg-orange-50 border border-orange-200 text-orange-800', text: '요척×수량이 작지의 출고량과 다름 — 확인해주세요', node: '요척×수량이 작지의 출고량과 다름 — 확인해주세요' });
+                                          }
+                                          if (rowBadges.duplicateLooking) {
+                                            chips.push({ key: 'duplicate-looking', className: 'bg-purple-50 border border-purple-200 text-purple-800', text: '이름만 다르고 소요량이 같은 행입니다 — 작업지시서와 대조해 주세요', node: '이름만 다르고 소요량이 같은 행입니다 — 작업지시서와 대조해 주세요' });
+                                          }
+                                          // PR-200: 서버 후처리 경고(UNKNOWN_NAME/요척 불일치/중복 묶음) —
+                                          // 위 배지(PR-197)와 별도로 표시한다(둘 다 서로 다른 로직).
+                                          if (unknownName) {
+                                            chips.push({
+                                              key: 'unknown-name',
+                                              className: 'bg-sky-50 border border-sky-200 text-sky-800',
+                                              text: unknownName.message,
+                                              node: (
+                                                <>
+                                                  {unknownName.message}
+                                                  {(unknownName.suggestions ?? []).map((s) => (
+                                                    <button key={s} type="button" onClick={() => updateBomItemField(index, i, 'itemName', s)} className="ml-1 px-1 rounded bg-sky-600 text-white hover:bg-sky-700">{s}로 바꾸기</button>
+                                                  ))}
+                                                </>
+                                              ),
+                                            });
+                                          }
+                                          // PR-201c: "요척 N로" 제안 버튼을 없앴다 — 불일치 원인이
+                                          // 요척 오독만이 아니라(총수량 오독·색상 행 분할·출고량
+                                          // 칸에 벌 수가 들어간 경우 등) 여러 가지인데, 버튼은
+                                          // 항상 요척만 바꿔 실제로는 맞는 요척을 틀리게 바꾸는
+                                          // 사례가 운영에서 확인됐다. 경고 문구만 그대로 둔다.
+                                          if (yocheokMismatch) {
+                                            chips.push({ key: 'yocheok-mismatch', className: 'bg-orange-50 border border-orange-200 text-orange-800', text: yocheokMismatch.message, node: yocheokMismatch.message });
+                                          }
+                                          if (duplicateWarning && duplicateGroup) {
+                                            const groupLabel = `(행 ${duplicateGroup.map((g) => g + 1).join(', ')})`;
+                                            chips.push({
+                                              key: 'duplicate-warning',
+                                              className: 'bg-purple-50 border border-purple-200 text-purple-800',
+                                              text: `${duplicateWarning.message}${groupLabel}`,
+                                              node: (
+                                                <span data-testid={`duplicate-group-${index}-${i}`}>
+                                                  {duplicateWarning.message}{groupLabel}
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setExcludedBomIndexes((prev) => {
+                                                      const next = new Map(prev);
+                                                      next.set(index, applyKeepOnlyThisRow(duplicateGroup, i, next.get(index) ?? new Set()));
+                                                      return next;
+                                                    })}
+                                                    className="ml-1 px-1 rounded bg-purple-600 text-white hover:bg-purple-700"
+                                                  >이 행만 남기기</button>
+                                                </span>
+                                              ),
+                                            });
+                                          }
+                                          if (chips.length === 0) return null;
+                                          const rowKey = `${index}-${i}`;
+                                          const isExpanded = expandedWarningRows.has(rowKey);
+                                          const { visible: visibleChips, hiddenCount, canCollapse } = selectVisibleChips(chips, isExpanded);
+                                          return (
+                                            <div className="flex flex-wrap gap-1 [word-break:keep-all]" title={buildChipsTitle(chips)}>
+                                              {canCollapse && <span className="text-gray-400 self-center">총 {chips.length}건</span>}
+                                              {visibleChips.map((c) => (
+                                                <span key={c.key} className={`${c.className} rounded px-1 py-0.5 whitespace-normal`}>{c.node}</span>
+                                              ))}
+                                              {canCollapse && (
+                                                <button
+                                                  type="button"
+                                                  data-testid={`bom-badges-toggle-${index}-${i}`}
+                                                  onClick={() => setExpandedWarningRows((prev) => {
+                                                    const next = new Set(prev);
+                                                    if (next.has(rowKey)) next.delete(rowKey); else next.add(rowKey);
+                                                    return next;
+                                                  })}
+                                                  className="bg-gray-100 border border-gray-300 text-gray-700 rounded px-1 py-0.5 hover:bg-gray-200 font-medium"
+                                                >
+                                                  {isExpanded ? '접기' : `+${hiddenCount}`}
+                                                </button>
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
                                       </td>
                                     </tr>
                                   );
