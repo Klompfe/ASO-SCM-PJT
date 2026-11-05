@@ -24,6 +24,7 @@ import {
   type VisionWarning,
 } from './utils/vision-guardrails.util';
 import { suggestCategoryCorrection, applyCategoryCorrection } from './utils/term-autocorrect.util';
+import { sanitizeHandwrittenCandidates } from './utils/handwritten-candidates.util';
 
 // PR-190 보강: "오늘" 기준 납기 연도 보정/의심 판정은 반드시 한국시간(KST, UTC+9) 날짜여야
 // 한다 — new Date().toISOString()은 UTC라 한국 00:00~09:00 사이에는 하루 전 날짜가 되어
@@ -134,8 +135,29 @@ export const RESPONSE_SCHEMA = {
         },
       },
       workNotes: { type: SchemaType.STRING, nullable: true },
+      // PR-223(PILOT-21 설계안): 자재 표 밖(라벨/장식 칸 여백, 스케치 주변 포함) 손글씨
+      // 중 자재로 보이는 것 — bomItems로 만들지 않고 여기에만 담는다(사람이 확인 후
+      // 저장 화면에서 "자재 행으로 추가"를 눌러야 자재 행이 된다).
+      handwrittenCandidates: {
+        type: SchemaType.ARRAY,
+        nullable: true,
+        items: {
+          type: SchemaType.OBJECT,
+          properties: {
+            rawText: { type: SchemaType.STRING, description: '손글씨를 읽은 글자 그대로(추측으로 고치지 말 것)' },
+            name: { type: SchemaType.STRING, nullable: true, description: '자재명으로 보이는 해석, 확신 없으면 null' },
+            spec: { type: SchemaType.STRING, nullable: true, description: '규격(예: "내경 10φ")' },
+            color: { type: SchemaType.STRING, nullable: true },
+            consumption: { type: SchemaType.NUMBER, nullable: true, description: '함께 적힌 요척, 없으면 null(추측 금지)' },
+            requiredQty: { type: SchemaType.NUMBER, nullable: true, description: '함께 적힌 수량, 없으면 null(추측 금지)' },
+            requiredQtyUnit: { type: SchemaType.STRING, nullable: true },
+            locationHint: { type: SchemaType.STRING, nullable: true, description: '대략적 위치를 짧게(예: "하단 여백", "라벨 칸 위")' },
+          },
+          required: ['rawText'],
+        },
+      },
     },
-    required: ['overview', 'bomItems', 'sizeSpecs', 'workNotes'],
+    required: ['overview', 'bomItems', 'sizeSpecs', 'workNotes', 'handwrittenCandidates'],
   },
 };
 
@@ -161,6 +183,17 @@ materialSubTypeCandidate: 실(THREAD)이나 테이프류 자재 행에서만, �
 
 4. workNotes(작업명세 - 지시사항): 옷 스케치 주변에 손글씨로 적힌 봉제 방식, 라벨 위치, 후가공 지시, 특이사항 등을 사람이 읽을 수 있는 자유 텍스트로 요약하세요. 구조화하지 말고 문단/목록 형태의 텍스트로 반환하세요.
 
+5. handwrittenCandidates(수기 메모 후보): 자재 표(상단 소재 표·하단 부자재 표) 밖, 페이지 어디든(라벨/장식 칸 위·옆 여백, 스케치 주변 포함) 손글씨로 적힌 글자 중 자재·부자재·장식으로 보이는 것이 있으면, 새 자재 행(bomItems)을 만들지 말고 이 배열에만 담으세요. 위치는 고정되어 있지 않습니다 — 표 밖이면 어디든 확인하세요.
+- rawText에는 읽은 글자를 보이는 그대로(추측으로 고치지 말고) 옮기세요.
+- name에는 자재명으로 보이는 해석을 넣고, 확신이 없으면 null로 두세요.
+- spec에는 규격(예: "내경 10φ"), color에는 색상을 적고, 없으면 null입니다.
+- consumption(요척)·requiredQty(수량)·requiredQtyUnit(단위)은 그 메모에 숫자가 함께 적혀 있을 때만 채우고, 없으면 반드시 null로 두세요(추측 금지).
+- locationHint에는 대략적 위치를 짧게 적으세요(예: "하단 여백", "라벨 칸 위").
+- 이미 자재 표 행(bomItems)으로 읽은 것과 같은 이름이면 중복으로 넣지 마세요.
+- 인쇄된 라벨 칸의 기본 인쇄 글자(MAIN, CARE 라벨, 가격 Tag 등 정식 표기)는 후보가 아닙니다 — 그 칸 주변에 별도로 손으로 적힌 글자만 후보입니다.
+- 확신이 없으면 후보에 넣지 마세요. 의미를 모르는 숫자·코드(예: "BE-WH" 같은 형태)는 rawText에만 적고 name은 null로 두세요.
+- 최대 10개까지만 담으세요.
+
 읽을 수 없거나 문서에 없는 값은 null로 두고, 절대 지어내지 마세요.
 
 판독 규칙(실제 오독 사례로 확인된 패턴, PR-200):
@@ -169,7 +202,7 @@ materialSubTypeCandidate: 실(THREAD)이나 테이프류 자재 행에서만, �
 - "공급사)자재명" 형식: ")" 앞은 공급사명, 뒤는 자재명입니다(예: "르카이)KL-R114" → 공급사 르카이, 자재명 KL-R114). ")"를 지우거나 두 이름을 붙여 쓰지 마세요.
 - 한 줄 = 한 항목입니다. 같은 줄을 다른 이름 후보로 여러 행 출력하지 마세요. 읽기 어려운 이름은 가장 가능성 높은 이름 하나를 itemName에, 나머지 후보는 itemNameCandidates에 넣으세요.
 - 빈 칸은 null입니다. 위·아래 줄의 값을 복사하지 마세요(소재표에서 색상 줄이 비어 있어도 다른 색상의 요척을 쓰지 마세요).
-- 새 항목은 표에서만 만드세요. 스케치·손글씨 메모의 글자로 새 자재 행을 만들지 마세요(메모는 workNotes로).
+- 새 항목(bomItems)은 표에서만 만드세요. 표 밖의 손글씨 글자로 새 자재 행을 만들지 마세요 — 자재·부자재·장식으로 보이면 5번 handwrittenCandidates에만 담고, 그 외 메모(봉제 방식·후가공 지시 등)는 workNotes로 옮기세요.
 - 숫자: 손글씨 요척·소요량에서 7↔9, 2↔3, 3↔9, 1↔7, 4↔9가 특히 헷갈리니 칸 안에서 다시 확인하고, 확신이 없으면 uncertain=true와 consumptionCandidates에 가능한 값을 모두 적으세요.
 - 날짜: 작성일은 "YY년 M월 D일"의 월·일 숫자를 그대로 옮기세요(7월을 1월로 바꾸지 마세요).`;
 
@@ -288,6 +321,7 @@ export class VisionService {
     this.applyTargetRddValidation(parsed);
     this.applyMidoCmtPriceGuard(parsed);
     this.applyGuardrails(parsed, context, todayKstIso());
+    this.applyHandwrittenCandidateGuardrails(parsed);
 
     // 페이지 수 = 결과 배열 길이(스타일 1개 = 페이지 1개)로 근사한다 — 실측 검증 완료
     // (6페이지 파일→6건, 16페이지 파일→16건 정확히 일치, PR-055 참고).
@@ -432,6 +466,18 @@ export class VisionService {
     }
   }
 
+  // PR-223: 필드가 없거나(모델이 빈 응답을 줌)/형식이 틀려도 업로드가 실패하지 않게
+  // 항상 배열로 정리하고(개수/길이 상한), 이미 bomItems로 읽힌 이름과 같은 후보는
+  // 중복이므로 제외한다 — 값은 추가/추측하지 않는다(순수 정리만, handwritten-candidates.util.ts).
+  private applyHandwrittenCandidateGuardrails(results: AiSalesOrderResultDto[]): void {
+    for (const result of results) {
+      result.handwrittenCandidates = sanitizeHandwrittenCandidates(
+        result.handwrittenCandidates,
+        result.bomItems.map((b) => b.itemName),
+      );
+    }
+  }
+
   // PR-200: AI 응답에 경고만 붙인다(값은 바꾸지 않음 — 예외: 스타일번호 대소문자 정리,
   // "공급사)자재명" 분리는 추측이 아니라 형식 해석이라 허용한다). 저장 경로
   // (commitAnalysis → mapping-commit)는 이 메서드가 채운 필드를 읽지 않는다(DTO에서
@@ -560,6 +606,7 @@ export class VisionService {
         ],
         sizeSpecs: [],
         workNotes: null,
+        handwrittenCandidates: [],
       },
     ];
   }

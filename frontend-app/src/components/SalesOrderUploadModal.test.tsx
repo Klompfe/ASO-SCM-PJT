@@ -41,4 +41,15 @@ describe('SalesOrderUploadModal — PR-200 안전장치 UI가 import 에러 없�
     expect(html).toContain('max-w-[1680px]');
     expect(html).not.toContain('max-w-4xl');
   });
+
+  // PR-223: 업로드 전(results 비어 있음)에는 후보가 있을 수 없으므로 "수기 메모 후보"
+  // 구역이 그려지지 않아야 한다(① 후보 0건이면 구역 없음). 후보가 있을 때의 렌더링은
+  // 이 하네스(renderToStaticMarkup, jsdom 없음, results가 내부 useState)로 직접 검증할
+  // 수 없어 순수 함수 테스트(salesOrderBomReview.test.ts)로 대신한다(PR-221/222와 동일 사유).
+  it('수기 메모 후보가 없으면 "수기 메모 후보" 구역이 보이지 않는다', () => {
+    const html = renderToStaticMarkup(
+      createElement(SalesOrderUploadModal, { isOpen: true, onClose: vi.fn(), onSuccess: vi.fn() }),
+    );
+    expect(html).not.toContain('수기 메모 후보');
+  });
 });

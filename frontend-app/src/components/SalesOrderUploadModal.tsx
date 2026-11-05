@@ -16,6 +16,12 @@ import {
   hasBlankMaterialName,
   computeBomRowBadges,
   normalizeMaterialName,
+  appendBomItemFromCandidate,
+  updateHandwrittenCandidateField,
+  appendBomItem,
+  createEmptyBomItem,
+  removeBomItem,
+  shiftIndexesAfterRemoval,
 } from '../utils/salesOrderBomReview';
 import { getAllItems } from '../api/items.service';
 import { buildUploadFailureInfo, resolveUploadFailureToastMessage, type UploadFailureInfo } from '../utils/salesOrderUploadError';
@@ -100,6 +106,98 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   const [colorQtyByIndex, setColorQtyByIndex] = useState<Map<number, { color: string; qty: number }[]>>(new Map());
   const [existingMaterialUnits, setExistingMaterialUnits] = useState<Map<string, string>>(new Map());
   const [packagingRules, setPackagingRules] = useState<MaterialPackagingUnitRule[]>([]);
+  // PR-223(PILOT-21 설계안): 작지 표 밖 손글씨 메모 후보 — 결과 인덱스별로 "무시"했거나
+  // "자재 행으로 추가"한 후보 인덱스, 그리고 후보에서 추가된 bomItem 인덱스(표에
+  // "수기 확인 필요" 표시용)만 들고 있는다. 후보 원문·값 자체는 results[].
+  // handwrittenCandidates에 그대로 있고(서버 응답), 여기서는 "처리 상태"만 기억한다.
+  const [ignoredCandidateIndexes, setIgnoredCandidateIndexes] = useState<Map<number, Set<number>>>(new Map());
+  const [addedCandidateIndexes, setAddedCandidateIndexes] = useState<Map<number, Set<number>>>(new Map());
+  const [handwrittenBomIndexes, setHandwrittenBomIndexes] = useState<Map<number, Set<number>>>(new Map());
+  // PR-225: "＋ 자재 행 직접 추가"로 만든 빈 행의 인덱스(결과 인덱스별) — "수기 입력"
+  // 배지·삭제 버튼 표시용. PR-223의 handwrittenBomIndexes(후보에서 추가된 행)와는
+  // 서로 배타적이다(같은 행이 둘 다에 들어가지 않음).
+  const [manualBomIndexes, setManualBomIndexes] = useState<Map<number, Set<number>>>(new Map());
+  const [focusManualRow, setFocusManualRow] = useState<{ index: number; bomIndex: number } | null>(null);
+
+  useEffect(() => {
+    if (!focusManualRow) return;
+    const el = document.querySelector<HTMLInputElement>(
+      `[data-testid="bom-item-name-${focusManualRow.index}-${focusManualRow.bomIndex}"]`,
+    );
+    el?.focus();
+    setFocusManualRow(null);
+  }, [focusManualRow]);
+
+  // PR-225: 직접 추가한 빈 행도 PR-223 "자재 행으로 추가"와 같은 appendBomItem
+  // 경로를 탄다(새 저장 경로를 만들지 않음) — 차이는 변환할 후보가 없다는 것뿐.
+  const addManualBomRow = (index: number) => {
+    const { results: next, newBomIndex } = appendBomItem(results, index, createEmptyBomItem());
+    setResults(next);
+    setManualBomIndexes((prev) => {
+      const nextMap = new Map(prev);
+      nextMap.set(index, new Set(nextMap.get(index) ?? []).add(newBomIndex));
+      return nextMap;
+    });
+    setFocusManualRow({ index, bomIndex: newBomIndex });
+  };
+
+  // PR-225: 직접 추가 행만 삭제할 수 있다(인식된 원본 행에는 "제외" 체크만 유지,
+  // 새 삭제 기능을 만들지 않음). 가운데 행을 지우면 이후 인덱스가 한 칸씩 당겨지므로
+  // 이 행을 가리키던 다른 index 기반 상태(제외/수정됨/수기 배지/직접 추가 표시)도
+  // 전부 같이 당긴다 — 하나라도 빠뜨리면 다른 행에 엉뚱한 배지/체크가 붙는다.
+  const deleteManualBomRow = (index: number, bomIndex: number) => {
+    const shift = (map: Map<number, Set<number>>) => {
+      const next = new Map(map);
+      next.set(index, shiftIndexesAfterRemoval(next.get(index) ?? new Set(), bomIndex));
+      return next;
+    };
+    setResults((prev) => removeBomItem(prev, index, bomIndex));
+    setManualBomIndexes(shift);
+    setHandwrittenBomIndexes(shift);
+    setExcludedBomIndexes(shift);
+    setEditedBomIndexes(shift);
+  };
+
+  const ignoreHandwrittenCandidate = (index: number, candidateIndex: number) => {
+    setIgnoredCandidateIndexes((prev) => {
+      const next = new Map(prev);
+      next.set(index, new Set(next.get(index) ?? []).add(candidateIndex));
+      return next;
+    });
+  };
+  const unignoreHandwrittenCandidate = (index: number, candidateIndex: number) => {
+    setIgnoredCandidateIndexes((prev) => {
+      const next = new Map(prev);
+      const set = new Set(next.get(index) ?? []);
+      set.delete(candidateIndex);
+      next.set(index, set);
+      return next;
+    });
+  };
+  const addHandwrittenCandidateAsBomItem = (index: number, candidateIndex: number) => {
+    const candidate = (results[index].handwrittenCandidates ?? [])[candidateIndex];
+    if (!candidate) return;
+    const { results: next, newBomIndex } = appendBomItemFromCandidate(results, index, candidate);
+    setResults(next);
+    setAddedCandidateIndexes((prev) => {
+      const nextMap = new Map(prev);
+      nextMap.set(index, new Set(nextMap.get(index) ?? []).add(candidateIndex));
+      return nextMap;
+    });
+    setHandwrittenBomIndexes((prev) => {
+      const nextMap = new Map(prev);
+      nextMap.set(index, new Set(nextMap.get(index) ?? []).add(newBomIndex));
+      return nextMap;
+    });
+  };
+  const updateCandidateField = <K extends keyof NonNullable<AiSalesOrderResult['handwrittenCandidates']>[number]>(
+    index: number,
+    candidateIndex: number,
+    field: K,
+    value: NonNullable<AiSalesOrderResult['handwrittenCandidates']>[number][K],
+  ) => {
+    setResults((prev) => updateHandwrittenCandidateField(prev, index, candidateIndex, field, value));
+  };
 
   const refreshColorQuantities = async (index: number, styleNo: string | null) => {
     if (!styleNo) {
@@ -197,6 +295,12 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       setSavedIndexes(new Set());
       setExcludedBomIndexes(new Map());
       setEditedBomIndexes(new Map());
+      // PR-223: 새 업로드 결과이므로 이전 업로드의 수기 메모 후보 처리 상태를 모두 비운다.
+      setIgnoredCandidateIndexes(new Map());
+      setAddedCandidateIndexes(new Map());
+      setHandwrittenBomIndexes(new Map());
+      // PR-225: 이전 업로드에서 직접 추가했던 행 표시도 함께 비운다.
+      setManualBomIndexes(new Map());
       setStep(2);
       // PR-197: "자재 마스터에 없는 새 이름" 배지용 — 전체 자재명을 한 번 불러와 정규화해 둔다.
       // PR-222: 같은 응답에서 단위(unit)도 함께 뽑아 둔다 — "발주수량(적용)" 열이 작지수량
@@ -445,6 +549,10 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setIsMock(false);
     setExcludedBomIndexes(new Map());
     setEditedBomIndexes(new Map());
+    setIgnoredCandidateIndexes(new Map());
+    setAddedCandidateIndexes(new Map());
+    setHandwrittenBomIndexes(new Map());
+    setManualBomIndexes(new Map());
     setUploadError(null);
     setFallbackUsed(false);
     setSimilarStyleCandidates(new Map());
@@ -606,6 +714,32 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                       {getSaveGateInfo(result.overview, verifiedStyleNo.has(index)).reason}
                     </div>
                   )}
+                  {/* PR-225: 자재명이 빈 행(직접 추가했지만 아직 안 채운 행 포함)이 있으면
+                      기존 규칙(handleSave의 hasBlankMaterialName)이 저장을 막는다 — 그 규칙은
+                      그대로 두고, 클릭해서 토스트를 봐야 아는 대신 미리 보이는 안내만 추가한다. */}
+                  {!savedIndexes.has(index) && hasBlankMaterialName(
+                    buildCommitResult(result, excludedBomIndexes.get(index) ?? new Set()).bomItems,
+                  ) && (
+                    <div className="text-xs text-red-600" data-testid={`blank-material-name-notice-${index}`}>
+                      자재명이 빈 행이 있어 저장할 수 없습니다 — 자재명을 입력하거나 그 행을 제외해 주세요.
+                    </div>
+                  )}
+
+                  {/* PR-223: 저장은 막지 않되(요구사항), 처리(추가/무시)하지 않은 후보가
+                      남아 있으면 저장 버튼 근처에 안내한다 — 하나씩 처리하면 줄어든다. */}
+                  {(() => {
+                    const candidates = result.handwrittenCandidates ?? [];
+                    if (candidates.length === 0) return null;
+                    const ignored = ignoredCandidateIndexes.get(index) ?? new Set<number>();
+                    const added = addedCandidateIndexes.get(index) ?? new Set<number>();
+                    const unprocessedCount = candidates.filter((_, ci) => !ignored.has(ci) && !added.has(ci)).length;
+                    if (unprocessedCount === 0) return null;
+                    return (
+                      <div className="text-xs text-indigo-700" data-testid={`handwritten-candidates-pending-${index}`}>
+                        처리하지 않은 수기 메모 후보 {unprocessedCount}건이 있습니다 — 아래 "수기 메모 후보" 구역에서 추가하거나 무시해 주세요.
+                      </div>
+                    );
+                  })()}
 
                   {(() => {
                     const summary = summarizeWarnings([result]);
@@ -816,6 +950,122 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                     </div>
                   </div>
 
+                  {/* PR-223(PILOT-21 설계안): 작지 표 밖 손글씨 메모 후보 — 자동으로 BOM에
+                      넣지 않고, 확인 후 "자재 행으로 추가"를 눌러야 아래 자재명세 표에 행이
+                      생긴다. 기존 "확인 필요 N건" 요약 띠·자재명세 표·PR-222 열은 건드리지
+                      않는다(완전히 별도 구역). */}
+                  {(() => {
+                    const candidates = result.handwrittenCandidates ?? [];
+                    // PR-225: 후보가 0건이면(모델이 손글씨를 못 읽었거나 아예 없는 경우)
+                    // 이 구역 대신 "직접 추가" 유도 안내를 한 줄만 보여준다 — 읽기 전용,
+                    // 저장·검증에 영향 없음. 레이아웃은 같은 자리를 그대로 쓴다(PR-221
+                    // 폭·PR-222 열·이 구역의 자리를 깨지 않음).
+                    if (candidates.length === 0) {
+                      return (
+                        <p className="text-xs text-gray-400" data-testid={`handwritten-candidates-empty-${index}`}>
+                          표 밖 손글씨 메모는 읽히지 않았습니다. 작지 원본에 손글씨 자재가 있으면 "＋ 자재 행 직접 추가"로 넣어 주세요.
+                        </p>
+                      );
+                    }
+                    const ignored = ignoredCandidateIndexes.get(index) ?? new Set<number>();
+                    const added = addedCandidateIndexes.get(index) ?? new Set<number>();
+                    return (
+                      <div
+                        className="border border-indigo-200 bg-indigo-50 rounded p-2 space-y-2"
+                        data-testid={`handwritten-candidates-${index}`}
+                      >
+                        <p className="text-sm font-semibold text-indigo-800">
+                          수기 메모 후보 ({candidates.length}건) — 작지 표 밖 손글씨입니다. 확인 후 추가하세요.
+                        </p>
+                        {candidates.map((candidate, ci) => {
+                          if (added.has(ci)) return null;
+                          if (ignored.has(ci)) {
+                            return (
+                              <div key={ci} className="text-xs text-gray-400 flex items-center gap-1" data-testid={`handwritten-candidate-ignored-${index}-${ci}`}>
+                                무시함: "{candidate.rawText}"
+                                <button
+                                  type="button"
+                                  onClick={() => unignoreHandwrittenCandidate(index, ci)}
+                                  className="px-1 rounded border border-gray-300 hover:bg-gray-100"
+                                >되돌리기</button>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div key={ci} className="border border-indigo-100 bg-white rounded p-2 text-xs" data-testid={`handwritten-candidate-${index}-${ci}`}>
+                              <div className="text-gray-500 mb-1">
+                                읽힌 원문: "{candidate.rawText}"{candidate.locationHint ? ` (위치: ${candidate.locationHint})` : ''}
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                <label className="flex flex-col">
+                                  <span className="text-[10px] text-gray-500">자재명</span>
+                                  <input
+                                    aria-label={`${index + 1}번째 항목 수기 메모 후보 ${ci + 1} 자재명`}
+                                    className="border rounded px-1 py-0.5 w-28"
+                                    value={candidate.name ?? ''}
+                                    onChange={(e) => updateCandidateField(index, ci, 'name', e.target.value || null)}
+                                  />
+                                </label>
+                                <label className="flex flex-col">
+                                  <span className="text-[10px] text-gray-500">규격</span>
+                                  <input
+                                    aria-label={`${index + 1}번째 항목 수기 메모 후보 ${ci + 1} 규격`}
+                                    className="border rounded px-1 py-0.5 w-20"
+                                    value={candidate.spec ?? ''}
+                                    onChange={(e) => updateCandidateField(index, ci, 'spec', e.target.value || null)}
+                                  />
+                                </label>
+                                <label className="flex flex-col">
+                                  <span className="text-[10px] text-gray-500">색상</span>
+                                  <input
+                                    aria-label={`${index + 1}번째 항목 수기 메모 후보 ${ci + 1} 색상`}
+                                    className="border rounded px-1 py-0.5 w-14"
+                                    value={candidate.color ?? ''}
+                                    onChange={(e) => updateCandidateField(index, ci, 'color', e.target.value || null)}
+                                  />
+                                </label>
+                                <label className="flex flex-col">
+                                  <span className="text-[10px] text-gray-500">수량</span>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    aria-label={`${index + 1}번째 항목 수기 메모 후보 ${ci + 1} 수량`}
+                                    className="border rounded px-1 py-0.5 w-14 text-right"
+                                    value={candidate.requiredQty ?? ''}
+                                    onChange={(e) => updateCandidateField(index, ci, 'requiredQty', e.target.value === '' ? null : Number(e.target.value))}
+                                  />
+                                </label>
+                                <label className="flex flex-col">
+                                  <span className="text-[10px] text-gray-500">단위</span>
+                                  <input
+                                    aria-label={`${index + 1}번째 항목 수기 메모 후보 ${ci + 1} 단위`}
+                                    className="border rounded px-1 py-0.5 w-12"
+                                    value={candidate.requiredQtyUnit ?? ''}
+                                    onChange={(e) => updateCandidateField(index, ci, 'requiredQtyUnit', e.target.value || null)}
+                                  />
+                                </label>
+                                <div className="flex items-end gap-1">
+                                  <button
+                                    type="button"
+                                    data-testid={`handwritten-candidate-add-${index}-${ci}`}
+                                    onClick={() => addHandwrittenCandidateAsBomItem(index, ci)}
+                                    className="px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                                  >자재 행으로 추가</button>
+                                  <button
+                                    type="button"
+                                    data-testid={`handwritten-candidate-ignore-${index}-${ci}`}
+                                    onClick={() => ignoreHandwrittenCandidate(index, ci)}
+                                    className="px-2 py-1 rounded border border-gray-300 hover:bg-gray-100"
+                                  >무시</button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
                   <div>
                     {(() => {
                       const excluded = excludedBomIndexes.get(index) ?? new Set<number>();
@@ -859,6 +1109,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                   const selectedValue = item.threadType ?? item.tapeType ?? '';
                                   const isExcluded = excluded.has(i);
                                   const isEdited = edited.has(i);
+                                  // PR-223: 수기 메모 후보에서 "자재 행으로 추가"한 행 — 이후에는
+                                  // 기존 행과 똑같은 검증·경고(마스터 대조·발주수량 계산 등)를
+                                  // 받지만, "손글씨에서 왔다"는 사실만 배지로 남겨 둔다.
+                                  const isHandwritten = (handwrittenBomIndexes.get(index) ?? new Set<number>()).has(i);
+                                  // PR-225: "＋ 자재 행 직접 추가"로 만든 행 — 인식/후보와 무관하게
+                                  // 사람이 처음부터 입력한 행이라 "수기 입력"으로 구분해 표시한다
+                                  // (PR-223의 "수기 확인 필요"=손글씨 인식 결과 확인용과는 의미가 다름).
+                                  const isManual = (manualBomIndexes.get(index) ?? new Set<number>()).has(i);
                                   const rowBadges = badges[i];
                                   const unknownName = findWarning(item.warnings, 'UNKNOWN_NAME');
                                   const yocheokMismatch = findWarning(item.warnings, 'YOCHEOK_QTY_MISMATCH');
@@ -878,6 +1136,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           checked={isExcluded}
                                           onChange={() => toggleExcludeBomItem(index, i)}
                                         />
+                                        {/* PR-225: 직접 추가한 행만 실제로 지울 수 있다(인식된 원본
+                                            행은 "제외" 체크만 — 삭제 기능을 새로 만들지 않음). */}
+                                        {isManual && (
+                                          <button
+                                            type="button"
+                                            data-testid={`bom-delete-manual-${index}-${i}`}
+                                            onClick={() => deleteManualBomRow(index, i)}
+                                            className="block mx-auto mt-0.5 text-[10px] text-red-600 hover:underline"
+                                          >삭제</button>
+                                        )}
                                       </td>
                                       <td className="border p-1">
                                         <input
@@ -896,6 +1164,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           onChange={(e) => updateBomItemField(index, i, 'itemName', e.target.value)}
                                         />
                                         {isEdited && <span className="ml-1 text-[10px] text-blue-600 align-middle">수정됨</span>}
+                                        {isHandwritten && (
+                                          <span className="ml-1 text-[10px] text-indigo-600 align-middle" data-testid={`bom-handwritten-${index}-${i}`}>
+                                            수기 확인 필요
+                                          </span>
+                                        )}
+                                        {isManual && (
+                                          <span className="ml-1 text-[10px] text-indigo-600 align-middle" data-testid={`bom-manual-${index}-${i}`}>
+                                            수기 입력
+                                          </span>
+                                        )}
                                         {/* PR-208: 품목군(괄호 앞) 자모 오독을 사전 기준으로 자동 교정했을 때만
                                             — itemName은 이미 교정된 값이고, 직접 고치면(위 입력칸) 원문으로
                                             되돌릴 수 있다(기존 동작 재사용, 별도 "되돌리기" 버튼 없음). */}
@@ -1160,6 +1438,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                               </tbody>
                             </table>
                           </div>
+                          {/* PR-225: 인식 성공 여부와 무관하게 사람이 직접 자재 행을 넣을 수
+                              있게 한다(손글씨 후보가 0건이어도 항상 보임). 빈 행 1개를 표 끝에
+                              추가하고 자재명 입력칸에 포커스한다 — PR-223 "자재 행으로 추가"와
+                              같은 저장 경로(appendBomItem)를 쓴다. */}
+                          <button
+                            type="button"
+                            data-testid={`add-manual-bom-row-${index}`}
+                            onClick={() => addManualBomRow(index)}
+                            className="text-sm px-2 py-1 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                          >＋ 자재 행 직접 추가</button>
                         </>
                       );
                     })()}

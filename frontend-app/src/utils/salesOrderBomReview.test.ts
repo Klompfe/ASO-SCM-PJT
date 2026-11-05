@@ -11,8 +11,15 @@ import {
   hasRequiredQtyBundleMismatch,
   computeDuplicateLookingRows,
   computeBomRowBadges,
+  handwrittenCandidateToBomItem,
+  appendBomItemFromCandidate,
+  updateHandwrittenCandidateField,
+  appendBomItem,
+  createEmptyBomItem,
+  removeBomItem,
+  shiftIndexesAfterRemoval,
 } from './salesOrderBomReview';
-import type { AiBomItem, AiSalesOrderResult } from '../api/salesOrders.service';
+import type { AiBomItem, AiHandwrittenCandidate, AiSalesOrderResult } from '../api/salesOrders.service';
 
 const bomItem = (overrides: Partial<AiBomItem> = {}): AiBomItem => ({
   category: '부자재', itemName: '자재', spec: null, colorCode: null, consumption: 1,
@@ -62,6 +69,56 @@ describe('buildCommitBomItems / buildCommitResult (PR-197) — 제외 체크된 
     const committed = buildCommitResult(result, new Set([0]));
     expect(committed.bomItems.map((i) => i.itemName)).toEqual(['B']);
     expect(committed.overview.styleNo).toBe('S');
+  });
+
+  // PR-223: 저장 요청은 수기 메모 후보를 받지 않는다 — 처리 여부와 무관하게 항상 제외.
+  it('buildCommitResult는 handwrittenCandidates를 저장 요청에서 제외한다', () => {
+    const result: AiSalesOrderResult = {
+      ...buildResult([bomItem({ itemName: 'A' })]),
+      handwrittenCandidates: [{ rawText: '금속장식', name: '금속장식', spec: null, color: null, consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: null }],
+    };
+    const committed = buildCommitResult(result, new Set());
+    expect(committed).not.toHaveProperty('handwrittenCandidates');
+  });
+});
+
+// PR-223(PILOT-21 설계안): 수기 메모 후보 → 일반 자재 행 변환(합성 값만 사용).
+describe('handwrittenCandidateToBomItem / appendBomItemFromCandidate (PR-223)', () => {
+  const candidate = (overrides: Partial<AiHandwrittenCandidate> = {}): AiHandwrittenCandidate => ({
+    rawText: '금속장식 (내경 10φ)', name: '금속장식', spec: '내경 10φ', color: null,
+    consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: '하단 여백', ...overrides,
+  });
+
+  it('name이 있으면 자재명으로 쓰고, 나머지 필드도 그대로 옮긴다', () => {
+    const item = handwrittenCandidateToBomItem(candidate({ color: 'BL', consumption: 1.2, requiredQty: 10, requiredQtyUnit: 'EA' }));
+    expect(item).toMatchObject({ itemName: '금속장식', spec: '내경 10φ', colorCode: 'BL', consumption: 1.2, requiredQty: 10, requiredQtyUnit: 'EA' });
+  });
+
+  it('name이 null이면 rawText를 자재명으로 쓴다(빈 자재명 방지)', () => {
+    const item = handwrittenCandidateToBomItem(candidate({ name: null, rawText: 'BE-WH…' }));
+    expect(item.itemName).toBe('BE-WH…');
+  });
+
+  it('수량/요척이 없는 후보는 자동으로 숫자를 만들어 넣지 않는다(비어 있음)', () => {
+    const item = handwrittenCandidateToBomItem(candidate());
+    expect(item.consumption).toBeNull();
+    expect(item.requiredQty).toBeNull();
+  });
+
+  it('appendBomItemFromCandidate는 그 결과의 bomItems 끝에 행을 추가하고 새 인덱스를 돌려준다', () => {
+    const results = [buildResult([bomItem({ itemName: 'A' })])];
+    const { results: next, newBomIndex } = appendBomItemFromCandidate(results, 0, candidate());
+    expect(newBomIndex).toBe(1);
+    expect(next[0].bomItems.map((i) => i.itemName)).toEqual(['A', '금속장식']);
+    // 다른 결과/원본은 그대로(불변).
+    expect(results[0].bomItems).toHaveLength(1);
+  });
+
+  it('updateHandwrittenCandidateField는 "자재 행으로 추가" 전에 후보 필드를 고칠 수 있게 한다', () => {
+    const results: AiSalesOrderResult[] = [{ ...buildResult([]), handwrittenCandidates: [candidate(), candidate({ rawText: '다른 후보' })] }];
+    const next = updateHandwrittenCandidateField(results, 0, 0, 'name', '교정된 자재명');
+    expect(next[0].handwrittenCandidates?.[0].name).toBe('교정된 자재명');
+    expect(next[0].handwrittenCandidates?.[1].rawText).toBe('다른 후보'); // 다른 후보는 그대로
   });
 });
 
@@ -244,5 +301,61 @@ describe('computeBomRowBadges (PR-197) — 통합', () => {
     expect(badges[0]).toEqual({ isNewMaterial: false, requiredQtyMismatch: false, duplicateLooking: true });
     expect(badges[1].isNewMaterial).toBe(true);
     expect(badges[2].isNewMaterial).toBe(true);
+  });
+});
+
+// PR-225: "＋ 자재 행 직접 추가" — PR-223 appendBomItemFromCandidate와 같은 저장
+// 경로(appendBomItem)를 공유한다(합성 값만 사용).
+describe('createEmptyBomItem / appendBomItem (PR-225)', () => {
+  it('createEmptyBomItem은 전부 비어 있는 행을 만든다', () => {
+    const item = createEmptyBomItem();
+    expect(item.itemName).toBe('');
+    expect(item.category).toBeNull();
+    expect(item.consumption).toBeNull();
+    expect(item.requiredQty).toBeNull();
+  });
+
+  it('appendBomItem은 그 결과의 bomItems 끝에 행을 추가하고 새 인덱스를 돌려준다(원본은 불변)', () => {
+    const results = [buildResult([bomItem({ itemName: 'A' })])];
+    const { results: next, newBomIndex } = appendBomItem(results, 0, createEmptyBomItem());
+    expect(newBomIndex).toBe(1);
+    expect(next[0].bomItems).toHaveLength(2);
+    expect(results[0].bomItems).toHaveLength(1);
+  });
+
+  it('appendBomItemFromCandidate는 appendBomItem과 같은 결과를 낸다(경로 공유 확인)', () => {
+    const candidate: AiHandwrittenCandidate = {
+      rawText: '금속장식', name: '금속장식', spec: null, color: null,
+      consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: null,
+    };
+    const results = [buildResult([])];
+    const viaCandidate = appendBomItemFromCandidate(results, 0, candidate);
+    const viaDirect = appendBomItem(results, 0, handwrittenCandidateToBomItem(candidate));
+    expect(viaCandidate.results[0].bomItems).toEqual(viaDirect.results[0].bomItems);
+    expect(viaCandidate.newBomIndex).toBe(viaDirect.newBomIndex);
+  });
+});
+
+describe('removeBomItem / shiftIndexesAfterRemoval (PR-225) — 직접 추가 행 삭제', () => {
+  it('removeBomItem은 지정한 행만 배열에서 제거한다(원본 불변)', () => {
+    const results = [buildResult([bomItem({ itemName: 'A' }), bomItem({ itemName: 'B' }), bomItem({ itemName: 'C' })])];
+    const next = removeBomItem(results, 0, 1);
+    expect(next[0].bomItems.map((i) => i.itemName)).toEqual(['A', 'C']);
+    expect(results[0].bomItems).toHaveLength(3);
+  });
+
+  it('shiftIndexesAfterRemoval은 지워진 인덱스를 빼고 그 뒤 인덱스를 1씩 당긴다', () => {
+    const indexes = new Set([0, 1, 2, 3]);
+    const shifted = shiftIndexesAfterRemoval(indexes, 1);
+    expect(shifted).toEqual(new Set([0, 1, 2])); // 1은 제거, 2→1, 3→2
+  });
+
+  it('지워진 인덱스보다 앞쪽 값은 그대로 유지된다', () => {
+    const shifted = shiftIndexesAfterRemoval(new Set([0, 4]), 2);
+    expect(shifted).toEqual(new Set([0, 3]));
+  });
+
+  it('빈 Set을 지워도 빈 Set이다', () => {
+    expect(shiftIndexesAfterRemoval(new Set(), 0)).toEqual(new Set());
   });
 });

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { GatewayTimeoutException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
-import { VisionService, todayKstIso } from './vision.service';
+import { VisionService, todayKstIso, PROMPT } from './vision.service';
 
 // PR-096: GEMINI_API_KEY 미설정 시 목업 데이터를 반환하는 현재 동작 자체는 유지하되,
 // 이 사실이 응답에 명시적으로 드러나는지(isMock)를 검증한다 — 기존에는
@@ -97,6 +97,9 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
     expect(outcome.results).toEqual([
       {
         ...fakeParsedResult[0],
+        // PR-223: handwrittenCandidates가 응답에 없으면(이 합성 응답처럼) 빈 배열로
+        // 정리된다(sanitizeHandwrittenCandidates — 업로드 실패 방지).
+        handwrittenCandidates: [],
         overview: {
           ...fakeParsedResult[0].overview,
           targetRddYearAdjusted: false, targetRddOriginal: null, targetRddAdjustBasis: null, targetRddNotice: 'none', targetRddSuspicious: false,
@@ -106,6 +109,111 @@ describe('VisionService.analyzeSalesOrder — isMock (PR-096)', () => {
       },
     ]);
     expect(outcome.usage).toEqual({ pageCount: 1, promptTokens: 100, outputTokens: 200 });
+  });
+});
+
+// PR-223(PILOT-21 설계안): 작지 표 밖 손글씨 메모 후보 — 자동으로 bomItems에 넣지
+// 않고 handwrittenCandidates에만 담는다. 합성 응답으로만 검증한다(Gemini 호출 없음).
+describe('VisionService.analyzeSalesOrder — handwrittenCandidates (PR-223)', () => {
+  const buildService = async (apiKey: string | undefined): Promise<VisionService> => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [VisionService, { provide: ConfigService, useValue: { get: jest.fn(() => apiKey) } }],
+    }).compile();
+    return module.get(VisionService);
+  };
+  const stubGenerateContent = (service: VisionService, fakeParsedResult: unknown) => {
+    const fakeGenerateContent = jest.fn().mockResolvedValue({
+      response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify(fakeParsedResult), usageMetadata: { promptTokenCount: 100, totalTokenCount: 300 } },
+    });
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent: fakeGenerateContent })) };
+  };
+
+  it('① 응답에 handwrittenCandidates가 있으면 파싱·전달된다(합성 값)', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    const fakeParsedResult = [
+      {
+        overview: { styleNo: null, styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null, targetRdd: null, documentDate: null },
+        bomItems: [],
+        sizeSpecs: [],
+        workNotes: null,
+        handwrittenCandidates: [
+          { rawText: '금속장식 (내경 10φ)', name: '금속장식', spec: '내경 10φ', color: null, consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: '하단 여백' },
+        ],
+      },
+    ];
+    stubGenerateContent(service, fakeParsedResult);
+
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+
+    expect(outcome.results[0].handwrittenCandidates).toEqual([
+      { rawText: '금속장식 (내경 10φ)', name: '금속장식', spec: '내경 10φ', color: null, consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: '하단 여백' },
+    ]);
+    // 자동으로 bomItems에 추가되지 않는다(핵심 설계 원칙).
+    expect(outcome.results[0].bomItems).toEqual([]);
+  });
+
+  it('② 필드가 없거나(undefined) null/형식 오류여도 업로드는 성공하고 빈 배열이다', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    for (const broken of [undefined, null, 'not-an-array', 42]) {
+      const fakeParsedResult = [
+        {
+          overview: { styleNo: null, styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null, targetRdd: null, documentDate: null },
+          bomItems: [],
+          sizeSpecs: [],
+          workNotes: null,
+          handwrittenCandidates: broken,
+        },
+      ];
+      stubGenerateContent(service, fakeParsedResult);
+      const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+      expect(outcome.results[0].handwrittenCandidates).toEqual([]);
+    }
+  });
+
+  it('③ 개수 상한(10개)을 넘으면 앞 10개만 남긴다', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    const many = Array.from({ length: 15 }, (_, i) => ({ rawText: `메모${i}`, name: null, spec: null, color: null, consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: null }));
+    const fakeParsedResult = [
+      {
+        overview: { styleNo: null, styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null, targetRdd: null, documentDate: null },
+        bomItems: [],
+        sizeSpecs: [],
+        workNotes: null,
+        handwrittenCandidates: many,
+      },
+    ];
+    stubGenerateContent(service, fakeParsedResult);
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].handwrittenCandidates).toHaveLength(10);
+  });
+
+  it('④ bomItems와 같은 이름(정규화 후 동일)의 후보는 서버에서 제외한다', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    const fakeParsedResult = [
+      {
+        overview: { styleNo: null, styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null, targetRdd: null, documentDate: null },
+        bomItems: [
+          { category: '부자재', itemName: '금속장식', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null, materialSubTypeCandidate: null },
+        ],
+        sizeSpecs: [],
+        workNotes: null,
+        handwrittenCandidates: [
+          { rawText: '금속 장식', name: '금속장식', spec: null, color: null, consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: null },
+          { rawText: 'BE-WH…', name: null, spec: null, color: null, consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: null },
+        ],
+      },
+    ];
+    stubGenerateContent(service, fakeParsedResult);
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].handwrittenCandidates).toEqual([
+      { rawText: 'BE-WH…', name: null, spec: null, color: null, consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: null },
+    ]);
+  });
+
+  it('⑤ PROMPT에 "handwrittenCandidates에만 담는다" 취지와 "표 안의 행은 후보에 넣지 말 것" 취지 문구가 있고, 기존 "새 항목은 표에서만 만드세요" 금지 취지가 유지된다', () => {
+    expect(PROMPT).toContain('handwrittenCandidates');
+    expect(PROMPT).toContain('이미 자재 표 행(bomItems)으로 읽은 것과 같은 이름이면 중복으로 넣지 마세요');
+    expect(PROMPT).toContain('새 항목(bomItems)은 표에서만 만드세요');
   });
 });
 
