@@ -18,6 +18,10 @@ import {
   normalizeMaterialName,
   appendBomItemFromCandidate,
   updateHandwrittenCandidateField,
+  appendBomItem,
+  createEmptyBomItem,
+  removeBomItem,
+  shiftIndexesAfterRemoval,
 } from '../utils/salesOrderBomReview';
 import { getAllItems } from '../api/items.service';
 import { buildUploadFailureInfo, resolveUploadFailureToastMessage, type UploadFailureInfo } from '../utils/salesOrderUploadError';
@@ -109,6 +113,50 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   const [ignoredCandidateIndexes, setIgnoredCandidateIndexes] = useState<Map<number, Set<number>>>(new Map());
   const [addedCandidateIndexes, setAddedCandidateIndexes] = useState<Map<number, Set<number>>>(new Map());
   const [handwrittenBomIndexes, setHandwrittenBomIndexes] = useState<Map<number, Set<number>>>(new Map());
+  // PR-225: "＋ 자재 행 직접 추가"로 만든 빈 행의 인덱스(결과 인덱스별) — "수기 입력"
+  // 배지·삭제 버튼 표시용. PR-223의 handwrittenBomIndexes(후보에서 추가된 행)와는
+  // 서로 배타적이다(같은 행이 둘 다에 들어가지 않음).
+  const [manualBomIndexes, setManualBomIndexes] = useState<Map<number, Set<number>>>(new Map());
+  const [focusManualRow, setFocusManualRow] = useState<{ index: number; bomIndex: number } | null>(null);
+
+  useEffect(() => {
+    if (!focusManualRow) return;
+    const el = document.querySelector<HTMLInputElement>(
+      `[data-testid="bom-item-name-${focusManualRow.index}-${focusManualRow.bomIndex}"]`,
+    );
+    el?.focus();
+    setFocusManualRow(null);
+  }, [focusManualRow]);
+
+  // PR-225: 직접 추가한 빈 행도 PR-223 "자재 행으로 추가"와 같은 appendBomItem
+  // 경로를 탄다(새 저장 경로를 만들지 않음) — 차이는 변환할 후보가 없다는 것뿐.
+  const addManualBomRow = (index: number) => {
+    const { results: next, newBomIndex } = appendBomItem(results, index, createEmptyBomItem());
+    setResults(next);
+    setManualBomIndexes((prev) => {
+      const nextMap = new Map(prev);
+      nextMap.set(index, new Set(nextMap.get(index) ?? []).add(newBomIndex));
+      return nextMap;
+    });
+    setFocusManualRow({ index, bomIndex: newBomIndex });
+  };
+
+  // PR-225: 직접 추가 행만 삭제할 수 있다(인식된 원본 행에는 "제외" 체크만 유지,
+  // 새 삭제 기능을 만들지 않음). 가운데 행을 지우면 이후 인덱스가 한 칸씩 당겨지므로
+  // 이 행을 가리키던 다른 index 기반 상태(제외/수정됨/수기 배지/직접 추가 표시)도
+  // 전부 같이 당긴다 — 하나라도 빠뜨리면 다른 행에 엉뚱한 배지/체크가 붙는다.
+  const deleteManualBomRow = (index: number, bomIndex: number) => {
+    const shift = (map: Map<number, Set<number>>) => {
+      const next = new Map(map);
+      next.set(index, shiftIndexesAfterRemoval(next.get(index) ?? new Set(), bomIndex));
+      return next;
+    };
+    setResults((prev) => removeBomItem(prev, index, bomIndex));
+    setManualBomIndexes(shift);
+    setHandwrittenBomIndexes(shift);
+    setExcludedBomIndexes(shift);
+    setEditedBomIndexes(shift);
+  };
 
   const ignoreHandwrittenCandidate = (index: number, candidateIndex: number) => {
     setIgnoredCandidateIndexes((prev) => {
@@ -251,6 +299,8 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       setIgnoredCandidateIndexes(new Map());
       setAddedCandidateIndexes(new Map());
       setHandwrittenBomIndexes(new Map());
+      // PR-225: 이전 업로드에서 직접 추가했던 행 표시도 함께 비운다.
+      setManualBomIndexes(new Map());
       setStep(2);
       // PR-197: "자재 마스터에 없는 새 이름" 배지용 — 전체 자재명을 한 번 불러와 정규화해 둔다.
       // PR-222: 같은 응답에서 단위(unit)도 함께 뽑아 둔다 — "발주수량(적용)" 열이 작지수량
@@ -502,6 +552,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setIgnoredCandidateIndexes(new Map());
     setAddedCandidateIndexes(new Map());
     setHandwrittenBomIndexes(new Map());
+    setManualBomIndexes(new Map());
     setUploadError(null);
     setFallbackUsed(false);
     setSimilarStyleCandidates(new Map());
@@ -661,6 +712,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                   {!savedIndexes.has(index) && getSaveGateInfo(result.overview, verifiedStyleNo.has(index)).reason && (
                     <div className="text-xs text-red-600 -mt-2" data-testid={`save-disabled-reason-${index}`}>
                       {getSaveGateInfo(result.overview, verifiedStyleNo.has(index)).reason}
+                    </div>
+                  )}
+                  {/* PR-225: 자재명이 빈 행(직접 추가했지만 아직 안 채운 행 포함)이 있으면
+                      기존 규칙(handleSave의 hasBlankMaterialName)이 저장을 막는다 — 그 규칙은
+                      그대로 두고, 클릭해서 토스트를 봐야 아는 대신 미리 보이는 안내만 추가한다. */}
+                  {!savedIndexes.has(index) && hasBlankMaterialName(
+                    buildCommitResult(result, excludedBomIndexes.get(index) ?? new Set()).bomItems,
+                  ) && (
+                    <div className="text-xs text-red-600" data-testid={`blank-material-name-notice-${index}`}>
+                      자재명이 빈 행이 있어 저장할 수 없습니다 — 자재명을 입력하거나 그 행을 제외해 주세요.
                     </div>
                   )}
 
@@ -895,7 +956,17 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                       않는다(완전히 별도 구역). */}
                   {(() => {
                     const candidates = result.handwrittenCandidates ?? [];
-                    if (candidates.length === 0) return null;
+                    // PR-225: 후보가 0건이면(모델이 손글씨를 못 읽었거나 아예 없는 경우)
+                    // 이 구역 대신 "직접 추가" 유도 안내를 한 줄만 보여준다 — 읽기 전용,
+                    // 저장·검증에 영향 없음. 레이아웃은 같은 자리를 그대로 쓴다(PR-221
+                    // 폭·PR-222 열·이 구역의 자리를 깨지 않음).
+                    if (candidates.length === 0) {
+                      return (
+                        <p className="text-xs text-gray-400" data-testid={`handwritten-candidates-empty-${index}`}>
+                          표 밖 손글씨 메모는 읽히지 않았습니다. 작지 원본에 손글씨 자재가 있으면 "＋ 자재 행 직접 추가"로 넣어 주세요.
+                        </p>
+                      );
+                    }
                     const ignored = ignoredCandidateIndexes.get(index) ?? new Set<number>();
                     const added = addedCandidateIndexes.get(index) ?? new Set<number>();
                     return (
@@ -1042,6 +1113,10 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                   // 기존 행과 똑같은 검증·경고(마스터 대조·발주수량 계산 등)를
                                   // 받지만, "손글씨에서 왔다"는 사실만 배지로 남겨 둔다.
                                   const isHandwritten = (handwrittenBomIndexes.get(index) ?? new Set<number>()).has(i);
+                                  // PR-225: "＋ 자재 행 직접 추가"로 만든 행 — 인식/후보와 무관하게
+                                  // 사람이 처음부터 입력한 행이라 "수기 입력"으로 구분해 표시한다
+                                  // (PR-223의 "수기 확인 필요"=손글씨 인식 결과 확인용과는 의미가 다름).
+                                  const isManual = (manualBomIndexes.get(index) ?? new Set<number>()).has(i);
                                   const rowBadges = badges[i];
                                   const unknownName = findWarning(item.warnings, 'UNKNOWN_NAME');
                                   const yocheokMismatch = findWarning(item.warnings, 'YOCHEOK_QTY_MISMATCH');
@@ -1061,6 +1136,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           checked={isExcluded}
                                           onChange={() => toggleExcludeBomItem(index, i)}
                                         />
+                                        {/* PR-225: 직접 추가한 행만 실제로 지울 수 있다(인식된 원본
+                                            행은 "제외" 체크만 — 삭제 기능을 새로 만들지 않음). */}
+                                        {isManual && (
+                                          <button
+                                            type="button"
+                                            data-testid={`bom-delete-manual-${index}-${i}`}
+                                            onClick={() => deleteManualBomRow(index, i)}
+                                            className="block mx-auto mt-0.5 text-[10px] text-red-600 hover:underline"
+                                          >삭제</button>
+                                        )}
                                       </td>
                                       <td className="border p-1">
                                         <input
@@ -1082,6 +1167,11 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                         {isHandwritten && (
                                           <span className="ml-1 text-[10px] text-indigo-600 align-middle" data-testid={`bom-handwritten-${index}-${i}`}>
                                             수기 확인 필요
+                                          </span>
+                                        )}
+                                        {isManual && (
+                                          <span className="ml-1 text-[10px] text-indigo-600 align-middle" data-testid={`bom-manual-${index}-${i}`}>
+                                            수기 입력
                                           </span>
                                         )}
                                         {/* PR-208: 품목군(괄호 앞) 자모 오독을 사전 기준으로 자동 교정했을 때만
@@ -1348,6 +1438,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                               </tbody>
                             </table>
                           </div>
+                          {/* PR-225: 인식 성공 여부와 무관하게 사람이 직접 자재 행을 넣을 수
+                              있게 한다(손글씨 후보가 0건이어도 항상 보임). 빈 행 1개를 표 끝에
+                              추가하고 자재명 입력칸에 포커스한다 — PR-223 "자재 행으로 추가"와
+                              같은 저장 경로(appendBomItem)를 쓴다. */}
+                          <button
+                            type="button"
+                            data-testid={`add-manual-bom-row-${index}`}
+                            onClick={() => addManualBomRow(index)}
+                            className="text-sm px-2 py-1 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                          >＋ 자재 행 직접 추가</button>
                         </>
                       );
                     })()}

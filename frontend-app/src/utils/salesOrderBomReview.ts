@@ -73,18 +73,60 @@ export function updateHandwrittenCandidateField<K extends keyof AiHandwrittenCan
 // 변환된 행을 그 결과(resultIndex)의 bomItems 끝에 추가한다. 추가된 행의 인덱스
 // (bomItems.length, 추가 전 길이)를 함께 돌려줘 호출자가 "수기 확인 필요" 표시용
 // Set<number>에 등록할 수 있게 한다.
-export function appendBomItemFromCandidate(
+// PR-225: appendBomItemFromCandidate(PR-223)와 "＋ 자재 행 직접 추가"가 같은 저장
+// 경로를 타게(새 경로를 만들지 않게) 공통으로 쓰는 append — 행을 그 결과의 bomItems
+// 끝에 추가하고 새 인덱스를 돌려준다.
+export function appendBomItem(
   results: AiSalesOrderResult[],
   resultIndex: number,
-  candidate: AiHandwrittenCandidate,
+  bomItem: AiBomItem,
 ): { results: AiSalesOrderResult[]; newBomIndex: number } {
   let newBomIndex = -1;
   const next = results.map((r, ri) => {
     if (ri !== resultIndex) return r;
     newBomIndex = r.bomItems.length;
-    return { ...r, bomItems: [...r.bomItems, handwrittenCandidateToBomItem(candidate)] };
+    return { ...r, bomItems: [...r.bomItems, bomItem] };
   });
   return { results: next, newBomIndex };
+}
+
+export function appendBomItemFromCandidate(
+  results: AiSalesOrderResult[],
+  resultIndex: number,
+  candidate: AiHandwrittenCandidate,
+): { results: AiSalesOrderResult[]; newBomIndex: number } {
+  return appendBomItem(results, resultIndex, handwrittenCandidateToBomItem(candidate));
+}
+
+// PR-225: "＋ 자재 행 직접 추가" — 빈 자재 행 1개(기존 입력칸과 동일한 필드, 전부
+// 비어 있음). PR-222 발주수량(적용)·자재명 마스터 대조 등 기존 행과 똑같은 계산·
+// 검증을 받는다(별도 저장 경로를 만들지 않음 — appendBomItem 재사용).
+export function createEmptyBomItem(): AiBomItem {
+  return {
+    category: null, itemName: '', spec: null, colorCode: null, consumption: null,
+    requiredQty: null, requiredQtyUnit: null, supplier: null, remarks: null,
+    materialSubTypeCandidate: null,
+  };
+}
+
+// PR-225: 직접 추가한 행의 "삭제" — 배열에서 실제로 제거한다(인식된 원본 행에는
+// 쓰지 않음, 그쪽은 기존 "제외" 체크만 유지). 가운데 행을 지우면 이후 인덱스가
+// 한 칸씩 당겨지므로, 호출자는 shiftIndexesAfterRemoval로 다른 index 기반 상태
+// (제외/수정됨/수기 배지 등)도 함께 당겨야 한다.
+export function removeBomItem(results: AiSalesOrderResult[], resultIndex: number, bomIndex: number): AiSalesOrderResult[] {
+  return results.map((r, ri) => (ri !== resultIndex ? r : { ...r, bomItems: r.bomItems.filter((_, i) => i !== bomIndex) }));
+}
+
+// removeBomItem으로 bomIndex 위치의 행을 지운 뒤, 그 결과를 가리키던 index 기반
+// Set<number>(제외/수정됨/수기 배지 등)을 같이 당긴다 — 지워진 인덱스는 빼고, 그보다
+// 큰 인덱스는 1씩 줄인다.
+export function shiftIndexesAfterRemoval(indexes: Set<number>, removedIndex: number): Set<number> {
+  const next = new Set<number>();
+  for (const i of indexes) {
+    if (i === removedIndex) continue;
+    next.add(i > removedIndex ? i - 1 : i);
+  }
+  return next;
 }
 
 // 자재명을 비우면 저장할 수 없다 — 커밋 직전(제외 필터링 후) bomItems에 적용한다.
