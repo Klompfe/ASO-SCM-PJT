@@ -191,6 +191,24 @@ export class AiBomItemDto {
   warnings?: { code: string; message: string; suggestions?: string[] }[] | null;
 }
 
+// PR-223(PILOT-21 설계안): 자재 표 밖(라벨/장식 칸 여백, 스케치 주변 포함) 손글씨 중
+// 자재로 보이는 것 — AI가 읽은 것을 그대로 담되 자동으로 BomItem을 만들지 않는다.
+// 저장(commit-analysis) 경로는 이 필드를 읽지 않는다(사람이 화면에서 "자재 행으로
+// 추가"를 눌러야 기존 bomItems 경로로 들어간다) — frontend가 commit 요청 전에 이
+// 필드를 제외한다(salesOrderBomReview.ts의 buildCommitResult 참고).
+export class AiHandwrittenCandidateDto {
+  @ApiProperty({ description: '손글씨를 읽은 글자 그대로(원문)' }) @IsNotEmpty() @IsString() rawText: string;
+  @ApiPropertyOptional({ description: '자재명으로 보이는 해석(확신 없으면 null)' }) @IsOptional() @IsString() name: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() spec: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() color: string | null;
+  // PR-220의 consumption/requiredQty/requiredQtyUnit과 이름을 그대로 맞춰, "자재 행으로
+  // 추가" 시 AiBomItemDto의 같은 이름 필드로 바로 복사되게 한다(필드명 변환 없음).
+  @ApiPropertyOptional({ description: '함께 적힌 요척(없으면 null)' }) @IsOptional() @IsNumber() consumption: number | null;
+  @ApiPropertyOptional({ description: '함께 적힌 수량(없으면 null)' }) @IsOptional() @IsNumber() requiredQty: number | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() requiredQtyUnit: string | null;
+  @ApiPropertyOptional({ description: '대략적 위치(예: "하단 여백", "라벨 칸 위")' }) @IsOptional() @IsString() locationHint: string | null;
+}
+
 // 사이즈 스펙표 한 행 (부위 x 사이즈). 원본이 손글씨 분수 표기라 문자열로 둔다.
 export class AiSizeSpecRowDto {
   @ApiProperty() @IsNotEmpty() @IsString() part: string;
@@ -224,4 +242,13 @@ export class AiSalesOrderResultDto {
   @IsOptional()
   @IsString()
   workNotes: string | null;
+
+  // PR-223: 선택 필드 — 없으면(엑셀 매핑 경로 등) 빈 배열로 취급한다. commitAnalysis()는
+  // 이 필드를 읽지 않는다(저장 대상 아님, 검토 화면 표시 전용).
+  @ApiPropertyOptional({ description: '작지 표 밖 손글씨 메모 후보(저장 대상 아님, 검토 화면용)', type: [AiHandwrittenCandidateDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AiHandwrittenCandidateDto)
+  handwrittenCandidates?: AiHandwrittenCandidateDto[] | null;
 }

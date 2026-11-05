@@ -92,11 +92,28 @@ export interface AiSizeSpecRow {
   finalValue: string | null;
 }
 
+// PR-223(PILOT-21 설계안): 작지 표 밖(라벨/장식 칸 여백, 스케치 주변 포함) 손글씨 중
+// 자재로 보이는 것 — 자동으로 bomItems에 들어가지 않는다. 저장(commit-analysis)
+// 요청에는 포함하지 않는다(salesOrderBomReview.ts의 buildCommitResult가 제외).
+export interface AiHandwrittenCandidate {
+  rawText: string;
+  name: string | null;
+  spec: string | null;
+  color: string | null;
+  // AiBomItem.consumption/requiredQty/requiredQtyUnit과 이름을 맞췄다 — "자재 행으로
+  // 추가" 시 그대로 복사한다(PR-220 sheetQty 규칙과 일관).
+  consumption: number | null;
+  requiredQty: number | null;
+  requiredQtyUnit: string | null;
+  locationHint: string | null;
+}
+
 export interface AiSalesOrderResult {
   overview: AiOverview;
   bomItems: AiBomItem[];
   sizeSpecs: AiSizeSpecRow[];
   workNotes: string | null;
+  handwrittenCandidates?: AiHandwrittenCandidate[] | null;
 }
 
 // PR-192: 백엔드가 240초 한도로 재시도·폴백을 끝내므로, 그보다 약간 긴 270초로 맞춰

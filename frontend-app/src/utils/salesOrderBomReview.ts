@@ -1,4 +1,4 @@
-import type { AiBomItem, AiSalesOrderResult } from '../api/salesOrders.service';
+import type { AiBomItem, AiHandwrittenCandidate, AiSalesOrderResult } from '../api/salesOrders.service';
 
 // PR-197: 작지 AI 분석 결과의 "2) 자재명세" 표를 저장 전에 사람이 고치고/빼고 할 수
 // 있게 하는 순수 함수들. updateOverviewField/setBomItemSubType(salesOrderOverviewEdit.ts)과
@@ -27,7 +27,64 @@ export function buildCommitBomItems(bomItems: AiBomItem[], excludedIndexes: Set<
 }
 
 export function buildCommitResult(result: AiSalesOrderResult, excludedIndexes: Set<number>): AiSalesOrderResult {
-  return { ...result, bomItems: buildCommitBomItems(result.bomItems, excludedIndexes) };
+  // PR-223: 저장(commit) 요청은 수기 메모 후보를 받지 않는다 — 사용자가 "자재 행으로
+  // 추가"한 것만 bomItems를 통해 저장되고, 처리하지 않은/무시한 후보는 애초에 전송하지
+  // 않는다(서버 DTO에도 필드가 없어 보내면 거부될 수 있음 — 명시적으로 빼서 안전하게 한다).
+  const { handwrittenCandidates: _handwrittenCandidates, ...rest } = result;
+  return { ...rest, bomItems: buildCommitBomItems(result.bomItems, excludedIndexes) };
+}
+
+// PR-223(PILOT-21 설계안): 수기 메모 후보 하나를 일반 자재 행(AiBomItem)으로 변환한다.
+// 자재명은 사람이 확인한 해석(name)이 있으면 그것, 없으면 읽은 원문(rawText)을 그대로
+// 쓴다(빈 자재명으로 만들지 않기 위함 — hasBlankMaterialName이 저장을 막는다).
+// consumption/requiredQty/requiredQtyUnit은 후보에 있는 값만 그대로 넣고, 없으면
+// 비워 둔다(자동으로 숫자를 만들어 넣지 않는다 — 설계 원칙).
+export function handwrittenCandidateToBomItem(candidate: AiHandwrittenCandidate): AiBomItem {
+  return {
+    category: null,
+    itemName: candidate.name ?? candidate.rawText,
+    spec: candidate.spec ?? null,
+    colorCode: candidate.color ?? null,
+    consumption: candidate.consumption ?? null,
+    requiredQty: candidate.requiredQty ?? null,
+    requiredQtyUnit: candidate.requiredQtyUnit ?? null,
+    supplier: null,
+    remarks: null,
+    materialSubTypeCandidate: null,
+  };
+}
+
+// 후보 입력칸(자재명/규격/수량/단위 등)을 사람이 "자재 행으로 추가"를 누르기 전에
+// 고칠 수 있게 한다 — updateBomItemField와 같은 방식(불변, index 기반).
+export function updateHandwrittenCandidateField<K extends keyof AiHandwrittenCandidate>(
+  results: AiSalesOrderResult[],
+  resultIndex: number,
+  candidateIndex: number,
+  field: K,
+  value: AiHandwrittenCandidate[K],
+): AiSalesOrderResult[] {
+  return results.map((r, ri) => {
+    if (ri !== resultIndex) return r;
+    const candidates = r.handwrittenCandidates ?? [];
+    return { ...r, handwrittenCandidates: candidates.map((c, ci) => (ci !== candidateIndex ? c : { ...c, [field]: value })) };
+  });
+}
+
+// 변환된 행을 그 결과(resultIndex)의 bomItems 끝에 추가한다. 추가된 행의 인덱스
+// (bomItems.length, 추가 전 길이)를 함께 돌려줘 호출자가 "수기 확인 필요" 표시용
+// Set<number>에 등록할 수 있게 한다.
+export function appendBomItemFromCandidate(
+  results: AiSalesOrderResult[],
+  resultIndex: number,
+  candidate: AiHandwrittenCandidate,
+): { results: AiSalesOrderResult[]; newBomIndex: number } {
+  let newBomIndex = -1;
+  const next = results.map((r, ri) => {
+    if (ri !== resultIndex) return r;
+    newBomIndex = r.bomItems.length;
+    return { ...r, bomItems: [...r.bomItems, handwrittenCandidateToBomItem(candidate)] };
+  });
+  return { results: next, newBomIndex };
 }
 
 // 자재명을 비우면 저장할 수 없다 — 커밋 직전(제외 필터링 후) bomItems에 적용한다.

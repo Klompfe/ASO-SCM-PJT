@@ -11,8 +11,11 @@ import {
   hasRequiredQtyBundleMismatch,
   computeDuplicateLookingRows,
   computeBomRowBadges,
+  handwrittenCandidateToBomItem,
+  appendBomItemFromCandidate,
+  updateHandwrittenCandidateField,
 } from './salesOrderBomReview';
-import type { AiBomItem, AiSalesOrderResult } from '../api/salesOrders.service';
+import type { AiBomItem, AiHandwrittenCandidate, AiSalesOrderResult } from '../api/salesOrders.service';
 
 const bomItem = (overrides: Partial<AiBomItem> = {}): AiBomItem => ({
   category: '부자재', itemName: '자재', spec: null, colorCode: null, consumption: 1,
@@ -62,6 +65,56 @@ describe('buildCommitBomItems / buildCommitResult (PR-197) — 제외 체크된 
     const committed = buildCommitResult(result, new Set([0]));
     expect(committed.bomItems.map((i) => i.itemName)).toEqual(['B']);
     expect(committed.overview.styleNo).toBe('S');
+  });
+
+  // PR-223: 저장 요청은 수기 메모 후보를 받지 않는다 — 처리 여부와 무관하게 항상 제외.
+  it('buildCommitResult는 handwrittenCandidates를 저장 요청에서 제외한다', () => {
+    const result: AiSalesOrderResult = {
+      ...buildResult([bomItem({ itemName: 'A' })]),
+      handwrittenCandidates: [{ rawText: '금속장식', name: '금속장식', spec: null, color: null, consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: null }],
+    };
+    const committed = buildCommitResult(result, new Set());
+    expect(committed).not.toHaveProperty('handwrittenCandidates');
+  });
+});
+
+// PR-223(PILOT-21 설계안): 수기 메모 후보 → 일반 자재 행 변환(합성 값만 사용).
+describe('handwrittenCandidateToBomItem / appendBomItemFromCandidate (PR-223)', () => {
+  const candidate = (overrides: Partial<AiHandwrittenCandidate> = {}): AiHandwrittenCandidate => ({
+    rawText: '금속장식 (내경 10φ)', name: '금속장식', spec: '내경 10φ', color: null,
+    consumption: null, requiredQty: null, requiredQtyUnit: null, locationHint: '하단 여백', ...overrides,
+  });
+
+  it('name이 있으면 자재명으로 쓰고, 나머지 필드도 그대로 옮긴다', () => {
+    const item = handwrittenCandidateToBomItem(candidate({ color: 'BL', consumption: 1.2, requiredQty: 10, requiredQtyUnit: 'EA' }));
+    expect(item).toMatchObject({ itemName: '금속장식', spec: '내경 10φ', colorCode: 'BL', consumption: 1.2, requiredQty: 10, requiredQtyUnit: 'EA' });
+  });
+
+  it('name이 null이면 rawText를 자재명으로 쓴다(빈 자재명 방지)', () => {
+    const item = handwrittenCandidateToBomItem(candidate({ name: null, rawText: 'BE-WH…' }));
+    expect(item.itemName).toBe('BE-WH…');
+  });
+
+  it('수량/요척이 없는 후보는 자동으로 숫자를 만들어 넣지 않는다(비어 있음)', () => {
+    const item = handwrittenCandidateToBomItem(candidate());
+    expect(item.consumption).toBeNull();
+    expect(item.requiredQty).toBeNull();
+  });
+
+  it('appendBomItemFromCandidate는 그 결과의 bomItems 끝에 행을 추가하고 새 인덱스를 돌려준다', () => {
+    const results = [buildResult([bomItem({ itemName: 'A' })])];
+    const { results: next, newBomIndex } = appendBomItemFromCandidate(results, 0, candidate());
+    expect(newBomIndex).toBe(1);
+    expect(next[0].bomItems.map((i) => i.itemName)).toEqual(['A', '금속장식']);
+    // 다른 결과/원본은 그대로(불변).
+    expect(results[0].bomItems).toHaveLength(1);
+  });
+
+  it('updateHandwrittenCandidateField는 "자재 행으로 추가" 전에 후보 필드를 고칠 수 있게 한다', () => {
+    const results: AiSalesOrderResult[] = [{ ...buildResult([]), handwrittenCandidates: [candidate(), candidate({ rawText: '다른 후보' })] }];
+    const next = updateHandwrittenCandidateField(results, 0, 0, 'name', '교정된 자재명');
+    expect(next[0].handwrittenCandidates?.[0].name).toBe('교정된 자재명');
+    expect(next[0].handwrittenCandidates?.[1].rawText).toBe('다른 후보'); // 다른 후보는 그대로
   });
 });
 
