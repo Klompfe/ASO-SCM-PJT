@@ -19,8 +19,11 @@ import {
 } from '../utils/salesOrderBomReview';
 import { getAllItems } from '../api/items.service';
 import { buildUploadFailureInfo, resolveUploadFailureToastMessage, type UploadFailureInfo } from '../utils/salesOrderUploadError';
-import { getSimilarMasterStyles } from '../api/styles.service';
+import { getSimilarMasterStyles, getStyleColorSizeQuantities } from '../api/styles.service';
 import { findSimilarStyleNos } from '../utils/styleNoSimilarity';
+import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
+import { buildColorQtyMap, resolveAppliedQuantity, APPLIED_BASIS_LABEL } from '../utils/appliedQuantity';
+import { formatBomItemQty } from '../utils/materialRequirementDisplay';
 import {
   shouldBlockSaveForStyleNo,
   summarizeWarnings,
@@ -91,6 +94,27 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   // PR-221: "확인 필요" 열의 경고가 3개 넘으면 기본 2개만 보여주고 나머지는 "+N"으로
   // 접는다 — 행(결과 인덱스-행 인덱스)별로 펼쳤는지만 기억한다(저장 로직과 무관).
   const [expandedWarningRows, setExpandedWarningRows] = useState<Set<string>>(new Set());
+  // PR-222: "발주수량(적용)" 열 — [A] 부족자재 표(StyleShortagePanel.tsx)가 쓰는 것과
+  // 같은 규칙(resolveAppliedQuantity)으로 미리 보여주려고 필요한 참고 데이터. 계산/저장
+  // 로직에는 전혀 쓰이지 않는다(읽기 전용 표시용).
+  const [colorQtyByIndex, setColorQtyByIndex] = useState<Map<number, { color: string; qty: number }[]>>(new Map());
+  const [existingMaterialUnits, setExistingMaterialUnits] = useState<Map<string, string>>(new Map());
+  const [packagingRules, setPackagingRules] = useState<MaterialPackagingUnitRule[]>([]);
+
+  const refreshColorQuantities = async (index: number, styleNo: string | null) => {
+    if (!styleNo) {
+      setColorQtyByIndex((prev) => { const next = new Map(prev); next.delete(index); return next; });
+      return;
+    }
+    try {
+      const data = await getStyleColorSizeQuantities(styleNo);
+      setColorQtyByIndex((prev) => { const next = new Map(prev); next.set(index, data.totalByColor ?? []); return next; });
+    } catch {
+      // PR-222: 아직 없는 스타일(첫 등록)이거나 조회 실패면 "수량표 없음"으로 취급한다
+      // (resolveAppliedQuantity는 빈 배열을 받으면 백엔드와 동일하게 unknown으로 떨어진다).
+      setColorQtyByIndex((prev) => { const next = new Map(prev); next.set(index, []); return next; });
+    }
+  };
 
   const refreshSimilarStyleCandidates = async (index: number, styleNo: string | null) => {
     if (!styleNo) {
@@ -121,6 +145,15 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     getAiUsageSummary()
       .then((res) => setUsageSummary(res))
       .catch(() => setUsageSummary(null));
+  }, [isOpen]);
+
+  // PR-222: "발주수량(적용)" 열의 포장단위(콘/롤) 환산 규칙 — 모달 열릴 때 한 번만
+  // 가져온다(자재명세 초안 저장/계산과는 무관한 읽기 전용 참고 데이터).
+  useEffect(() => {
+    if (!isOpen) return;
+    getMaterialPackagingUnitRules()
+      .then((rules) => setPackagingRules(Array.isArray(rules) ? rules : []))
+      .catch(() => setPackagingRules([]));
   }, [isOpen]);
 
   // 파일을 브라우저 창에 드롭하면 기본 동작은 그 파일을 새 페이지로 여는 것이라
@@ -166,12 +199,26 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       setEditedBomIndexes(new Map());
       setStep(2);
       // PR-197: "자재 마스터에 없는 새 이름" 배지용 — 전체 자재명을 한 번 불러와 정규화해 둔다.
+      // PR-222: 같은 응답에서 단위(unit)도 함께 뽑아 둔다 — "발주수량(적용)" 열이 작지수량
+      // 단위와 비교할 기존 자재의 단위로 쓴다(새 자재는 아직 단위가 없어 비교하지 않는다).
       getAllItems({})
-        .then((items) => setExistingMaterialNames(new Set(items.map((it) => normalizeMaterialName(it.name)))))
-        .catch(() => setExistingMaterialNames(new Set()));
+        .then((items) => {
+          setExistingMaterialNames(new Set(items.map((it) => normalizeMaterialName(it.name))));
+          setExistingMaterialUnits(new Map(items.filter((it) => it.unit).map((it) => [normalizeMaterialName(it.name), it.unit as string])));
+        })
+        .catch(() => {
+          setExistingMaterialNames(new Set());
+          setExistingMaterialUnits(new Map());
+        });
       // PR-198: 결과마다 읽은 스타일번호가 기존 스타일과 끝 글자만 다른지 확인한다.
       setSimilarStyleCandidates(new Map());
-      data.forEach((r, i) => { void refreshSimilarStyleCandidates(i, r.overview.styleNo ?? null); });
+      // PR-222: 결과마다 읽은 스타일번호의 색상×사이즈 수량표(있으면)를 가져온다 —
+      // "발주수량(적용)" 열이 [A] 부족자재 표와 같은 규칙으로 미리 계산하는 데 쓴다.
+      setColorQtyByIndex(new Map());
+      data.forEach((r, i) => {
+        void refreshSimilarStyleCandidates(i, r.overview.styleNo ?? null);
+        void refreshColorQuantities(i, r.overview.styleNo ?? null);
+      });
       if (mock) {
         toast.error('⚠️ 목업 데이터입니다 — 실제 AI 분석이 아닙니다. 관리자에게 GEMINI_API_KEY 설정을 요청하세요.', { duration: 10000 });
       } else if (charge > 0) {
@@ -198,7 +245,11 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   ) => {
     setResults((prev) => updateOverviewFieldPure(prev, index, field, value));
     // PR-198: 스타일번호를 직접 고치면 그 값 기준으로 유사 스타일 후보를 다시 조회한다.
-    if (field === 'styleNo') void refreshSimilarStyleCandidates(index, (value as string | null) ?? null);
+    if (field === 'styleNo') {
+      void refreshSimilarStyleCandidates(index, (value as string | null) ?? null);
+      // PR-222: 스타일번호를 고치면 그 번호의 색상×사이즈 수량표를 다시 가져온다.
+      void refreshColorQuantities(index, (value as string | null) ?? null);
+    }
   };
 
   // PR-200c: 스타일번호 입력칸에 "사람이 직접" 타이핑했을 때만 쓴다(= 원본을 보고 입력한
@@ -771,15 +822,36 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                       const edited = editedBomIndexes.get(index) ?? new Set<number>();
                       const badges = computeBomRowBadges(result.bomItems, result.overview.totalQty, existingMaterialNames);
                       const duplicateGroups = groupDuplicateIndexes(result.bomItems);
+                      // PR-222: "발주수량(적용)" 열 — [A] 부족자재 표(StyleShortagePanel.tsx,
+                      // work-orders/utils/material-requirements.util.ts)가 쓰는 것과 같은
+                      // 규칙으로, 저장 전에도 "지금 저장하면 적용될 수량"을 행마다 미리 계산한다.
+                      const colorQtyMap = buildColorQtyMap(colorQtyByIndex.get(index) ?? []);
+                      const appliedQuantities = result.bomItems.map((item) => resolveAppliedQuantity({
+                        consumption: item.consumption,
+                        totalQty: result.overview.totalQty,
+                        sheetQty: item.requiredQty,
+                        sheetQtyUnit: item.requiredQtyUnit ?? null,
+                        itemUnit: existingMaterialUnits.get(normalizeMaterialName(item.itemName)) ?? item.requiredQtyUnit ?? null,
+                        colorCode: item.colorCode,
+                        colorQtyMap,
+                      }));
+                      const confirmedAppliedCount = appliedQuantities.filter((a) => a.basis !== 'unknown').length;
+                      const needsColorQtyCount = appliedQuantities.filter((a) => a.basis === 'unknown').length;
                       return (
                         <>
                           <h5 className="text-sm font-semibold text-gray-700 mb-1">
                             2) 자재명세 ({result.bomItems.length}건 중 {result.bomItems.length - excluded.size}건 포함)
                           </h5>
                           <p className="text-xs text-gray-400 mb-1">AI가 읽은 값이므로 작업지시서 원본과 대조해 주세요 — 잘못된 행은 수정하거나 제외할 수 있습니다.</p>
+                          {/* PR-222: 계산·저장에는 영향 없는 참고용 한 줄 — 기존 "확인 필요 N건" 요약 띠(위)와는 별개. */}
+                          <p className="text-xs text-gray-500 mb-1" data-testid={`applied-qty-summary-${index}`}>
+                            기획수량(총수량) {result.overview.totalQty != null ? result.overview.totalQty.toLocaleString('ko-KR') : '미입력'}
+                            {' · '}적용수량이 확정된 행 {confirmedAppliedCount} / {result.bomItems.length}
+                            {' · '}색상별 수량 확인 필요 {needsColorQtyCount}
+                          </p>
                           <div className="overflow-x-auto max-h-96 overflow-y-auto">
                             <table className="border text-sm">
-                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1 min-w-[48px]">제외</th><th className="border p-1 min-w-[72px]">구분</th><th className="border p-1 min-w-[140px]">자재명</th><th className="border p-1 min-w-[72px]">규격</th><th className="border p-1 min-w-[72px]">소요량</th><th className="border p-1 min-w-[140px]">작지수량(출고량)</th><th className="border p-1 min-w-[96px]">공급사</th><th className="border p-1 min-w-[72px]">비고</th><th className="border p-1 min-w-[120px]">실/테이프 종류</th><th className="border p-1 min-w-[280px]">확인 필요</th></tr></thead>
+                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1 min-w-[48px]">제외</th><th className="border p-1 min-w-[72px]">구분</th><th className="border p-1 min-w-[140px]">자재명</th><th className="border p-1 min-w-[72px]">규격</th><th className="border p-1 min-w-[72px]">소요량</th><th className="border p-1 min-w-[140px]">작지수량(출고량)</th><th className="border p-1 min-w-[150px]">발주수량(적용)</th><th className="border p-1 min-w-[96px]">공급사</th><th className="border p-1 min-w-[72px]">비고</th><th className="border p-1 min-w-[120px]">실/테이프 종류</th><th className="border p-1 min-w-[280px]">확인 필요</th></tr></thead>
                               <tbody>
                                 {result.bomItems.map((item, i) => {
                                   const candidate = item.materialSubTypeCandidate ?? null;
@@ -896,6 +968,45 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                         {item.consumption != null && (
                                           <div className="text-[10px] text-gray-400 mt-0.5">계산값: {((item.consumption ?? 0) * (result.overview.totalQty ?? 0)).toLocaleString('ko-KR')}</div>
                                         )}
+                                      </td>
+                                      <td className="border p-1 text-xs" data-testid={`applied-qty-${index}-${i}`}>
+                                        {(() => {
+                                          // PR-222: 계산 로직은 바꾸지 않는다 — [A] 부족자재 표와 같은 규칙
+                                          // (resolveAppliedQuantity)으로 "지금 저장하면 적용될 수량"만 미리
+                                          // 보여준다. 이 값을 "작지수량" 입력칸에 자동으로 써 넣지 않는다.
+                                          const applied = appliedQuantities[i];
+                                          if (applied.basis === 'unknown') {
+                                            return <span className="text-amber-700">색상별 수량 확인 필요</span>;
+                                          }
+                                          const subtype = item.threadType ?? item.tapeType ?? null;
+                                          const itemUnit = existingMaterialUnits.get(normalizeMaterialName(item.itemName)) ?? item.requiredQtyUnit ?? null;
+                                          const display = formatBomItemQty(applied.qty, { subtype, itemName: item.itemName, itemUnit }, packagingRules);
+                                          const badgeClass = applied.basis === 'sheet'
+                                            ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                                            : applied.basis === 'color-qty'
+                                              ? 'bg-sky-50 border border-sky-200 text-sky-800'
+                                              : 'bg-gray-100 border border-gray-300 text-gray-700';
+                                          return (
+                                            <>
+                                              <div className="flex items-center gap-1 flex-wrap">
+                                                <span data-testid={`applied-qty-text-${index}-${i}`}>{display.text}</span>
+                                                <span
+                                                  className={`${badgeClass} rounded px-1 py-0.5 text-[10px]`}
+                                                  data-testid={`applied-qty-basis-${index}-${i}`}
+                                                  title={applied.formula}
+                                                >{APPLIED_BASIS_LABEL[applied.basis]}</span>
+                                              </div>
+                                              {applied.mismatch && (
+                                                <div className="text-[10px] text-orange-700 mt-0.5" data-testid={`applied-qty-mismatch-${index}-${i}`}>
+                                                  작지 값 적용 {display.text} / 계산값 {Math.round(applied.computedQty).toLocaleString('ko-KR')}
+                                                </div>
+                                              )}
+                                              {(display.kind === 'SUBTYPE_NEEDED' || display.kind === 'UNIT_MISMATCH') && (
+                                                <div className="text-[10px] text-orange-700 mt-0.5">{display.warning}</div>
+                                              )}
+                                            </>
+                                          );
+                                        })()}
                                       </td>
                                       <td className="border p-1">
                                         <input

@@ -58,3 +58,17 @@ export const updateMasterStyle = (styleNo: string, data: UpdateMasterStyle): Pro
 // 자동 변경 없음).
 export const getSimilarMasterStyles = (styleNo: string): Promise<{ styleNo: string }[]> =>
   apiClient.get('/master-styles/similar', { params: { styleNo } });
+
+// PR-222: 색상×사이즈 수량표(PR-212, styles.controller.ts GET :styleNo/quantities) —
+// work-orders.service.ts(PR-220b)가 [A] 부족자재 표의 필요량 계산에 쓰는 것과 같은
+// 조회다. 수주등록 저장 화면(자재명세 초안)이 "발주수량(적용)" 열을 같은 규칙으로
+// 미리 보여주려고 읽기 전용으로 가져온다 — 저장/계산 로직은 바꾸지 않는다.
+export interface StyleColorSizeQuantities {
+  styleNo: string;
+  sizes: string[];
+  rows: { color: string; size: string; qty: number }[];
+  totalByColor: { color: string; qty: number }[];
+  grandTotal: number;
+}
+export const getStyleColorSizeQuantities = (styleNo: string): Promise<StyleColorSizeQuantities> =>
+  apiClient.get(`/master-styles/${encodeURIComponent(styleNo)}/quantities`);
