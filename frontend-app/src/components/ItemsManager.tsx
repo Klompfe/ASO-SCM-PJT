@@ -22,6 +22,7 @@ import { buildEditableOrderByItem } from '../utils/purchaseOrderForm';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { formatBomItemQty } from '../utils/materialRequirementDisplay';
+import { filterBomRows, distinctNonEmptySorted } from '../utils/bomLookupFilter';
 
 // PR-175: 실/테이프 통합 드롭다운 값을 서버 필드(threadType/tapeType) 중 하나로 나눈다.
 const resolveSubTypePayload = (value: string): { threadType?: ThreadType; tapeType?: TapeType } =>
@@ -67,6 +68,16 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   }, [bom, loadPendingOrders]);
   const [bomError, setBomError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+  // PR-224: 발주 화면(PurchaseOrdersManager.tsx)의 "스타일 연결" 콤보와 같은
+  // SearchSelectField<MasterStyle> + getMasterStyles 조합 — 입력칸에 직접 타이핑 후
+  // 검색 버튼/Enter를 누르는 기존 동작(searchStyleNo)은 그대로 두고, 목록에서 바로
+  // 고르는 방법을 추가한다(둘 중 아무 방법으로도 조회 가능).
+  const [styleSearchPick, setStyleSearchPick] = useState<MasterStyle | null>(null);
+  // PR-224: 선택한 스타일의 자재 목록(위 bom.items)을 화면에서만 거르는 필터 —
+  // 서버 요청 없음, 소요량/포장단위 계산과 무관(filterBomRows).
+  const [bomNameFilter, setBomNameFilter] = useState('');
+  const [bomCategoryFilter, setBomCategoryFilter] = useState('');
+  const [bomColorFilter, setBomColorFilter] = useState('');
 
   // 품목 마스터 (보조 기능)
   const [items, setItems] = useState<Item[]>([]);
@@ -135,22 +146,52 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       });
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setSearchResults(data);
+      // PR-224: 검색 결과가 정확히 1건이면 그 행을 클릭하지 않아도 바로 자재 목록을 보여준다.
+      if (data.length === 1) {
+        await handleSelectStyleNo(data[0].styleNo);
+      }
     } catch (err: any) {
       toast.error(getErrorMessage(err, '스타일 검색에 실패했습니다.'));
       setSearchResults([]);
     }
   };
 
+  // PR-224: 발주 화면과 같은 SearchSelectField<MasterStyle>이 쓰는 검색 함수 — 같은
+  // getMasterStyles(styleNo 부분일치)를 그대로 쓰고, 후보가 많아도 과도하게 늘지
+  // 않도록 PurchaseOrdersManager.searchStyles와 같이 30건으로 자른다.
+  const searchStylesForLookup = useCallback(async (keyword: string): Promise<MasterStyle[]> => {
+    const res = await getMasterStyles(keyword ? { styleNo: keyword } : undefined);
+    const list = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
+    return list.slice(0, 30);
+  }, []);
+
   const handleSelectStyleNo = async (styleNo: string) => {
     setSelectedStyleNo(styleNo);
     setBom(null);
     setBomError(null);
+    // PR-224: 다른 스타일로 바꾸면 이전 스타일에 걸어 둔 필터가 그대로 남아 "자재가
+    // 하나도 안 보이는" 혼란을 막기 위해 초기화한다.
+    setBomNameFilter('');
+    setBomCategoryFilter('');
+    setBomColorFilter('');
     try {
       const res = await getBomByStyleNo(styleNo);
       setBom(res);
     } catch (err: any) {
       setBomError(getErrorMessage(err, '자재명세를 불러오는 데 실패했습니다.'));
     }
+  };
+
+  // PR-224: 목록(콤보)에서 스타일을 고르면 검색 버튼 없이 바로 조회한다 — 기존
+  // 검색창(searchStyleNo)·결과 표(searchResults)에도 선택한 스타일 1건을 반영해
+  // 같은 화면 구조(검색 결과 표 → 자재 목록)를 그대로 쓴다.
+  const handlePickStyleFromSearch = async (picked: MasterStyle | null) => {
+    setStyleSearchPick(picked);
+    if (!picked) return;
+    setSearchStyleNo(picked.styleNo);
+    setSearched(true);
+    setSearchResults([picked]);
+    await handleSelectStyleNo(picked.styleNo);
   };
 
   // 오더관리에서 "자재명세 보기"로 넘어온 styleNo가 있으면 검색창 입력 없이 바로 그
@@ -590,8 +631,37 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       {/* 스타일번호 / 목표출고일 기간으로 검색 → 선택한 스타일의 자재명세(BOM) 표시 */}
       <form onSubmit={handleSearch} className="flex flex-wrap gap-4 items-end bg-gray-50 p-4 rounded-lg">
         <div className="flex flex-col">
-          <label className="text-sm text-gray-600 mb-1">스타일 번호</label>
+          <label className="text-sm text-gray-600 mb-1">스타일 번호(직접 입력)</label>
           <input className="border border-gray-300 rounded px-3 py-2" placeholder="예: MB62SLM103Z" value={searchStyleNo} onChange={(e) => setSearchStyleNo(e.target.value)} />
+        </div>
+        <div className="flex flex-col">
+          {/* PR-224: 발주 화면(PurchaseOrdersManager.tsx "스타일 연결")과 같은
+              SearchSelectField<MasterStyle> + getMasterStyles 조합 — 목록에서 고르면
+              검색 버튼 없이 바로 그 스타일의 자재 목록이 아래에 뜬다. 이 컴포넌트는
+              클릭하면 열리는 검색 팝업(돋보기 버튼)이라 "타이핑하면 바로 아래에 후보가
+              뜨는" 인라인 콤보와는 모양이 다르다(발주 화면의 실제 동작과 동일 — 보고서
+              1절 참고). renderRow만 브랜드/바이어를 보여주도록 추가했다(발주 화면
+              원본은 스타일번호만 보여줌).
+          */}
+          <label className="text-sm text-gray-600 mb-1">또는 목록에서 선택</label>
+          <SearchSelectField<MasterStyle>
+            value={styleSearchPick}
+            onChange={(picked) => { void handlePickStyleFromSearch(picked); }}
+            search={searchStylesForLookup}
+            getKey={(s) => s.styleNo}
+            getLabel={(s) => s.styleNo}
+            renderRow={(s) => (
+              <span>
+                <span className="font-mono">{s.styleNo}</span>
+                <span className="text-gray-400 text-xs ml-1">{[s.overview?.brand, s.overview?.buyer].filter(Boolean).join(' · ') || '-'}</span>
+              </span>
+            )}
+            ariaLabel="스타일 목록 검색"
+            placeholder="스타일 선택"
+            title="스타일 검색 — 고르면 바로 자재 목록을 보여줍니다"
+            allowClear
+            className="w-56"
+          />
         </div>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">납기일(From)</label>
@@ -661,7 +731,71 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
               onSaved={() => { setEditing(null); loadPendingOrders(); }}
             />
           )}
-          {bom && (
+          {bom && (() => {
+            // PR-224: 자재명/구분/색상 필터 — 서버 요청 없이 bom.items(이미 불러온
+            // 행)에만 적용한다(소요량/포장단위 계산 로직은 그대로). 선택지는 현재
+            // 스타일에 실제로 있는 값만(distinctNonEmptySorted) — 새 분류를 만들지 않음.
+            const categoryOptions = distinctNonEmptySorted(bom.items.map((it) => it.category));
+            const colorOptions = distinctNonEmptySorted(bom.items.map((it) => it.colorCode));
+            const filteredBomItems = filterBomRows(bom.items, {
+              nameKeyword: bomNameFilter,
+              category: bomCategoryFilter,
+              colorCode: bomColorFilter,
+            });
+            const hasAnyFilter = !!(bomNameFilter || bomCategoryFilter || bomColorFilter);
+            return (
+              <>
+                <div className="flex flex-wrap gap-3 items-end bg-gray-50 p-3 rounded-lg" data-testid="bom-filter-bar">
+                  <div className="flex flex-col">
+                    <label className="text-xs text-gray-600 mb-1">자재명</label>
+                    <input
+                      className="border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="자재명 검색"
+                      aria-label="자재명 필터"
+                      value={bomNameFilter}
+                      onChange={(e) => setBomNameFilter(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-xs text-gray-600 mb-1">구분</label>
+                    <select
+                      className="border border-gray-300 rounded px-2 py-1 text-sm"
+                      aria-label="구분 필터"
+                      value={bomCategoryFilter}
+                      onChange={(e) => setBomCategoryFilter(e.target.value)}
+                    >
+                      <option value="">전체</option>
+                      {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-xs text-gray-600 mb-1">색상</label>
+                    <select
+                      className="border border-gray-300 rounded px-2 py-1 text-sm"
+                      aria-label="색상 필터"
+                      value={bomColorFilter}
+                      onChange={(e) => setBomColorFilter(e.target.value)}
+                    >
+                      <option value="">전체</option>
+                      {colorOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  {hasAnyFilter && (
+                    <button
+                      type="button"
+                      className="text-sm text-gray-500 hover:underline"
+                      onClick={() => { setBomNameFilter(''); setBomCategoryFilter(''); setBomColorFilter(''); }}
+                    >초기화</button>
+                  )}
+                  <span className="text-xs text-gray-500" data-testid="bom-filter-count">
+                    자재 {bom.items.length}건 중 {filteredBomItems.length}건
+                  </span>
+                </div>
+                {filteredBomItems.length === 0 ? (
+                  <p className="p-4 text-center text-gray-500 bg-white border border-gray-200 rounded-lg">
+                    조건에 맞는 자재가 없습니다 — 필터를 초기화해 보세요.
+                  </p>
+                ) : (
             <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
               <table>
                 <thead className="bg-gray-100 text-gray-700">
@@ -683,7 +817,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {bom.items.map((it) =>
+                  {filteredBomItems.map((it) =>
                     swappingBomItemId === it.id ? (
                       <tr key={it.id} className="bg-indigo-50">
                         <td className="px-4 py-2 font-mono">{it.material?.code}</td>
@@ -859,7 +993,10 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                 </tbody>
               </table>
             </div>
-          )}
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
 
