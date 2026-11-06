@@ -25,6 +25,7 @@ import {
 } from './utils/vision-guardrails.util';
 import { suggestCategoryCorrection, applyCategoryCorrection } from './utils/term-autocorrect.util';
 import { sanitizeHandwrittenCandidates } from './utils/handwritten-candidates.util';
+import { sumRequiredQtyLots } from './utils/required-qty-lots.util';
 
 // PR-190 보강: "오늘" 기준 납기 연도 보정/의심 판정은 반드시 한국시간(KST, UTC+9) 날짜여야
 // 한다 — new Date().toISOString()은 UTC라 한국 00:00~09:00 사이에는 하루 전 날짜가 되어
@@ -101,6 +102,10 @@ export const RESPONSE_SCHEMA = {
             // PR-220: requiredQty(출고량)의 단위를 원문 그대로(계산 없이) 추가로 읽는다.
             // 기존 필드(requiredQty)의 의미·읽는 방식은 바꾸지 않는다 — 단위만 추가.
             requiredQtyUnit: { type: SchemaType.STRING, nullable: true, description: '출고량(requiredQty) 칸 옆/안에 인쇄된 단위를 원문 그대로(Y/M/EA/KG 등). 단위가 안 보이면 null — 추측하지 마세요.' },
+            // PR-226: 출고량 칸이 LOT1/LOT2처럼 여러 줄이면 줄별 숫자를 전부 담는다
+            // (requiredQty는 그 합계 — 서버가 다시 합산해 덮어쓴다). 한 줄만 있으면
+            // 생략하거나 그 값 1개만 담아도 된다.
+            requiredQtyLots: { type: SchemaType.ARRAY, items: { type: SchemaType.NUMBER }, nullable: true, description: '출고량 칸에 LOT1/LOT2 또는 ①②③ 같은 동그라미 번호로 구분된 여러 줄 숫자들(있을 때만, 한 줄이면 생략 가능). 소수 둘째 자리까지 그대로. 줄마다 단위가 다르면 담지 말고 null로 두세요.' },
             supplier: { type: SchemaType.STRING, nullable: true },
             remarks: { type: SchemaType.STRING, nullable: true },
             materialSubTypeCandidate: {
@@ -175,7 +180,9 @@ handwrittenCmtPriceCandidate / handwrittenCmtPriceMemo: 바이어(buyer)가 "미
 
 2. bomItems(자재명세): 상단 소재 표(소재No./소재명/색상/규격/요척/출고량)와 하단 부자재 표(안감/심지/포켓감/테이프/재봉사/단추/라벨 등, 규격/소요량/비고)를 모두 각 행 하나씩 bomItems 배열 항목으로 변환하세요. category는 소재/안감/심지/부자재 등 표의 구분명, itemName은 소재명 또는 부자재명, spec은 규격/색상, consumption은 요척 또는 소요량(숫자만, 단위 제외). supplier(공급처)는 문서에 실제로 인쇄/기재된 값이 있을 때만 그대로 옮기고, 문서에 없으면 절대 추정하지 말고 반드시 null로 두세요 — 공급처는 작업지시서 시점에는 정해지지 않고 이후 발주 단계에서 결정되는 정보입니다.
 
-requiredQty(출고량)는 그 행에 인쇄된 숫자를 계산하지 말고 그대로 옮기세요(요척×수량으로 다시 계산하지 마세요). 같은 자재가 색상별로 행이 나뉘어 있으면 각 색상 행의 출고량을 각각 그대로 읽으세요(다른 색상 행의 값을 합치거나 복사하지 마세요). requiredQtyUnit은 출고량 칸 옆/안에 인쇄된 단위(Y/M/EA/KG 등)를 원문 그대로 옮기고, 단위가 안 보이면 null로 두세요(추측하지 마세요). "합계"/"TOTAL" 같은 합산 행은 개별 자재 행이 아니므로 bomItems에 넣지 마세요.
+requiredQty(출고량)는 그 행에 인쇄된 숫자를 계산하지 말고 그대로 옮기세요(요척×수량으로 다시 계산하지 마세요). 같은 자재가 색상별로 행이 나뉘어 있으면 각 색상 행의 출고량을 각각 그대로 읽으세요(다른 색상 행의 값을 합치거나 복사하지 마세요). requiredQtyUnit은 출고량 칸 옆/안에 인쇄된 단위(Y/M/EA/KG 등)를 원문 그대로 옮기고, 단위가 안 보이면 null로 두세요(추측하지 마세요). "합계"/"TOTAL" 같은 합산 행은 개별 자재 행이 아니므로 bomItems에 넣지 마세요. **requiredQty는 반드시 그 행의 "출고량(요구수량)" 칸에 있는 값만 읽으세요 — 스타일 총수량, 주문수량, 장수처럼 다른 칸(보통 문서 상단이나 다른 표)에 적힌 숫자를 출고량 대신 넣지 마세요.** 출고량 칸이 비어 있거나 안 보이면 다른 칸의 숫자로 대신 채우지 말고 null로 두세요.
+
+출고량 칸에 값이 여러 줄로 적혀 있으면(LOT1, LOT2 같은 글자 표기, 또는 ①·②·③처럼 동그라미 번호로 구분된 줄 — 둘 다 같은 뜻의 LOT 구분자입니다), 각 줄의 숫자를 모두 읽어 requiredQtyLots에 담고(예: [317.54, 442.54]), requiredQty는 그 합계로 하세요(직접 더해서 넣어도 되고, 모르면 서버가 다시 합산합니다). 숫자에 소수점이 있으면 소수 둘째 자리까지 그대로 읽으세요 — 반올림해서 정수로 줄이지 마세요. 한 줄만 있으면 requiredQtyLots는 생략하고 requiredQty에만 그 값을 넣으세요. 읽기 불확실한 줄이 있어도 건너뛰지 말고 보이는 숫자만 담되, 숫자 자체가 안 보이면 그 줄은 비우세요(추측 금지). LOT 줄마다 단위가 서로 다르면(예: 한 줄은 Y, 다른 줄은 M) 합산하지 말고 requiredQtyLots는 null로 두고, requiredQty에는 가장 위 줄(첫 LOT)의 값만 넣고 requiredQtyUnit도 그 줄의 단위로 하세요.
 
 materialSubTypeCandidate: 실(THREAD)이나 테이프류 자재 행에서만, 자재명 또는 규격란 텍스트에 "코아사"/"오바사"/"스쿠이사"/"지누이도"/"다데"/"암홀" 같은 글자가 그대로(또는 거의 그대로) 포함되어 있어 종류를 명확히 특정할 수 있을 때만 채우세요(스쿠이사는 오바사로, 다른 이름들은 가장 가까운 항목으로 매핑). 실/테이프가 아닌 자재이거나, 그런 단서가 없거나, 여러 후보 중 어느 것인지 확신할 수 없으면 반드시 null로 두고 절대 추측하지 마세요.
 
@@ -318,6 +325,10 @@ export class VisionService {
       throw new InternalServerErrorException('작업지시서 AI 분석에 실패했습니다.');
     }
 
+    // PR-226: LOT 합산은 가장 먼저 한다 — applyGuardrails의 요척×수량 불일치 검사
+    // (checkYocheokMismatch 등)가 item.requiredQty를 읽는데, 합산 전 값(LOT 한 줄만)을
+    // 보면 틀린 불일치 경고가 뜬다.
+    this.applyRequiredQtyLots(parsed);
     this.applyTargetRddValidation(parsed);
     this.applyMidoCmtPriceGuard(parsed);
     this.applyGuardrails(parsed, context, todayKstIso());
@@ -475,6 +486,20 @@ export class VisionService {
         result.handwrittenCandidates,
         result.bomItems.map((b) => b.itemName),
       );
+    }
+  }
+
+  // PR-226: requiredQtyLots(LOT별 숫자, 2개 이상)가 있으면 서버가 결정적으로 합산해
+  // requiredQty를 덮어쓴다 — 모델이 합계를 안 냈거나 잘못 냈어도 항상 정확하다.
+  // sheetQty(저장 필드)에는 이 합계만 들어간다(commitAnalysis가 requiredQty를 그대로
+  // sheetQty로 넘김, 기존 PR-220 경로 — 바꾸지 않음). requiredQtyLots 자체는 저장하지
+  // 않는다(buildCommitResult가 bomItems에서 제외, 프런트 salesOrderBomReview.ts).
+  private applyRequiredQtyLots(results: AiSalesOrderResultDto[]): void {
+    for (const result of results) {
+      for (const item of result.bomItems) {
+        const sum = sumRequiredQtyLots(item.requiredQtyLots);
+        if (sum != null) item.requiredQty = sum;
+      }
     }
   }
 

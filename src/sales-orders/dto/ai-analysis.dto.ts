@@ -116,6 +116,15 @@ export class AiBomItemDto {
   @IsOptional()
   @IsString()
   requiredQtyUnit?: string | null;
+  // PR-226: 출고량 칸이 LOT1/LOT2처럼 여러 줄이면 모델이 담는 줄별 숫자(서버가 합산해
+  // requiredQty를 덮어씀, vision.service.ts의 applyRequiredQtyLots) — 검토 화면의
+  // "LOT1 a + LOT2 b = 합" 표시용일 뿐, 저장(commit) 경로는 읽지 않는다(buildCommitResult가
+  // bomItems에서 제외).
+  @ApiPropertyOptional({ description: '출고량 LOT별 숫자(있을 때만, 서버가 합산해 requiredQty를 덮어씀, 저장 대상 아님)', type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  requiredQtyLots?: number[] | null;
   @ApiPropertyOptional() @IsOptional() @IsString() supplier: string | null;
   @ApiPropertyOptional() @IsOptional() @IsString() remarks: string | null;
 

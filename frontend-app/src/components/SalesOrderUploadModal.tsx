@@ -28,7 +28,7 @@ import { buildUploadFailureInfo, resolveUploadFailureToastMessage, type UploadFa
 import { getSimilarMasterStyles, getStyleColorSizeQuantities } from '../api/styles.service';
 import { findSimilarStyleNos } from '../utils/styleNoSimilarity';
 import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
-import { buildColorQtyMap, resolveAppliedQuantity, APPLIED_BASIS_LABEL } from '../utils/appliedQuantity';
+import { buildColorQtyMap, resolveAppliedQuantity, APPLIED_BASIS_LABEL, formatLotBreakdown } from '../utils/appliedQuantity';
 import { formatBomItemQty } from '../utils/materialRequirementDisplay';
 import {
   shouldBlockSaveForStyleNo,
@@ -1264,6 +1264,13 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                             : applied.basis === 'color-qty'
                                               ? 'bg-sky-50 border border-sky-200 text-sky-800'
                                               : 'bg-gray-100 border border-gray-300 text-gray-700';
+                                          // PR-226: "계산값 우선" 규칙 이후 배지 title에는 계산식과 함께
+                                          // 작지 값(있으면, LOT 줄 내역이 있으면 그것까지)을 보여준다 —
+                                          // 작지 값이 적용되지 않아도(계산값이 적용돼도) 근거를 알 수 있게.
+                                          const lotBreakdown = formatLotBreakdown(item.requiredQtyLots);
+                                          const sheetRefText = applied.sheetQty != null
+                                            ? ` · 작지 값 ${lotBreakdown ?? applied.sheetQty.toLocaleString('ko-KR')}`
+                                            : '';
                                           return (
                                             <>
                                               <div className="flex items-center gap-1 flex-wrap">
@@ -1271,12 +1278,22 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                                 <span
                                                   className={`${badgeClass} rounded px-1 py-0.5 text-[10px]`}
                                                   data-testid={`applied-qty-basis-${index}-${i}`}
-                                                  title={applied.formula}
+                                                  title={`${applied.formula}${sheetRefText}`}
                                                 >{APPLIED_BASIS_LABEL[applied.basis]}</span>
                                               </div>
                                               {applied.mismatch && (
                                                 <div className="text-[10px] text-orange-700 mt-0.5" data-testid={`applied-qty-mismatch-${index}-${i}`}>
-                                                  작지 값 적용 {display.text} / 계산값 {Math.round(applied.computedQty).toLocaleString('ko-KR')}
+                                                  {/* PR-226: 계산값을 적용하므로 더 이상 "작지 값 적용"이 아니다 —
+                                                      "계산값 적용 · 작지 값(LOT 합산 포함)과 차이 N% — 확인" 문구로 교체. */}
+                                                  계산값 {display.text} 적용 · 작지 값 {lotBreakdown ?? (applied.sheetQty != null ? applied.sheetQty.toLocaleString('ko-KR') : '-')}
+                                                  {lotBreakdown ? '(LOT 합산)' : ''}와 차이 {applied.sheetQty != null && applied.qty !== 0 ? Math.round(Math.abs(applied.qty - applied.sheetQty) / Math.abs(applied.qty) * 100) : 0}% — 확인
+                                                  {/* PR-226 추가(사용자 확인): 작지 값이 스타일 총수량과 정확히 같으면
+                                                      출고량 칸이 아니라 다른 칸(총수량 등)을 읽었을 가능성이 크다. */}
+                                                  {applied.sheetQtyLooksLikeTotalQtyMisread && (
+                                                    <span className="block" data-testid={`applied-qty-looks-like-total-qty-${index}-${i}`}>
+                                                      작지 값이 총수량과 같습니다 — 출고량 칸이 아닌 수량을 읽었을 수 있습니다
+                                                    </span>
+                                                  )}
                                                 </div>
                                               )}
                                               {(display.kind === 'SUBTYPE_NEEDED' || display.kind === 'UNIT_MISMATCH') && (

@@ -161,6 +161,25 @@ describe('ShortageTable 작지 수량 출처/불일치 표시 (PR-220)', () => {
     const html = renderToStaticMarkup(createElement(ShortageTable, { rows: [row({ basis: 'sheet' })], onPick: vi.fn() }));
     expect(html).not.toContain('확인이 필요합니다');
   });
+
+  // PR-226 추가(사용자 확인 사실): 작지 값이 스타일 총수량과 정확히 같으면 출고량
+  // 칸이 아니라 다른 칸(총수량 등)을 읽었을 가능성을 추가로 알린다.
+  it('sheetQtyLooksLikeTotalQtyMisread:true면 "총수량과 같습니다" 안내가 함께 보인다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, {
+        rows: [row({ basis: 'computed', mismatch: true, sheetQty: 499, computedQty: 758.48, sheetQtyLooksLikeTotalQtyMisread: true })],
+        onPick: vi.fn(),
+      }),
+    );
+    expect(html).toContain('총수량과 같습니다');
+  });
+
+  it('sheetQtyLooksLikeTotalQtyMisread가 없으면(기본) 그 안내가 없다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, { rows: [row({ basis: 'sheet', mismatch: true, sheetQty: 1200, computedQty: 1518 })], onPick: vi.fn() }),
+    );
+    expect(html).not.toContain('총수량과 같습니다');
+  });
 });
 
 // PR-220b: 색상 있는 BOM 행에 작지 수량/색상×사이즈 수량표 근거가 전혀 없으면 숫자를

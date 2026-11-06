@@ -323,6 +323,87 @@ describe('VisionService.analyzeSalesOrder — PR-200 안전장치', () => {
   });
 });
 
+// PR-226: 작지 출고량 칸의 LOT 여러 줄 합산 — 합성 응답만 사용(Gemini 호출 없음).
+describe('VisionService.analyzeSalesOrder — requiredQtyLots 합산 (PR-226)', () => {
+  const buildService = async (apiKey: string | undefined): Promise<VisionService> => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [VisionService, { provide: ConfigService, useValue: { get: jest.fn(() => apiKey) } }],
+    }).compile();
+    return module.get(VisionService);
+  };
+  const stubGenerateContent = (service: VisionService, fakeParsedResult: unknown) => {
+    const fakeGenerateContent = jest.fn().mockResolvedValue({
+      response: { candidates: [{ finishReason: 'STOP' }], text: () => JSON.stringify(fakeParsedResult), usageMetadata: { promptTokenCount: 100, totalTokenCount: 300 } },
+    });
+    (service as any).genAI = { getGenerativeModel: jest.fn(() => ({ generateContent: fakeGenerateContent })) };
+  };
+  const baseOverview = { styleNo: null, styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null, targetRdd: null, documentDate: null };
+
+  it('requiredQtyLots가 2개 이상이면 서버가 합산해 requiredQty를 덮어쓴다(합성 값)', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    const fakeParsedResult = [
+      {
+        overview: baseOverview,
+        bomItems: [
+          { category: '겉감', itemName: 'KHAKI KH', spec: null, colorCode: 'KH', consumption: 1, requiredQty: 499, requiredQtyUnit: 'Y', requiredQtyLots: [499, 259], supplier: null, remarks: null },
+        ],
+        sizeSpecs: [],
+        workNotes: null,
+      },
+    ];
+    stubGenerateContent(service, fakeParsedResult);
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].bomItems[0].requiredQty).toBe(758);
+    expect(outcome.results[0].bomItems[0].requiredQtyLots).toEqual([499, 259]);
+  });
+
+  it('requiredQtyLots가 1개뿐이면 그 값으로 덮어쓴다(기존 단일 값과 동일한 결과)', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    const fakeParsedResult = [
+      { overview: baseOverview, bomItems: [{ category: null, itemName: 'A', spec: null, colorCode: null, consumption: 1, requiredQty: 1, requiredQtyUnit: 'Y', requiredQtyLots: [758], supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ];
+    stubGenerateContent(service, fakeParsedResult);
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].bomItems[0].requiredQty).toBe(758);
+  });
+
+  it('requiredQtyLots가 없으면(필드 자체가 없음) requiredQty를 그대로 둔다', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    const fakeParsedResult = [
+      { overview: baseOverview, bomItems: [{ category: null, itemName: 'A', spec: null, colorCode: null, consumption: 1, requiredQty: 758, requiredQtyUnit: 'Y', supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ];
+    stubGenerateContent(service, fakeParsedResult);
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].bomItems[0].requiredQty).toBe(758);
+  });
+
+  it('음수/NaN이 섞인 LOT도 유효한 값만 합산한다(형식 오류로 업로드가 실패하지 않음)', async () => {
+    const service = await buildService('fake-api-key-for-test');
+    const fakeParsedResult = [
+      { overview: baseOverview, bomItems: [{ category: null, itemName: 'A', spec: null, colorCode: null, consumption: 1, requiredQty: 1, requiredQtyUnit: 'Y', requiredQtyLots: [499, -10, 259], supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ];
+    stubGenerateContent(service, fakeParsedResult);
+    const outcome = await service.analyzeSalesOrder({ buffer: Buffer.from(''), mimetype: 'image/png' } as any);
+    expect(outcome.results[0].bomItems[0].requiredQty).toBe(758);
+  });
+
+  it('PROMPT에 LOT 여러 줄 지시 문구가 있다', () => {
+    expect(PROMPT).toContain('requiredQtyLots');
+    expect(PROMPT).toContain('LOT');
+  });
+
+  // PR-226 추가 지시(사용자가 작지 원본으로 확인한 사실): 처음 보였던 "작지수량 499"는
+  // LOT 값이 아니라 총수량과 같은 숫자였다 — 출고량 칸이 아닌 칸을 읽었을 가능성이
+  // 크므로, 프롬프트에 "출고량 칸의 값만 읽어라" 지시와 동그라미 번호(①②③)도 LOT
+  // 구분자로 취급하라는 지시, 소수 둘째 자리까지 그대로 읽으라는 지시를 추가했다.
+  it('PROMPT에 "출고량 칸의 값만 읽는다"는 지시와 동그라미 번호(①)도 LOT로 취급한다는 지시, 소수 둘째 자리 지시가 있다', () => {
+    expect(PROMPT).toContain('출고량(요구수량)" 칸에 있는 값만');
+    expect(PROMPT).toContain('총수량');
+    expect(PROMPT).toContain('①');
+    expect(PROMPT).toContain('소수 둘째 자리까지 그대로');
+  });
+});
+
 // PR-158: AI가 문서 상단 작성일을 납기로 잘못 인식한 실사례(targetRdd="6/22" ≈
 // documentDate) 재발 방지 — 프롬프트만으로는 부족해 코드로 재검증한다.
 describe('VisionService.analyzeSalesOrder — targetRddSuspicious 계산 (PR-158)', () => {

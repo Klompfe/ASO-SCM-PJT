@@ -54,6 +54,9 @@ export interface MaterialRequirementRow {
   // PR-220b: true면 requiredQty/shortageQty/packaging은 불완전한 값이다 — 화면은 숫자
   // 대신 "색상별 수량 확인 필요"를 보여줘야 한다(스타일 전체 수량으로 추측하지 않음).
   needsColorQty?: boolean;
+  // PR-226 추가(사용자 확인): mismatch일 때 작지 값이 스타일 총수량과 정확히 같으면
+  // 출고량 칸이 아니라 다른 칸(총수량 등)을 읽었을 가능성이 크다는 서버 계산 표시.
+  sheetQtyLooksLikeTotalQtyMisread?: boolean;
 }
 
 export type RequirementReason = 'NO_STYLE_NO' | 'NO_BOM' | null;

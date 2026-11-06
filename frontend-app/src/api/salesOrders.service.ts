@@ -60,6 +60,11 @@ export interface AiBomItem {
   // PR-220: requiredQty(출고량, 위)의 단위를 원문 그대로(계산 없이) — commit 시
   // BomItem.sheetQty/sheetQtyUnit으로 함께 저장되어 소요량 계산의 기준이 된다.
   requiredQtyUnit?: string | null;
+  // PR-226: 출고량 칸이 LOT1/LOT2처럼 여러 줄이면 서버가 이 배열을 합산해 requiredQty를
+  // 덮어쓴다(값 자체는 서버가 결정, vision.service.ts). 표시용(화면의 "LOT1 a + LOT2 b
+  // = 합")일 뿐 저장 대상이 아니다 — buildCommitResult(salesOrderBomReview.ts)가
+  // 저장 요청에서 제외한다.
+  requiredQtyLots?: number[] | null;
   supplier: string | null;
   remarks: string | null;
   // PR-175: AI 후보(읽기전용 참고) — 실/테이프 종류 한글 라벨 중 하나 또는 null.

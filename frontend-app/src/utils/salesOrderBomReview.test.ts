@@ -80,6 +80,15 @@ describe('buildCommitBomItems / buildCommitResult (PR-197) — 제외 체크된 
     const committed = buildCommitResult(result, new Set());
     expect(committed).not.toHaveProperty('handwrittenCandidates');
   });
+
+  // PR-226: requiredQtyLots(LOT별 숫자, 표시용)는 저장 대상이 아니다 — requiredQty
+  // (서버가 이미 합산한 값)만 저장한다.
+  it('buildCommitResult는 각 bomItem의 requiredQtyLots를 저장 요청에서 제외한다', () => {
+    const result = buildResult([bomItem({ itemName: 'A', requiredQty: 758, requiredQtyLots: [499, 259] })]);
+    const committed = buildCommitResult(result, new Set());
+    expect(committed.bomItems[0]).not.toHaveProperty('requiredQtyLots');
+    expect(committed.bomItems[0].requiredQty).toBe(758); // requiredQty 자체는 그대로 남는다
+  });
 });
 
 // PR-223(PILOT-21 설계안): 수기 메모 후보 → 일반 자재 행 변환(합성 값만 사용).

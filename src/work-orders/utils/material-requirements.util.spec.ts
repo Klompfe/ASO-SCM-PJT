@@ -1,4 +1,4 @@
-import { calculateMaterialRequirements } from './material-requirements.util';
+import { calculateMaterialRequirements, sheetQtyLooksLikeTotalQtyMisread } from './material-requirements.util';
 
 const mat = (id: number, name: string) => ({ id, code: `M${id}`, name });
 // PR-220b: 기본 colorCode를 ''(공통/FREE 취급)으로 둔다 — 색상 비교 로직이 생기기 전에는
@@ -739,5 +739,157 @@ describe('PR-220b: 색상×사이즈 수량표(colorQuantities) 기반 필요량
       { colorQuantities: [{ color: 'BL', qty: 760 }, { color: 'KH', qty: 758 }] },
     );
     expect(rows.map((r) => r.requiredQty)).toEqual([760, 758, 1518 * 1.2]);
+  });
+});
+
+// PR-226(사용자 확정): 계산값(색상×사이즈 수량표 또는 총수량×요척)이 있으면 그 값을
+// 적용한다 — 작지 수량(sheetQty)은 1순위가 아니라 "대조·대체 근거"로 내려간다.
+// 배경(사용자 보고): 작지 출고량 칸이 LOT 여러 줄로 나뉘어 있었는데 인식이 한 줄만
+// 읽어 실제보다 적은 값을 작지수량으로 잡았고, 그 값을 1순위로 쓰면 다른 자재(전부
+// 계산값 적용)와 기준이 달라져 틀린 결과가 나왔다 — 계산값이 있으면 계산값을 쓰고
+// 작지 값은 비교만 하도록 바꾼다.
+describe('PR-226: 계산값 우선 — 작지 수량은 대조·대체 근거', () => {
+  const matUnit = (id: number, name: string, unit: string) => ({ id, code: `M${id}`, name, unit });
+
+  it('① 색상×사이즈 수량표로 계산값이 있고 작지 값도 있으면(5% 이내) 계산값을 적용하고 mismatch는 false다', () => {
+    const [row] = calculateMaterialRequirements(
+      1518,
+      // 계산값 = 1.0 × 758(수량표 KH 합계) = 758. 작지 760 — 차이 0.26%.
+      [{ id: 1, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 760, sheetQtyUnit: 'Y' }],
+      new Map(),
+      { colorQuantities: [{ color: 'KH', qty: 758 }] },
+    );
+    expect(row.basis).toBe('color-qty');
+    expect(row.requiredQty).toBe(758); // 계산값 적용(작지 760이 아님)
+    expect(row.sheetQty).toBe(760); // 대조용으로는 그대로 보관
+    // row.computedQty는 "총수량(1518)×요척" 참고값(화면의 계산수량 열, 색상과 무관하게
+    // 항상 제공 — 기존 정의)이라 이 행의 적용값(758, 색상 수량표 기준)과는 다르다.
+    expect(row.computedQty).toBe(1518);
+    expect(row.mismatch).toBe(false);
+  });
+
+  it('② 계산값과 작지 값 차이가 ±5% 넘으면 계산값을 적용하고 mismatch:true(작지 값은 참고로 남는다) — 사용자가 보고한 실제 버그 재현', () => {
+    const [row] = calculateMaterialRequirements(
+      1518,
+      // 계산값 = 1.0 × 758 = 758. 작지(LOT 한 줄만 인식) 499 — 차이 약 34%.
+      [{ id: 1, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 499, sheetQtyUnit: 'Y' }],
+      new Map(),
+      { colorQuantities: [{ color: 'KH', qty: 758 }] },
+    );
+    expect(row.basis).toBe('color-qty');
+    expect(row.requiredQty).toBe(758); // PR-220 시절과 달리 더 이상 작지 값(499)을 쓰지 않는다
+    expect(row.sheetQty).toBe(499);
+    expect(row.mismatch).toBe(true);
+  });
+
+  it('공통 색상 행(총수량×요척 계산값)도 같은 규칙 — 작지 값과 차이가 크면 mismatch지만 계산값을 적용한다', () => {
+    const [row] = calculateMaterialRequirements(
+      1000,
+      [{ id: 1, material: matUnit(10, '안감', 'Y'), consumption: 1.0, category: '안감', colorCode: '', sheetQty: 500, sheetQtyUnit: 'Y' }],
+      new Map(),
+    );
+    expect(row.basis).toBe('computed');
+    expect(row.requiredQty).toBe(1000);
+    expect(row.sheetQty).toBe(500);
+    expect(row.mismatch).toBe(true);
+  });
+
+  it('계산값이 없는 행(수량표에 그 색상이 없음)은 여전히 작지 값을 적용한다(기존 PR-220 동작 유지)', () => {
+    const [row] = calculateMaterialRequirements(
+      1518,
+      [{ id: 1, material: matUnit(21, 'KHAKI KH', 'Y'), consumption: 1.0, category: '겉감', colorCode: 'KH', sheetQty: 758, sheetQtyUnit: 'Y' }],
+      new Map(),
+      { colorQuantities: [{ color: 'BL', qty: 760 }] }, // KH는 수량표에 없음
+    );
+    expect(row.basis).toBe('sheet');
+    expect(row.requiredQty).toBe(758);
+  });
+
+  it('색상은 있고 계산값도 작지 값도 없으면 기존대로 needsColorQty다', () => {
+    const [row] = calculateMaterialRequirements(
+      1518,
+      [{ id: 1, material: mat(21, 'KHAKI KH'), consumption: 1.0, category: '겉감', colorCode: 'KH' }],
+      new Map(),
+    );
+    expect(row.needsColorQty).toBe(true);
+    expect(row.basis).toBe('unknown');
+  });
+});
+
+// PR-226 추가 지시(사용자가 작지 원본으로 확인한 사실, 합성 값으로 재현): 요척 1.52,
+// 총수량 499, 작지 출고량 칸 LOT 2줄 317.54/442.54(합계 760.08). 계산값 499×1.52=758.48,
+// 작지 합계와 차이 약 0.2% → 일치(mismatch 없음). 처음에 보였던 "작지수량 499"는 LOT
+// 값이 아니라 총수량과 같은 숫자였다 — 출고량 칸이 아닌 칸을 읽었을 가능성이 크므로,
+// mismatch일 때 작지 값이 총수량과 정확히 같으면 그 사실을 표시한다(소수 오차 허용 안 함).
+describe('sheetQtyLooksLikeTotalQtyMisread (PR-226 추가) — 순수 함수', () => {
+  it('mismatch가 없으면(계산값과 거의 같음) 항상 false다', () => {
+    expect(sheetQtyLooksLikeTotalQtyMisread(499, 499, false)).toBe(false);
+  });
+  it('mismatch가 있고 작지 값이 총수량과 정확히 같으면 true', () => {
+    expect(sheetQtyLooksLikeTotalQtyMisread(499, 499, true)).toBe(true);
+  });
+  it('mismatch가 있어도 작지 값이 총수량과 다르면(500 vs 499) false', () => {
+    expect(sheetQtyLooksLikeTotalQtyMisread(499, 500, true)).toBe(false);
+  });
+  it('소수 오차는 허용하지 않는다(499.01 ≠ 499)', () => {
+    expect(sheetQtyLooksLikeTotalQtyMisread(499.01, 499, true)).toBe(false);
+  });
+  it('값이 없으면(null) false', () => {
+    expect(sheetQtyLooksLikeTotalQtyMisread(null, 499, true)).toBe(false);
+    expect(sheetQtyLooksLikeTotalQtyMisread(499, null, true)).toBe(false);
+  });
+});
+
+describe('calculateMaterialRequirements — 총수량 오독 방어 통합 (PR-226 추가, 합성 값)', () => {
+  const matUnit = (id: number, name: string, unit: string) => ({ id, code: `M${id}`, name, unit });
+
+  it('정상 케이스: LOT 합산 760.08 vs 계산값 758.48(차이 0.2%) → mismatch 없음, 오독 표시도 없음', () => {
+    const [row] = calculateMaterialRequirements(
+      499,
+      // 서버가 이미 LOT를 합산해 넘긴 값이라고 가정(vision.service.ts 쪽 책임) — 이
+      // 유틸은 sheetQty를 그대로 받아 비교만 한다.
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1.52, category: '겉감', colorCode: '', sheetQty: 760.08, sheetQtyUnit: 'YD' }],
+      new Map(),
+    );
+    expect(row.basis).toBe('computed');
+    expect(row.requiredQty).toBeCloseTo(758.48, 2);
+    expect(row.mismatch).toBe(false);
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBeFalsy();
+  });
+
+  it('오독 케이스: 작지 값 499(총수량과 정확히 같음) vs 계산값 758.48(차이 34%) → mismatch + 총수량 오독 표시', () => {
+    const [row] = calculateMaterialRequirements(
+      499,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1.52, category: '겉감', colorCode: '', sheetQty: 499, sheetQtyUnit: 'YD' }],
+      new Map(),
+    );
+    expect(row.basis).toBe('computed');
+    expect(row.requiredQty).toBeCloseTo(758.48, 2); // 적용은 여전히 계산값(자동으로 버리지 않음)
+    expect(row.mismatch).toBe(true);
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBe(true);
+  });
+
+  it('작지 값이 총수량과 다르면(500 ≠ 499) mismatch여도 총수량 오독 표시는 붙지 않는다', () => {
+    const [row] = calculateMaterialRequirements(
+      499,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1.52, category: '겉감', colorCode: '', sheetQty: 500, sheetQtyUnit: 'YD' }],
+      new Map(),
+    );
+    expect(row.mismatch).toBe(true); // 계산값 758.48과 500은 여전히 34%가량 차이
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBe(false);
+  });
+
+  it('계산값이 없어 작지 값을 대체 근거로 쓰는 행도(basis=sheet) 총수량과 같으면 표시한다(적용은 그대로 작지 값)', () => {
+    const [row] = calculateMaterialRequirements(
+      499,
+      // 색상 KH인데 수량표에 KH가 없음 → 계산값 없음 → basis=sheet로 작지 값(499) 적용.
+      // 그런데 499는 총수량과 같고, 참고용 computedQty(1.52×499=758.48)와도 크게 다르다.
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1.52, category: '겉감', colorCode: 'KH', sheetQty: 499, sheetQtyUnit: 'YD' }],
+      new Map(),
+    );
+    expect(row.basis).toBe('sheet');
+    expect(row.requiredQty).toBe(499); // 자동으로 버리지 않고 적용은 그대로 작지 값
+    expect(row.mismatch).toBe(true);
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBe(true);
   });
 });

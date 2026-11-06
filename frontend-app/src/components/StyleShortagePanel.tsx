@@ -75,6 +75,14 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                 {r.mismatch && (
                   <span className="block text-xs text-amber-700" data-testid={`sheet-mismatch-${r.itemId}`}>
                     ⚠ 작지 수량({fmt(r.sheetQty ?? 0)})과 계산값(요척×기획수량, {fmt(r.computedQty ?? 0)})이 달라 확인이 필요합니다
+                    {/* PR-226 추가(사용자 확인): 작지 값이 스타일 총수량과 정확히 같으면
+                        출고량 칸이 아니라 다른 칸(총수량 등)을 읽었을 가능성이 크다는
+                        안내를 덧붙인다 — 적용값은 그대로 계산값(위 mismatch 로직 불변). */}
+                    {r.sheetQtyLooksLikeTotalQtyMisread && (
+                      <span className="block" data-testid={`sheet-looks-like-total-qty-${r.itemId}`}>
+                        작지 값이 총수량과 같습니다 — 출고량 칸이 아닌 수량을 읽었을 수 있습니다
+                      </span>
+                    )}
                   </span>
                 )}
                 {r.packaging && <span className="block text-xs text-amber-700">{r.packaging.conversionFormula}</span>}

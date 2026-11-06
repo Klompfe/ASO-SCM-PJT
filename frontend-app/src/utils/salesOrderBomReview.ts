@@ -22,8 +22,15 @@ export function updateBomItemField<K extends keyof AiBomItem>(
 
 // 제외 체크된 행을 뺀 저장용 bomItems — 화면 표시용 results 상태 자체는 건드리지 않아
 // 체크 해제로 되돌릴 수 있다(저장 직전에만 적용).
+// PR-226: requiredQtyLots(LOT별 숫자, 표시용)는 저장하지 않는다 — requiredQty(서버가
+// 이미 합산한 값)만 저장 대상이다.
 export function buildCommitBomItems(bomItems: AiBomItem[], excludedIndexes: Set<number>): AiBomItem[] {
-  return bomItems.filter((_, i) => !excludedIndexes.has(i));
+  return bomItems
+    .filter((_, i) => !excludedIndexes.has(i))
+    .map((b) => {
+      const { requiredQtyLots: _requiredQtyLots, ...rest } = b;
+      return rest;
+    });
 }
 
 export function buildCommitResult(result: AiSalesOrderResult, excludedIndexes: Set<number>): AiSalesOrderResult {
