@@ -47,7 +47,11 @@ export interface MaterialRequirementRow {
   // (요척×기획수량, 항상 제공)과 작지 수량이 크게 다를 때의 확인 필요 표시.
   // PR-220b: 'color-qty'(색상×사이즈 수량표 기준)/'unknown'(색상 있는 행인데 작지
   // 수량도 수량표도 없어 필요량을 확정할 수 없음) 추가.
-  basis?: 'sheet' | 'color-qty' | 'computed' | 'mixed' | 'unknown';
+  // PR-231: 'manual'(이 자재의 BOM 행 중 하나 이상이 수동 지정) 추가.
+  basis?: 'sheet' | 'color-qty' | 'computed' | 'manual' | 'mixed' | 'unknown';
+  // PR-231: basis와 무관하게 "이 자재에 수동 지정 행이 있는지" — basis가 'mixed'라도
+  // 화면이 "수동" 배지를 보여줄 수 있게 서버가 별도로 내려준다.
+  hasManualOverride?: boolean;
   computedQty?: number;
   sheetQty?: number;
   mismatch?: boolean;

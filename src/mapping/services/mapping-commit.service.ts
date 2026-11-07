@@ -463,6 +463,10 @@ export class MappingCommitService {
           const newItem = action.newItem!;
           const beforeMaterialId = bomItem.material?.id ?? null;
           bomItem.material = await findOrCreateMaterial(newItem.itemName);
+          // PR-231: 자재 교체는 수동 지정 값을 이어가지 않는다(초기화가 기본 — swapMaterial과 동일 원칙).
+          bomItem.manualRequiredQty = null;
+          bomItem.manualRequiredQtyNote = null;
+          bomItem.manualRequiredQtyAt = null;
           applyNewItemValues(bomItem, newItem);
           const saved = await queryRunner.manager.save(BomItem, bomItem);
           items = items.map((i) => (i.id === saved.id ? saved : i));

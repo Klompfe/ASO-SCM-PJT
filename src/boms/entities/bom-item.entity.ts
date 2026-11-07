@@ -91,4 +91,23 @@ export class BomItem {
 
   @Column({ nullable: true })
   sheetQtyUnit?: string | null;
+
+  // PR-231: 사람이 직접 지정한 이 행(자재×색상 행)의 총 필요수량 — 있으면 계산값/작지
+  // 값보다 항상 우선 적용된다(material-requirements.util.ts/appliedQuantity.ts의
+  // "수동 > 계산값 > 작지 값 > 근거 없음" 우선순위). null이면 지정 안 함(해제 포함).
+  // 재업로드/재저장(mapping-commit.service.ts)이 건드리지 않아야 하는 값 — PR-212의
+  // MANUAL 보존 원칙과 같다.
+  @Column('decimal', { nullable: true })
+  manualRequiredQty?: number | null;
+
+  // 수동 지정 사유(선택, 200자) — 화면 title/목록에 "계산값 N · 지정 시각 · 사유"로 보여준다.
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  manualRequiredQtyNote?: string | null;
+
+  // 수동 지정(또는 값 변경) 시각 — manualRequiredQty가 null이면 이 값도 항상 null.
+  // type을 명시하지 않는다 — 'timestamp'는 sqlite(e2e 테스트 DB)에서 지원하지 않는
+  // 타입이라 명시하면 DataTypeNotSupportedError로 서버가 뜨지 않는다(Item.packagingReviewedAt과
+  // 같은 이유). 타입 없이 두면 TypeORM이 TS 타입(Date)에서 드라이버별 컬럼 타입을 추론한다.
+  @Column({ nullable: true })
+  manualRequiredQtyAt?: Date | null;
 }

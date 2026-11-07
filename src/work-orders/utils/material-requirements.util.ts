@@ -32,6 +32,10 @@ export interface RequirementBomItem {
   // 전체 물량을 모든 색상 행에 곱하던 문제)의 근본 수정.
   sheetQty?: number | null;
   sheetQtyUnit?: string | null;
+  // PR-231: 사람이 직접 지정한 이 행의 총 필요수량 — 있으면 계산값/작지 값보다 항상
+  // 우선 적용된다(색상×사이즈 수량표 매칭 여부와 무관). 경고(불일치/오독/비정상 요척)
+  // 대상에서도 빠진다.
+  manualRequiredQty?: number | null;
 }
 
 // PR-185 B-2 / PR-186: material_packaging_unit_rules(PR-175) 한 행 — materialSubType →
@@ -95,7 +99,12 @@ export interface MaterialRequirementRow {
   // 작지 수량과 계산값이 크게 다를 때의 확인 필요 표시.
   // PR-220b: 'color-qty'(색상×사이즈 수량표 기준) 'unknown'(색상 있는 행인데 sheetQty도
   // 수량표도 없어 숫자를 만들 수 없음) 추가.
-  basis?: 'sheet' | 'color-qty' | 'computed' | 'mixed' | 'unknown';
+  // PR-231: 'manual' 추가 — 이 자재의 BOM 행 중 하나 이상이 수동 지정이면 basis에
+  // 섞여 들어간다(모든 행이 수동이면 'manual', 다른 basis와 섞이면 'mixed').
+  basis?: 'sheet' | 'color-qty' | 'computed' | 'manual' | 'mixed' | 'unknown';
+  // PR-231: basis와 무관하게 "이 자재의 BOM 행 중 하나 이상이 수동 지정됐는지" —
+  // basis가 'mixed'라도 화면이 "수동" 배지를 보여줄 수 있게 별도로 노출한다.
+  hasManualOverride?: boolean;
   computedQty?: number;
   sheetQty?: number;
   mismatch?: boolean;
@@ -256,6 +265,7 @@ interface WorkingRow extends MaterialRequirementRow {
   // 적용했어도 작지 값과 대조(mismatch)하려면 이 합계가 필요하다.
   sheetAppliedCount: number;
   computedBasisCount: number;
+  manualBasisCount: number;
   sheetPresentCount: number;
   sheetPresentSum: number;
   // PR-226: 계산값(색상수량표/총수량×요척)을 적용한 행 중, 그 행 자신의 계산값과
@@ -329,9 +339,19 @@ export function calculateMaterialRequirements(
     // LOT 여러 줄로 나뉘어 있는데 인식이 한 줄만 읽어 실제보다 적은 값을 작지수량으로
     // 잡는 사례가 있었고(LOT 합산은 vision.service.ts/handwritten 쪽에서 처리), 그 값을
     // 1순위로 쓰면 다른 자재(전부 계산값 적용)와 기준이 달라져 틀린 결과가 나왔다.
-    let rowBasis: 'sheet' | 'color-qty' | 'computed' | 'unknown';
+    // PR-231(사용자 확정): "수동 지정 값 > 계산값 > 작지 값 > 근거 없음" — 사람이 이
+    // 행에 직접 지정한 값이 있으면 색상/작지 여부와 무관하게 항상 그 값을 쓴다. 경고
+    // (불일치/오독/비정상 요척) 판단용 집계(sheetPresentCount 등)에도 들어가지 않는다
+    // (아래 unitMatches 블록 참고).
+    const manualQtyRaw = bi.manualRequiredQty;
+    const hasManualQty = manualQtyRaw != null && Number.isFinite(Number(manualQtyRaw));
+
+    let rowBasis: 'sheet' | 'color-qty' | 'computed' | 'manual' | 'unknown';
     let rowQty: number;
-    if (isCommonColor) {
+    if (hasManualQty) {
+      rowBasis = 'manual';
+      rowQty = num(manualQtyRaw);
+    } else if (isCommonColor) {
       rowBasis = 'computed';
       rowQty = computedRowQty;
     } else if (colorQtyValue != null) {
@@ -368,6 +388,7 @@ export function calculateMaterialRequirements(
         reviewed: !!bi.material.packagingReviewedAt,
         sheetAppliedCount: 0,
         computedBasisCount: 0,
+        manualBasisCount: 0,
         sheetPresentCount: 0,
         sheetPresentSum: 0,
         computedVsSheetMismatch: false,
@@ -376,7 +397,10 @@ export function calculateMaterialRequirements(
       };
     cur.consumptionPerUnit = round4(cur.consumptionPerUnit + perUnit);
     cur.lineCount += 1;
-    if (rowBasis === 'sheet') {
+    if (rowBasis === 'manual') {
+      cur.manualBasisCount += 1;
+      cur.requiredQty = round4(cur.requiredQty + rowQty);
+    } else if (rowBasis === 'sheet') {
       cur.sheetAppliedCount += 1;
       cur.requiredQty = round4(cur.requiredQty + rowQty);
     } else if (rowBasis === 'color-qty') {
@@ -392,8 +416,9 @@ export function calculateMaterialRequirements(
     }
     // PR-226: rowBasis와 무관하게(계산값을 적용했어도) 단위가 맞는 작지 수량이 있으면
     // "대조용" 합계에 누적한다 — 이게 있어야 계산값을 적용한 행도 작지 값과 비교해
-    // mismatch를 표시할 수 있다.
-    if (unitMatches) {
+    // mismatch를 표시할 수 있다. PR-231: 수동 지정 행은 이 대조에서 완전히 빠진다(경고
+    // 대상이 아니다 — 작지 값이 같이 있어도 비교하지 않는다).
+    if (unitMatches && rowBasis !== 'manual') {
       cur.sheetPresentCount += 1;
       cur.sheetPresentSum = round4(cur.sheetPresentSum + sheetQtyRaw);
       // 계산값을 적용한 행(color-qty/computed)은 "그 행 자신의 계산값"과 작지 값을
@@ -485,7 +510,8 @@ export function calculateMaterialRequirements(
       row.sheetQtyLooksLikeTotalQtyMisread = sheetQtyLooksLikeTotalQtyMisread(row.sheetQty, target, row.mismatch, row.quantityUnitKind);
       row.extremeConsumptionMismatch = isExtremeConsumptionMismatch(row.computedQty, row.sheetQty);
     }
-    const usedBases: Array<'sheet' | 'color-qty' | 'computed'> = [];
+    const usedBases: Array<'sheet' | 'color-qty' | 'computed' | 'manual'> = [];
+    if (row.manualBasisCount > 0) usedBases.push('manual');
     if (row.sheetAppliedCount > 0) usedBases.push('sheet');
     if (row.colorQtyBasisCount > 0) usedBases.push('color-qty');
     if (row.computedBasisCount > 0) usedBases.push('computed');
@@ -496,10 +522,11 @@ export function calculateMaterialRequirements(
     } else {
       row.basis = usedBases.length === 1 ? usedBases[0] : 'mixed';
     }
+    row.hasManualOverride = row.manualBasisCount > 0;
 
     const {
       colorMeters: _colorMeters, subtype: _subtype, subtypeMixed: _subtypeMixed, unit: _unit, materialName: _materialName, reviewed: _reviewed,
-      sheetAppliedCount: _sheetAppliedCount, computedBasisCount: _computedBasisCount,
+      sheetAppliedCount: _sheetAppliedCount, computedBasisCount: _computedBasisCount, manualBasisCount: _manualBasisCount,
       sheetPresentCount: _sheetPresentCount, sheetPresentSum: _sheetPresentSum,
       computedVsSheetMismatch: _computedVsSheetMismatch,
       colorQtyBasisCount: _colorQtyBasisCount, unknownBasisCount: _unknownBasisCount,

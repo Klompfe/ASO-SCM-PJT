@@ -11,7 +11,10 @@
 // (sheetQty)은 더 이상 1순위가 아니다: 계산값과 함께 있으면 비교해 ±5% 넘게
 // 다르면 mismatch만 표시하고(적용은 계산값), 계산값이 전혀 없을 때만(색상이
 // 수량표에 없음) 작지 값을 적용한다. material-requirements.util.ts와 같은 순서.
-export type AppliedQuantityBasis = 'sheet' | 'color-qty' | 'computed' | 'unknown';
+// PR-231(사용자 확정): "수동 지정 값 > 계산값 > 작지 값 > 근거 없음" — 수동 지정이
+// 있으면 색상/작지 여부와 무관하게 항상 그 값을 쓰고, 불일치/오독/비정상 요척 경고는
+// 내지 않는다. 서버 material-requirements.util.ts와 같은 우선순위(row 단위).
+export type AppliedQuantityBasis = 'sheet' | 'color-qty' | 'computed' | 'manual' | 'unknown';
 
 export interface AppliedQuantityResult {
   basis: AppliedQuantityBasis;
@@ -36,6 +39,9 @@ export interface AppliedQuantityResult {
   // PR-228: 계산값과 작지 값의 비율이 10배를 넘거나 1/10 미만이면 true — 기존 ±5%
   // mismatch와 별도인 강한 경고(요척 자체가 틀렸을 가능성).
   extremeConsumptionMismatch: boolean;
+  // PR-231: 수동 지정 사유(선택) — title에 "계산값 N · 사유"로 보여줄 때 쓴다. basis가
+  // 'manual'이 아니면 항상 null.
+  manualNote: string | null;
 }
 
 const normUnit = (u: string | null | undefined): string => (u ?? '').trim().toUpperCase();
@@ -108,6 +114,9 @@ export function resolveAppliedQuantity(opts: {
   itemUnit: string | null;
   colorCode: string | null;
   colorQtyMap: Map<string, number>;
+  // PR-231: 사람이 이 행에 직접 지정한 총 필요수량 — 있으면 항상 1순위.
+  manualRequiredQty?: number | null;
+  manualRequiredQtyNote?: string | null;
 }): AppliedQuantityResult {
   const perUnit = Number(opts.consumption) || 0;
   const target = Number(opts.totalQty) || 0;
@@ -124,10 +133,16 @@ export function resolveAppliedQuantity(opts: {
   const isCommonColor = !colorKeyNorm || colorKeyNorm === FREE_COLOR_KEY || colorKeyNorm === NA_COLOR_KEY;
   const colorQtyValue = !isCommonColor ? opts.colorQtyMap.get(colorKeyNorm) : undefined;
 
+  const hasManualQty = opts.manualRequiredQty != null && Number.isFinite(Number(opts.manualRequiredQty));
+
   let basis: AppliedQuantityBasis;
   let qty: number;
   let formula: string;
-  if (isCommonColor) {
+  if (hasManualQty) {
+    basis = 'manual';
+    qty = Number(opts.manualRequiredQty);
+    formula = `수동 지정: ${qty.toLocaleString('ko-KR')}`;
+  } else if (isCommonColor) {
     basis = 'computed';
     qty = computedRowQty;
     formula = `기획수량 ${target.toLocaleString('ko-KR')} × 요척 ${perUnit} = ${computedRowQty.toLocaleString('ko-KR')}`;
@@ -150,11 +165,13 @@ export function resolveAppliedQuantity(opts: {
   // 없으므로, 백엔드(material-requirements.util.ts)가 그런 행에 쓰는 것과 같은
   // 폴백 비교(총수량×요척 참고값 vs 작지 값)를 그대로 쓴다 — PR-220부터 있던
   // "참고 사실 확인"과 같은 취지.
+  // PR-231: 수동 지정 행은 불일치/오독/비정상 요척 경고를 전혀 내지 않는다(경고 대상이
+  // 아니다 — 작지 값이 같이 있어도 비교하지 않는다).
   let mismatch = false;
-  if ((basis === 'computed' || basis === 'color-qty') && sheetQty != null) {
+  if (!hasManualQty && (basis === 'computed' || basis === 'color-qty') && sheetQty != null) {
     const diffPct = qty !== 0 ? Math.abs(qty - sheetQty) / Math.abs(qty) : (sheetQty !== 0 ? 1 : 0);
     mismatch = diffPct > SHEET_QTY_MISMATCH_THRESHOLD_PCT;
-  } else if (basis === 'sheet') {
+  } else if (!hasManualQty && basis === 'sheet') {
     const diffPct = computedRowQty !== 0 ? Math.abs(computedRowQty - sheetQtyRaw) / Math.abs(computedRowQty) : 0;
     mismatch = diffPct > SHEET_QTY_MISMATCH_THRESHOLD_PCT;
   }
@@ -162,9 +179,10 @@ export function resolveAppliedQuantity(opts: {
   const quantityUnitKind = classifyQuantityUnit(opts.itemUnit);
   return {
     basis, qty, computedQty: computedRowQty, sheetQty, mismatch, formula,
-    sheetQtyLooksLikeTotalQtyMisread: sheetQtyLooksLikeTotalQtyMisread(sheetQty, target || null, mismatch, quantityUnitKind),
+    sheetQtyLooksLikeTotalQtyMisread: !hasManualQty && sheetQtyLooksLikeTotalQtyMisread(sheetQty, target || null, mismatch, quantityUnitKind),
     quantityUnitKind,
-    extremeConsumptionMismatch: isExtremeConsumptionMismatch(computedRowQty || null, sheetQty),
+    extremeConsumptionMismatch: !hasManualQty && isExtremeConsumptionMismatch(computedRowQty || null, sheetQty),
+    manualNote: hasManualQty ? (opts.manualRequiredQtyNote ?? null) : null,
   };
 }
 
@@ -182,5 +200,6 @@ export const APPLIED_BASIS_LABEL: Record<AppliedQuantityBasis, string> = {
   sheet: '작지',
   'color-qty': '색상수량표',
   computed: '계산',
+  manual: '수동',
   unknown: '',
 };

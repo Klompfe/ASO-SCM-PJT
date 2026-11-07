@@ -23,7 +23,7 @@ import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.ser
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { formatBomItemQty } from '../utils/materialRequirementDisplay';
 import { filterBomRows, distinctNonEmptySorted } from '../utils/bomLookupFilter';
-import { buildColorQtyMap, resolveAppliedQuantity, APPLIED_BASIS_LABEL, type AppliedQuantityResult } from '../utils/appliedQuantity';
+import { buildColorQtyMap, resolveAppliedQuantity, APPLIED_BASIS_LABEL, isExtremeConsumptionMismatch, type AppliedQuantityResult } from '../utils/appliedQuantity';
 import { UNIT_CHANGE_CONFIRM_TEXT, isUnitChanged, resolveLiveQtyReason, describeLiveQtyReason, describeSnapshotNote } from '../utils/bomQtyReason';
 
 // PR-175: 실/테이프 통합 드롭다운 값을 서버 필드(threadType/tapeType) 중 하나로 나눈다.
@@ -122,7 +122,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
   // PR-227: unit은 BomItem이 아니라 자재(Item) 마스터 값이다 — 저장 시 PATCH /boms/items/:id
   // 가 아니라 기존 PATCH /items/:id로 따로 보낸다(아래 handleUpdateBomItem 참고).
-  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string; unit: string }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '' });
+  // PR-231: manualRequiredQty는 문자열 입력칸 그대로(비우면 "해제" 요청) — unit은 기존.
+  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string; unit: string; manualRequiredQty: string; manualRequiredQtyNote: string }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '' });
   // PR-099: "라벨류 기본 세트 추가" 버튼 처리 중 표시.
   const [addingLabelSet, setAddingLabelSet] = useState(false);
   // PR-197: BOM 행 삭제/자재 교체 — 사람이 버튼을 눌러야만 동작(자동 정리 없음).
@@ -356,6 +357,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       composition: row.composition || '', hsCode: row.hsCode || '', threadType: row.threadType || row.tapeType || '',
       consumption: String(row.consumption ?? ''), spec: row.spec || '', colorCode: row.colorCode || '', category: row.category || '',
       unit: row.material?.unit || '',
+      manualRequiredQty: row.manualRequiredQty != null ? String(row.manualRequiredQty) : '',
+      manualRequiredQtyNote: row.manualRequiredQtyNote || '',
     });
   };
 
@@ -382,6 +385,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       itemUnit: it.material?.unit ?? null,
       colorCode: it.colorCode,
       colorQtyMap: selectedStyleColorQtyMap,
+      // PR-231: 수동 지정 값이 있으면 항상 1순위로 적용된다(resolveAppliedQuantity 내부 규칙).
+      manualRequiredQty: it.manualRequiredQty ?? null,
+      manualRequiredQtyNote: it.manualRequiredQtyNote ?? null,
     });
 
   // 계산 자체가 안 되는 두 경우(색상별 수량표/작지 값 둘 다 근거 없음, 또는 스타일
@@ -407,9 +413,20 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
     const display = formatBomItemQty(applied.qty, bomItemFormatOpts(it), packagingRules);
     const snapshotNote = reason ? null : bomItemSnapshotNote(it, display.text);
     const basisLabel = APPLIED_BASIS_LABEL[applied.basis];
+    // PR-231: 수동 지정 행은 주 값 옆에 "수동" 배지를 보여준다 — title에 계산값(참고)·
+    // 지정 시각·사유를 모아 둔다.
+    const manualTitleParts: string[] = [];
+    if (applied.basis === 'manual') {
+      manualTitleParts.push(`계산값(참고): ${fmtBomQty(applied.computedQty)}`);
+      if (it.manualRequiredQtyAt) manualTitleParts.push(`지정 시각: ${new Date(it.manualRequiredQtyAt).toLocaleString('ko-KR')}`);
+      if (applied.manualNote) manualTitleParts.push(`사유: ${applied.manualNote}`);
+    }
     return (
       <>
         {reason ? <span title={reason.title}>{reason.text}</span> : display.text}
+        {applied.basis === 'manual' && (
+          <span className="ml-1 inline-block px-1 rounded bg-purple-100 text-purple-700 text-xs align-middle" title={manualTitleParts.join(' · ')}>수동</span>
+        )}
         {!reason && basisLabel && (
           <span className="block text-xs text-emerald-700" title={applied.formula}>{basisLabel} 기준</span>
         )}
@@ -442,7 +459,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
 
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
-    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '' });
+    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '' });
   };
 
   const handleUpdateBomItem = async (id: number) => {
@@ -468,6 +485,24 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       const ok = window.confirm(UNIT_CHANGE_CONFIRM_TEXT);
       if (!ok) return;
     }
+    // PR-231: 필요수량 직접 지정 — 비우면 해제(null), 값이 있으면 0 이상의 숫자여야 한다.
+    // 계산값과 10배 이상(또는 1/10 이하) 차이 나면 저장 전 한 번 더 확인받는다.
+    const manualInput = editBomItemForm.manualRequiredQty.trim();
+    let manualQty: number | null = null;
+    if (manualInput !== '') {
+      manualQty = Number(manualInput);
+      if (!Number.isFinite(manualQty) || manualQty < 0) {
+        toast.error('필요수량 직접 지정 값은 0 이상의 숫자여야 합니다.');
+        return;
+      }
+      if (original) {
+        const computedQty = bomItemApplied(original).computedQty;
+        if (isExtremeConsumptionMismatch(computedQty, manualQty)) {
+          const ok = window.confirm(`계산값 ${fmtBomQty(computedQty)}과 크게 다릅니다. 직접 지정 값 ${fmtBomQty(manualQty)}으로 저장할까요?`);
+          if (!ok) return;
+        }
+      }
+    }
     try {
       await updateBomItem(id, {
         composition: editBomItemForm.composition,
@@ -477,6 +512,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
         spec: editBomItemForm.spec,
         colorCode: editBomItemForm.colorCode,
         category: editBomItemForm.category,
+        manualRequiredQty: manualQty,
+        manualRequiredQtyNote: editBomItemForm.manualRequiredQtyNote.trim(),
       });
       if (unitChanged && original?.material) {
         await updateItem(original.material.id, { unit: newUnit });
@@ -492,6 +529,22 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       }
     } catch (err: any) {
       toast.error(getErrorMessage(err, '자재명세 항목 수정에 실패했습니다.'));
+    }
+  };
+
+  // PR-231: "수동 지정 해제(계산값 사용)" — 확인창 없이 즉시 저장 요청 + 목록 갱신
+  // (요구사항: 해제는 되돌리기 쉬운 동작이라 확인을 받지 않는다).
+  const handleClearManualRequiredQty = async (id: number) => {
+    try {
+      await updateBomItem(id, { manualRequiredQty: null });
+      toast.success('수동 지정을 해제했습니다 — 계산값을 사용합니다.');
+      if (editingBomItemId === id) cancelEditBomItem();
+      if (selectedStyleNo) {
+        const res = await getBomByStyleNo(selectedStyleNo);
+        setBom(res);
+      }
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '수동 지정 해제에 실패했습니다.'));
     }
   };
 
@@ -1019,7 +1072,43 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                             onChange={(e) => setEditBomItemForm({ ...editBomItemForm, consumption: e.target.value })}
                           />
                         </td>
-                        <td className="px-4 py-2 text-right">{renderBomItemQtyCell(it)}</td>
+                        <td className="px-4 py-2 text-right">
+                          {renderBomItemQtyCell(it)}
+                          {/* PR-231: 필요수량 직접 지정 — 비우면 계산값 사용(placeholder에 지금 계산값 표시). */}
+                          <div className="mt-2 text-left">
+                            <label className="block text-xs text-gray-500">필요수량 직접 지정</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                step="any"
+                                min={0}
+                                className="border rounded px-2 py-1 w-24 text-right"
+                                aria-label="필요수량 직접 지정"
+                                placeholder={`비우면 계산값 ${fmtBomQty(bomItemApplied(it).computedQty)} 사용`}
+                                value={editBomItemForm.manualRequiredQty}
+                                onChange={(e) => setEditBomItemForm({ ...editBomItemForm, manualRequiredQty: e.target.value })}
+                              />
+                              <span className="text-xs text-gray-400">{it.material?.unit}</span>
+                            </div>
+                            <input
+                              className="border rounded px-2 py-1 w-full mt-1 text-xs"
+                              aria-label="필요수량 직접 지정 사유"
+                              placeholder="사유(선택, 200자 이내)"
+                              maxLength={200}
+                              value={editBomItemForm.manualRequiredQtyNote}
+                              onChange={(e) => setEditBomItemForm({ ...editBomItemForm, manualRequiredQtyNote: e.target.value })}
+                            />
+                            {it.manualRequiredQty != null && (
+                              <button
+                                type="button"
+                                className="text-xs text-gray-500 underline mt-1"
+                                onClick={() => handleClearManualRequiredQty(it.id)}
+                              >
+                                수동 지정 해제(계산값 사용)
+                              </button>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-4 py-2">{it.supplier}</td>
                         <td className="px-4 py-2 text-right">{it.unitPrice}</td>
                         <td className="px-4 py-2">{it.remarks}</td>

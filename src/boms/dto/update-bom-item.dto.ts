@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { ThreadType, TapeType } from '../entities/bom-item.entity';
 
 // PR-073: 수출 선적서류(INVOICE/Packing List) 자동생성을 위해 BomItem에 혼용율/HS코드를
@@ -54,4 +54,26 @@ export class UpdateBomItemDto {
   @IsOptional()
   @IsEnum(TapeType)
   tapeType?: TapeType;
+
+  // PR-231: 이 행(자재×색상 행)의 필요수량을 직접 지정 — 있으면 계산값/작지 값보다
+  // 항상 우선 적용된다. null(또는 보내지 않고 생략이 아니라 명시적으로 null)을 보내면
+  // 수동 지정을 해제(세 컬럼 모두 NULL, 계산값으로 돌아감). @IsOptional()은
+  // class-validator 규칙상 undefined와 null 둘 다 아래 검증을 건너뛰므로 null도 그대로
+  // 통과해 서비스가 "해제" 요청으로 처리할 수 있다.
+  @ApiPropertyOptional({
+    example: 499,
+    nullable: true,
+    description: '필요수량 직접 지정(그 행 기준 총 필요수량, 그 자재 단위) — null을 보내면 수동 지정을 해제합니다(계산값 사용).',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1_000_000_000)
+  manualRequiredQty?: number | null;
+
+  @ApiPropertyOptional({ example: '작지 출고량과 실측이 달라 현장 확인 후 직접 입력', maxLength: 200, nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  manualRequiredQtyNote?: string | null;
 }

@@ -22,6 +22,7 @@ export interface BomItemBeforeSnapshot {
   colorCode: string;
   category: string;
   requiredQty: number;
+  manualRequiredQty: number | null | undefined;
 }
 
 export interface DuplicateBomItemView {
@@ -118,6 +119,7 @@ export class BomsService {
       colorCode: bomItem.colorCode,
       category: bomItem.category,
       requiredQty: Number(bomItem.requiredQty),
+      manualRequiredQty: bomItem.manualRequiredQty != null ? Number(bomItem.manualRequiredQty) : null,
     };
 
     if (dto.composition !== undefined) bomItem.composition = dto.composition;
@@ -135,12 +137,34 @@ export class BomsService {
       }
     }
 
+    // PR-231: 필요수량 직접 지정 — null을 보내면 세 컬럼 모두 해제(계산값으로 복귀).
+    // 값을 보내면 그 값 + (같이 왔으면) 사유를 저장하고 지정 시각을 지금으로 기록한다.
+    // 값은 보내지 않고 사유만 보내면(이미 지정된 값은 그대로 두고) 사유만 바꿀 수 있다.
+    if (dto.manualRequiredQty !== undefined) {
+      if (dto.manualRequiredQty === null) {
+        bomItem.manualRequiredQty = null;
+        bomItem.manualRequiredQtyNote = null;
+        bomItem.manualRequiredQtyAt = null;
+      } else {
+        bomItem.manualRequiredQty = Math.round(dto.manualRequiredQty * 1000) / 1000;
+        bomItem.manualRequiredQtyAt = new Date();
+        if (dto.manualRequiredQtyNote !== undefined) bomItem.manualRequiredQtyNote = dto.manualRequiredQtyNote || null;
+      }
+    } else if (dto.manualRequiredQtyNote !== undefined) {
+      bomItem.manualRequiredQtyNote = dto.manualRequiredQtyNote || null;
+    }
+
     const saved = await this.bomItemRepository.save(bomItem);
 
     const after: Record<string, unknown> = { ...saved };
     for (const field of Object.keys(before) as (keyof BomItemBeforeSnapshot)[]) {
       const beforeValue = before[field];
-      const afterValue = field === 'consumption' || field === 'requiredQty' ? Number(after[field]) : after[field];
+      const afterValue =
+        field === 'consumption' || field === 'requiredQty'
+          ? Number(after[field])
+          : field === 'manualRequiredQty'
+            ? (after[field] != null ? Number(after[field]) : null)
+            : after[field];
       if (beforeValue !== afterValue) {
         this.logger.log(`BomItem #${id} ${field}: ${beforeValue} → ${afterValue}`);
       }
@@ -200,6 +224,11 @@ export class BomsService {
 
     const beforeMaterialId = bomItem.material?.id ?? null;
     bomItem.material = newMaterial;
+    // PR-231: 수동 지정 값은 "이 자재(행)"에 대한 사람의 판단이라, 자재 자체가 바뀌면
+    // 더 이상 유효하지 않다 — 이어지지 않는 것(초기화)이 기본(사용자 확정 요구사항).
+    bomItem.manualRequiredQty = null;
+    bomItem.manualRequiredQtyNote = null;
+    bomItem.manualRequiredQtyAt = null;
     const saved = await this.bomItemRepository.save(bomItem);
     this.logger.log(`BomItem #${id} material: ${beforeMaterialId} → ${newMaterial.id}(${newMaterial.name})`);
     return saved;

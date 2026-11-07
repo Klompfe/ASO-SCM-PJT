@@ -69,13 +69,14 @@ export function isUnitChanged(originalUnit: string | null | undefined, newUnit: 
 export type LiveQtyReasonKind = 'needs-color-qty' | 'missing-total-qty';
 
 export interface LiveQtyReasonInput {
-  basis: 'sheet' | 'color-qty' | 'computed' | 'unknown';
+  basis: 'sheet' | 'color-qty' | 'computed' | 'manual' | 'unknown';
   styleTotalQty: number | null;
 }
 
 // basis==='unknown'(색상은 있는데 수량표에도 없고 단위 맞는 작지 값도 없음)이거나,
 // basis==='computed'(공통/무색상)인데 총수량이 아직 없으면(0 이하 포함) 이유를
 // 돌려준다. 'sheet'/'color-qty'는 총수량과 무관하게 이미 값이 있으므로 이유가 없다.
+// PR-231: 'manual'(수동 지정)도 항상 값이 있으므로(사람이 직접 넣음) 이유가 없다.
 export function resolveLiveQtyReason(input: LiveQtyReasonInput): LiveQtyReasonKind | null {
   if (input.basis === 'unknown') return 'needs-color-qty';
   if (input.basis === 'computed' && (input.styleTotalQty == null || input.styleTotalQty <= 0)) {

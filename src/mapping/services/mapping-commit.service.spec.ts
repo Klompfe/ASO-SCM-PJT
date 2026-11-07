@@ -493,6 +493,28 @@ describe('MappingCommitService', () => {
       });
     });
 
+    // PR-231: 재업로드/재저장(매핑 병합)이 수동 지정 값을 지우거나 덮어쓰면 안 된다(PR-212의
+    // MANUAL 보존 원칙과 같음) — 같은 (자재명,색상,규격)으로 다시 커밋해도(sheetQty가 같이
+    // 와서 그 행이 실제로 저장되는 경우 포함) 수동 값은 그대로 유지된다.
+    it('같은 작지를 다시 저장해도(sheetQty 갱신 포함) 기존 행의 수동 지정 값은 지워지지 않는다', async () => {
+      mockQueryRunnerManager.find.mockImplementation((entity: any) =>
+        Promise.resolve(
+          entity === Bom
+            ? [{ ...existingBom, items: [{ ...existingBomItem, manualRequiredQty: 499, manualRequiredQtyNote: '현장 확인', manualRequiredQtyAt: new Date('2026-01-01') }] }]
+            : [],
+        ),
+      );
+      const payload = rebuildPayload();
+      payload.bomItems[0] = { ...payload.bomItems[0], sheetQty: 760, sheetQtyUnit: 'Y' };
+      await service.commit(payload);
+
+      const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+      const bkSave = bomItemSaveCalls.find(([, data]: any) => data.colorCode === 'BK' || data.id === 501);
+      expect(bkSave).toBeDefined();
+      expect(bkSave![1].manualRequiredQty).toBe(499);
+      expect(bkSave![1].manualRequiredQtyNote).toBe('현장 확인');
+    });
+
     it('totalQty가 값을 보내면 새 값으로 갱신된다(factory와 달리 예외 없음)', async () => {
       await service.commit(rebuildPayload());
 
@@ -844,6 +866,29 @@ describe('MappingCommitService', () => {
       const saveCall = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
       expect(saveCall[1].material).toEqual(replacementMaterial);
       expect(saveCall[1]).toEqual(expect.objectContaining({ consumption: 1.72 }));
+    });
+
+    // PR-231: REPLACE(자재 교체)는 수동 지정 값을 이어가지 않는다(초기화가 기본).
+    it('REPLACE — 기존 행에 수동 지정 값이 있었어도 자재 교체 시 초기화된다', async () => {
+      const existing = {
+        ...bomItem(501, 'DARK GREY DG (원단A)', 1.73),
+        manualRequiredQty: 499 as any,
+        manualRequiredQtyNote: '메모',
+        manualRequiredQtyAt: new Date('2026-01-01') as any,
+      };
+      mockQueryRunnerManager.find.mockResolvedValue([bomFixture([existing])]);
+      mockQueryRunnerManager.findOne.mockResolvedValue({ id: 999, name: '원단A' });
+
+      const payload: BomReconcileRequestDto = {
+        styleNo: 'MB73SKM109Z',
+        actions: [{ type: 'REPLACE', bomItemId: 501, newItem: { itemName: '원단A', consumption: 1.72 } as any }],
+      };
+      await service.reconcile(payload);
+
+      const saveCall = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(saveCall[1].manualRequiredQty).toBeNull();
+      expect(saveCall[1].manualRequiredQtyNote).toBeNull();
+      expect(saveCall[1].manualRequiredQtyAt).toBeNull();
     });
 
     it('다른 스타일의 bomItemId가 섞이면 400이고 전체 롤백된다', async () => {

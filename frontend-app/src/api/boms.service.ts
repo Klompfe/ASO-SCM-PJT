@@ -31,6 +31,11 @@ export interface BomItemRow {
   // 추가 — 백엔드 변경 없음). "소요수량"(requiredQty)이 왜 0인지 참고하는 데만 쓴다.
   sheetQty?: number | null;
   sheetQtyUnit?: string | null;
+  // PR-231: 사람이 직접 지정한 이 행의 총 필요수량 — 있으면 계산값/작지 값보다 항상
+  // 우선 적용된다. null이면 지정 안 함.
+  manualRequiredQty?: number | null;
+  manualRequiredQtyNote?: string | null;
+  manualRequiredQtyAt?: string | null;
   material: BomItemMaterial;
 }
 
@@ -52,6 +57,9 @@ export interface UpdateBomItem {
   spec?: string;
   colorCode?: string;
   category?: string;
+  // PR-231: 필요수량 직접 지정 — null을 보내면 수동 지정을 해제한다(계산값 사용).
+  manualRequiredQty?: number | null;
+  manualRequiredQtyNote?: string | null;
 }
 
 // PR-197: updateBomItem() 응답에 변경 전 값(before)이 함께 온다 — "요척 2.7 → 2.9" 같은

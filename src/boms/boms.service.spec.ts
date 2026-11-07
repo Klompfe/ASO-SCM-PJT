@@ -193,6 +193,7 @@ describe('BomsService.updateItem/deleteItem/swapMaterial (PR-197)', () => {
       ({
         id: 10, composition: null, hsCode: null, threadType: null, tapeType: null,
         consumption: 2.7, spec: '53"', colorCode: 'BK', category: '부자재', requiredQty: 2646,
+        manualRequiredQty: null, manualRequiredQtyNote: null, manualRequiredQtyAt: null,
         material: { id: 1, name: '다데<실크>' },
         bom: { id: 1, style: { styleNo: 'ST-1', overview: { totalQty: 980 } } },
         ...overrides,
@@ -226,6 +227,58 @@ describe('BomsService.updateItem/deleteItem/swapMaterial (PR-197)', () => {
     it('존재하지 않는 id면 404', async () => {
       (bomItemRepository.findOne as jest.Mock).mockResolvedValue(null);
       await expect(service.updateItem(999, { spec: 'x' })).rejects.toThrow(NotFoundException);
+    });
+
+    // PR-231: 필요수량 직접 지정(수동) — 우선순위 "수동 > 계산값 > 작지 값 > 근거 없음"의 수정 API 쪽.
+    it('manualRequiredQty를 보내면 값을 저장하고 지정 시각을 기록한다(소수 3자리로 반올림)', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(buildBomItem());
+      const result = await service.updateItem(10, { manualRequiredQty: 499.12345 });
+      expect(Number(result.manualRequiredQty)).toBe(499.123);
+      expect(result.manualRequiredQtyAt).toBeInstanceOf(Date);
+      expect(result.before.manualRequiredQty).toBeNull();
+    });
+
+    it('manualRequiredQty와 manualRequiredQtyNote를 같이 보내면 사유도 저장된다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(buildBomItem());
+      const result = await service.updateItem(10, { manualRequiredQty: 100, manualRequiredQtyNote: '현장 실측값으로 정정' });
+      expect(result.manualRequiredQtyNote).toBe('현장 실측값으로 정정');
+    });
+
+    it('manualRequiredQty에 0을 보내면 유효한 값(진짜 0)으로 저장된다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(buildBomItem());
+      const result = await service.updateItem(10, { manualRequiredQty: 0 });
+      expect(Number(result.manualRequiredQty)).toBe(0);
+      expect(result.manualRequiredQtyAt).toBeInstanceOf(Date);
+    });
+
+    it('manualRequiredQty에 null을 보내면 세 컬럼 모두 해제된다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(
+        buildBomItem({ manualRequiredQty: 499, manualRequiredQtyNote: '메모', manualRequiredQtyAt: new Date('2026-01-01') } as any),
+      );
+      const result = await service.updateItem(10, { manualRequiredQty: null as any });
+      expect(result.manualRequiredQty).toBeNull();
+      expect(result.manualRequiredQtyNote).toBeNull();
+      expect(result.manualRequiredQtyAt).toBeNull();
+    });
+
+    it('manualRequiredQty를 보내지 않고 manualRequiredQtyNote만 보내면 값은 그대로, 사유만 바뀐다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(
+        buildBomItem({ manualRequiredQty: 499, manualRequiredQtyNote: '기존 사유' } as any),
+      );
+      const result = await service.updateItem(10, { manualRequiredQtyNote: '새 사유' });
+      expect(Number(result.manualRequiredQty)).toBe(499);
+      expect(result.manualRequiredQtyNote).toBe('새 사유');
+    });
+
+    it('manualRequiredQty를 보내지 않으면(undefined) 기존 수동 값/사유/시각을 그대로 둔다', async () => {
+      const at = new Date('2026-01-01');
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(
+        buildBomItem({ manualRequiredQty: 499, manualRequiredQtyNote: '메모', manualRequiredQtyAt: at } as any),
+      );
+      const result = await service.updateItem(10, { spec: '55"' });
+      expect(Number(result.manualRequiredQty)).toBe(499);
+      expect(result.manualRequiredQtyNote).toBe('메모');
+      expect(result.manualRequiredQtyAt).toBe(at);
     });
   });
 
@@ -288,6 +341,21 @@ describe('BomsService.updateItem/deleteItem/swapMaterial (PR-197)', () => {
     it('존재하지 않는 BomItem id면 404', async () => {
       (bomItemRepository.findOne as jest.Mock).mockResolvedValue(null);
       await expect(service.swapMaterial(999, { materialId: 1 })).rejects.toThrow(NotFoundException);
+    });
+
+    // PR-231: 자재 교체는 수동 지정 값을 이어가지 않는다(초기화가 기본).
+    it('자재를 교체하면 수동 지정 값(있었다면)이 초기화된다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue({
+        id: 10, material: { id: 1, name: '스판사' },
+        manualRequiredQty: 499, manualRequiredQtyNote: '메모', manualRequiredQtyAt: new Date('2026-01-01'),
+      } as any);
+      (itemRepository.findOne as jest.Mock).mockResolvedValue({ id: 2, name: '스쿠이사' });
+
+      const result = await service.swapMaterial(10, { materialId: 2 });
+
+      expect(result.manualRequiredQty).toBeNull();
+      expect(result.manualRequiredQtyNote).toBeNull();
+      expect(result.manualRequiredQtyAt).toBeNull();
     });
   });
 });

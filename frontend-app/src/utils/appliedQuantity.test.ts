@@ -302,3 +302,68 @@ describe('resolveAppliedQuantity — 개수 품목 오경고 방지 + 비정상 
     expect(r.quantityUnitKind).toBe('unknown');
   });
 });
+
+describe('resolveAppliedQuantity (PR-231) — 필요수량 직접 지정(수동), 우선순위 "수동 > 계산값 > 작지 값 > 근거 없음"', () => {
+  it('수동 값이 있으면 계산값/작지 값과 무관하게 그 값을 쓰고 basis는 manual, 경고는 모두 false다', () => {
+    const r = resolveAppliedQuantity({
+      consumption: 2, totalQty: 100, sheetQty: 180, sheetQtyUnit: 'YD', itemUnit: 'YD',
+      colorCode: '', colorQtyMap: new Map(), manualRequiredQty: 50,
+    });
+    expect(r.basis).toBe('manual');
+    expect(r.qty).toBe(50);
+    expect(r.computedQty).toBe(200); // 참고용 계산값은 그대로.
+    expect(r.mismatch).toBe(false);
+    expect(r.sheetQtyLooksLikeTotalQtyMisread).toBe(false);
+    expect(r.extremeConsumptionMismatch).toBe(false);
+  });
+
+  it('수동 값이 0이면 유효한 값(진짜 0)으로 적용된다', () => {
+    const r = resolveAppliedQuantity({
+      consumption: 2, totalQty: 100, sheetQty: null, sheetQtyUnit: null, itemUnit: 'YD',
+      colorCode: '', colorQtyMap: new Map(), manualRequiredQty: 0,
+    });
+    expect(r.basis).toBe('manual');
+    expect(r.qty).toBe(0);
+  });
+
+  it('manualRequiredQty가 null/undefined이면 기존(PR-226/228) 결과와 완전히 같다 — 회귀 확인', () => {
+    const base = { consumption: 1.52, totalQty: 499, sheetQty: 499, sheetQtyUnit: 'YD', itemUnit: 'YD', colorCode: '', colorQtyMap: new Map() };
+    const withoutField = resolveAppliedQuantity(base);
+    const withNull = resolveAppliedQuantity({ ...base, manualRequiredQty: null });
+    const withUndefined = resolveAppliedQuantity({ ...base, manualRequiredQty: undefined });
+    expect(withNull).toEqual(withoutField);
+    expect(withUndefined).toEqual(withoutField);
+    expect(withoutField.basis).toBe('computed');
+  });
+
+  it('색상이 있고 근거가 없어 unknown이었던 행도 수동 지정하면 해제된다', () => {
+    const r = resolveAppliedQuantity({
+      consumption: 0.26, totalQty: 3000, sheetQty: null, sheetQtyUnit: null, itemUnit: 'yd',
+      colorCode: 'KH', colorQtyMap: new Map(), manualRequiredQty: 120,
+    });
+    expect(r.basis).toBe('manual');
+    expect(r.qty).toBe(120);
+  });
+
+  it('사유(manualRequiredQtyNote)는 수동일 때만 manualNote로 노출되고, 다른 basis에서는 항상 null이다', () => {
+    const manual = resolveAppliedQuantity({
+      consumption: 1, totalQty: 100, sheetQty: null, sheetQtyUnit: null, itemUnit: 'EA',
+      colorCode: '', colorQtyMap: new Map(), manualRequiredQty: 50, manualRequiredQtyNote: '현장 확인',
+    });
+    expect(manual.manualNote).toBe('현장 확인');
+
+    const computed = resolveAppliedQuantity({
+      consumption: 1, totalQty: 100, sheetQty: null, sheetQtyUnit: null, itemUnit: 'EA',
+      colorCode: '', colorQtyMap: new Map(),
+    });
+    expect(computed.manualNote).toBeNull();
+  });
+
+  it('실/테이프(포장단위 환산)는 이 함수의 책임이 아니지만, qty(적용값)는 수동 값 그대로 넘겨 formatBomItemQty 등 후속 유틸이 그대로 쓸 수 있다', () => {
+    const r = resolveAppliedQuantity({
+      consumption: 1, totalQty: 100, sheetQty: null, sheetQtyUnit: null, itemUnit: 'EA',
+      colorCode: '', colorQtyMap: new Map(), manualRequiredQty: 5100,
+    });
+    expect(r.qty).toBe(5100);
+  });
+});

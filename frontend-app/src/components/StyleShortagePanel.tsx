@@ -72,6 +72,12 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                 {r.basis === 'mixed' && (
                   <span className="block text-xs text-emerald-700" data-testid={`basis-mixed-${r.itemId}`}>일부 작지 수량 기준</span>
                 )}
+                {/* PR-231: 수동 지정 — basis가 'manual'(전부 수동)이든 'mixed'(일부만 수동)든
+                    hasManualOverride만 보고 배지를 보여준다(불일치/오독/비정상 요척 경고는
+                    수동 지정 행이 집계에서 빠지므로 자연히 뜨지 않는다 — material-requirements.util.ts 참고). */}
+                {r.hasManualOverride && (
+                  <span className="block text-xs px-1 rounded bg-purple-100 text-purple-700 w-fit" data-testid={`manual-override-${r.itemId}`}>수동 지정 포함</span>
+                )}
                 {r.mismatch && (
                   <span className="block text-xs text-amber-700" data-testid={`sheet-mismatch-${r.itemId}`}>
                     ⚠ 작지 수량({fmt(r.sheetQty ?? 0)})과 계산값(요척×기획수량, {fmt(r.computedQty ?? 0)})이 달라 확인이 필요합니다

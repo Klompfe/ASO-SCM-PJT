@@ -994,3 +994,98 @@ describe('calculateMaterialRequirements — 개수 품목 오경고 방지 + 비
     expect(row.quantityUnitKind).toBe('unknown');
   });
 });
+
+describe('PR-231: 필요수량 직접 지정(수동) — 우선순위 "수동 > 계산값 > 작지 값 > 근거 없음"', () => {
+  const matUnit = (id: number, name: string, unit: string) => ({ id, code: `M${id}`, name, unit });
+
+  it('수동 값이 있으면 계산값/작지 값과 무관하게 그 값을 쓰고 basis는 manual, 경고는 없다', () => {
+    const [row] = calculateMaterialRequirements(
+      100,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 2, category: '겉감', colorCode: '', sheetQty: 180, sheetQtyUnit: 'YD', manualRequiredQty: 50 }],
+      new Map(),
+    );
+    // 계산값은 100×2=200, 작지는 180(둘 다 50과 10배 이상 차이) — 그래도 적용값은 50.
+    expect(row.requiredQty).toBe(50);
+    expect(row.basis).toBe('manual');
+    expect(row.hasManualOverride).toBe(true);
+    expect(row.computedQty).toBe(200); // 참고용 계산값은 그대로 노출된다.
+    expect(row.mismatch).toBeUndefined();
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBeUndefined();
+    expect(row.extremeConsumptionMismatch).toBeUndefined();
+  });
+
+  it('수동 값이 0이면 유효한 값으로 적용된다(진짜 0 소요)', () => {
+    const [row] = calculateMaterialRequirements(
+      100,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 2, category: '겉감', colorCode: '', manualRequiredQty: 0 }],
+      new Map(),
+    );
+    expect(row.requiredQty).toBe(0);
+    expect(row.basis).toBe('manual');
+    expect(row.hasManualOverride).toBe(true);
+  });
+
+  it('수동 값이 없으면(undefined/null) 기존(PR-226/228) 결과와 완전히 같다 — 회귀 확인', () => {
+    const withManualUndefined = calculateMaterialRequirements(
+      499,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1.52, category: '겉감', colorCode: '', sheetQty: 499, sheetQtyUnit: 'YD' }],
+      new Map(),
+    );
+    const withManualNull = calculateMaterialRequirements(
+      499,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1.52, category: '겉감', colorCode: '', sheetQty: 499, sheetQtyUnit: 'YD', manualRequiredQty: null }],
+      new Map(),
+    );
+    expect(withManualNull).toEqual(withManualUndefined);
+    expect(withManualUndefined[0].basis).toBe('computed');
+    expect(withManualUndefined[0].sheetQtyLooksLikeTotalQtyMisread).toBe(true);
+  });
+
+  it('색상이 있고 수량표/작지 둘 다 없어 needsColorQty였던 행도 수동 지정하면 해제된다', () => {
+    const noManual = calculateMaterialRequirements(
+      100,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1, category: '겉감', colorCode: 'BLUE' }],
+      new Map(),
+    );
+    expect(noManual[0].needsColorQty).toBe(true);
+
+    const [row] = calculateMaterialRequirements(
+      100,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1, category: '겉감', colorCode: 'BLUE', manualRequiredQty: 120 }],
+      new Map(),
+    );
+    expect(row.needsColorQty).toBe(false);
+    expect(row.requiredQty).toBe(120);
+    expect(row.basis).toBe('manual');
+  });
+
+  it('실/테이프 자재도 수동 값 기준으로 포장단위(N콘/N롤) 환산이 적용된다', () => {
+    const coaRule = { materialSubType: 'COA_SA', displayName: '코아사', packagingUnitLabel: '콘', unitLengthM: 2500 };
+    const [row] = calculateMaterialRequirements(
+      1,
+      [{ id: 1, material: matUnit(10, '코아사', 'EA'), consumption: 1, category: '실', colorCode: '', threadType: 'COA_SA', manualRequiredQty: 5100 }],
+      new Map(),
+      { packagingRules: [coaRule] },
+    );
+    expect(row.requiredQty).toBe(5100);
+    expect(row.basis).toBe('manual');
+    expect(row.packaging?.packagingUnitLabel).toBe('콘');
+    expect(row.packaging?.requiredPackages).toBe(3); // ceil(5100/2500) = 3
+  });
+
+  it('같은 자재에 수동 행과 계산 행이 섞여 있으면 basis는 mixed이지만 hasManualOverride는 true다', () => {
+    const [row] = calculateMaterialRequirements(
+      100,
+      [
+        { id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1, category: '겉감', colorCode: '', manualRequiredQty: 30 },
+        { id: 2, material: matUnit(10, '겉감', 'YD'), consumption: 1, category: '겉감', colorCode: 'RED', manualRequiredQty: null },
+      ],
+      new Map(),
+    );
+    // 2번 행은 색상 있는데 수량표가 없어 unknown(근거 없음) — needsColorQty로 빠진다.
+    expect(row.needsColorQty).toBe(true);
+    expect(row.basis).toBe('mixed');
+    expect(row.hasManualOverride).toBe(true);
+    expect(row.requiredQty).toBe(30); // unknown 행은 합계에 더해지지 않는다(기존 규칙 그대로).
+  });
+});
