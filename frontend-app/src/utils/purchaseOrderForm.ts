@@ -191,6 +191,48 @@ export function isQuantityFilled(input: string): boolean {
   return input.trim() !== '' && Number.isFinite(n) && n > 0;
 }
 
+// PR-230: 자재명세(BOM)/부족자재 표에서 "이 자재로 발주하기"로 넘어올 때는 스타일이
+// 연결되는 것이 당연하다(단가 필수 판단·스타일별 집계·발주 이력이 연결된 스타일을
+// 기준으로 동작) — 연결을 기본으로 보여주고, 끊는 것(연결 해제)은 사용자의 명시적
+// 선택으로 안내한다. "저장된 값 0(다시 저장 필요)" 류처럼 틀린 유도 문구를 쓰지 않도록
+// 문구를 한 곳(이 함수)에 모아 둔다.
+export interface StyleLinkDisplayInput {
+  styleNo: string | null;
+  styleName?: string | null;
+  // 사용자가 "연결 해제"(또는 필드의 X)를 눌러 명시적으로 끊었는지 — 끊은 적 없이
+  // 그냥 스타일 컨텍스트 없이 들어온 경우(직접 입력)와 문구를 다르게 보여준다.
+  explicitlyCleared: boolean;
+}
+export interface StyleLinkDisplay {
+  connected: boolean;
+  // 연결된 상태에서 눈에 띄게 보여줄 라벨(스타일번호 + 있으면 스타일명). 미연결이면 null.
+  connectedLabel: string | null;
+  // 스타일 검색 필드의 placeholder — 연결 가능함을 알린다("기본"이라는 말은 쓰지 않음).
+  placeholder: string;
+  // 명시적으로 해제했을 때만 보여줄 안내. 처음부터 컨텍스트가 없던 경우는 null(조용히 placeholder만).
+  disconnectedNote: string | null;
+}
+
+const STYLE_LINK_PLACEHOLDER = '스타일 미연결 (스타일을 선택하면 연결됩니다)';
+const STYLE_LINK_DISCONNECTED_NOTE = '스타일 미연결 — 스타일별 집계에 포함되지 않습니다';
+
+export function resolveStyleLinkDisplay(input: StyleLinkDisplayInput): StyleLinkDisplay {
+  if (input.styleNo) {
+    return {
+      connected: true,
+      connectedLabel: `연결됨: ${input.styleNo}${input.styleName ? ` (${input.styleName})` : ''}`,
+      placeholder: STYLE_LINK_PLACEHOLDER,
+      disconnectedNote: null,
+    };
+  }
+  return {
+    connected: false,
+    connectedLabel: null,
+    placeholder: STYLE_LINK_PLACEHOLDER,
+    disconnectedNote: input.explicitlyCleared ? STYLE_LINK_DISCONNECTED_NOTE : null,
+  };
+}
+
 // 일괄발주 행을 커밋해도 되는지: 공급업체·정수 수량(1 이상)이 있어야 하고, 단가는
 // unitPriceRequired가 true일 때만 필요(0 초과)하다.
 // MERGE-2: PR-173이 CMT 발주를 단가 없이 허용하면서, 일괄발주에서만 CMT 건이 단가

@@ -26,7 +26,8 @@ import { SearchSelectField } from './SearchSelectField';
 import { StyleShortagePanel } from './StyleShortagePanel';
 import {
   pickLatestOrderDefaults, resolveAutofill, isUnitPriceRequired,
-  sumPurchaseOrderLines, suggestStyleLinkedQuantity, suggestUnlinkedQuantity, trackBadgeLabel, isQuantityFilled, type SupplierRef,
+  sumPurchaseOrderLines, suggestStyleLinkedQuantity, suggestUnlinkedQuantity, trackBadgeLabel, isQuantityFilled,
+  resolveStyleLinkDisplay, type SupplierRef,
 } from '../utils/purchaseOrderForm';
 import type { MaterialRequirementRow } from '../utils/bomRequirementReport';
 import { looksLikeThreadOrTape, suggestThreadTapeByKeyword, ceilWithEpsilon } from '../utils/materialRequirementDisplay';
@@ -50,9 +51,13 @@ interface PurchaseOrdersManagerProps {
   // 부족분 표를 바로 열고(기존 styleSearch 경로 재사용) 발주 목록도 그 스타일로 필터한다.
   prefillStyleNo?: string | null;
   onStylePrefillConsumed?: () => void;
+  // PR-230: 자재·BOM 조회의 "발주하기"처럼 특정 품목과 함께 그 스타일도 아는 진입 —
+  // prefillStyleNo(발주 목록도 그 스타일로 필터)와 달리 [B]만 연결하고 목록 필터는
+  // 건드리지 않는다. prefillItemId와 같은 effect에서 함께 소비된다.
+  prefillItemStyleNo?: string | null;
 }
 
-export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ prefillItemId, onPrefillConsumed, prefillStyleNo, onStylePrefillConsumed }) => {
+export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ prefillItemId, onPrefillConsumed, prefillStyleNo, onStylePrefillConsumed, prefillItemStyleNo }) => {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +71,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const [item, setItem] = useState<ItemRef | null>(null);
   // PR-185 A: 발주 폼의 스타일 연결(선택) — 고르면 그 스타일 BOM의 자재만 고를 수 있다("스타일 연결 트랙").
   const [styleSearch, setStyleSearch] = useState<StyleOption | null>(null);
+  // PR-230: 사용자가 "연결 해제"(또는 필드의 X)를 눌러 명시적으로 끊었는지 — 끊은 뒤에는
+  // "스타일 미연결 — 스타일별 집계에 포함되지 않습니다" 안내를 보여준다. 다시 스타일을
+  // 고르면(수동/자동 모두) false로 돌아간다.
+  const [styleLinkExplicitlyCleared, setStyleLinkExplicitlyCleared] = useState(false);
   const [styleMaterialRows, setStyleMaterialRows] = useState<MaterialRequirementRow[]>([]);
   const [styleRowsLoading, setStyleRowsLoading] = useState(false);
   // PR-185 C: 스타일 미연결 트랙에서 사람이 고르는 브랜드(기본 "선택 안 함" = 미도 단가표만).
@@ -179,6 +188,12 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     return list.slice(0, 30);
   }, [itemCategorySearchId]);
   const categoryFilter = categoryFilterState(item?.categoryId, byItemCategory);
+  // PR-230: [B]의 스타일 연결 라벨/안내 문구 — resolveStyleLinkDisplay(순수 함수, 테스트됨)에 위임.
+  const styleLinkDisplay = resolveStyleLinkDisplay({
+    styleNo: styleSearch?.styleNo ?? null,
+    styleName: styleSearch?.overview?.styleName ?? null,
+    explicitlyCleared: styleLinkExplicitlyCleared,
+  });
   const searchRawMaterials = useCallback(async (keyword: string): Promise<ItemRef[]> => {
     const res = await getItems({ keyword: keyword || undefined, type: 'RAW_MATERIAL', limit: 20 });
     return Array.isArray(res) ? res : (res?.items ?? []);
@@ -301,10 +316,12 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     return () => { cancelled = true; };
   }, [styleSearch]);
 
-  const handlePickMaterial = (row: MaterialRequirementRow, styleNo?: string) => {
+  const handlePickMaterial = (row: MaterialRequirementRow, styleNo?: string, styleName?: string | null) => {
     // PR-185: 소요량 화면에서 "이 자재로 발주하기"를 누르면 그 스타일도 함께 연결한다.
+    // PR-230: 매번 누르는 명시적 클릭이므로, 이전에 "연결 해제"를 눌렀어도 다시 연결한다.
     if (styleNo) {
-      setStyleSearch({ styleNo });
+      setStyleSearch({ styleNo, overview: styleName ? { styleName } : null });
+      setStyleLinkExplicitlyCleared(false);
       setStyleMaterialRows([row]);
       selectStyleMaterial({ id: row.itemId, name: row.itemName, code: row.itemCode }, row, styleNo);
     } else {
@@ -335,15 +352,22 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   }, [loadPendingOrders, panelRefresh]);
 
   // Items(자재명세) 화면에서 "발주하기"로 넘어온 경우, 해당 품목을 폼에 미리 선택해 둔다.
+  // PR-230: 그 화면은 항상 특정 스타일의 BOM을 보는 중이므로, 같이 넘어온 styleNo가
+  // 있으면 [B]의 스타일 연결도 그 스타일로 자동 설정한다(명시적 해제 전까지 유지).
   useEffect(() => {
     if (prefillItemId) {
+      const styleNo = prefillItemStyleNo || undefined;
+      if (styleNo) {
+        setStyleSearch({ styleNo });
+        setStyleLinkExplicitlyCleared(false);
+      }
       getItem(prefillItemId)
-        .then((it) => selectItem({ id: it.id, name: it.name, code: it.code }))
+        .then((it) => selectItem({ id: it.id, name: it.name, code: it.code }, styleNo ? { styleNo } : undefined))
         .catch((err) => setError(getErrorMessage(err, '품목 정보를 불러오지 못했습니다.')));
       onPrefillConsumed?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillItemId, onPrefillConsumed]);
+  }, [prefillItemId, prefillItemStyleNo, onPrefillConsumed]);
 
   // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"로 넘어온 경우 — 그 스타일을
   // styleSearch에 넣어 기존 경로(getStyleRequirements → StyleShortagePanel)를 그대로
@@ -557,16 +581,30 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             <label className="text-sm text-gray-600 mb-1">스타일 연결(선택)</label>
             <SearchSelectField<StyleOption>
               value={styleSearch}
-              onChange={(picked) => { setStyleSearch(picked); setItem(null); setQuantityInput(''); }}
+              onChange={(picked) => { setStyleSearch(picked); setStyleLinkExplicitlyCleared(picked === null); setItem(null); setQuantityInput(''); }}
               search={searchStyles}
               getKey={(s) => s.styleNo}
               getLabel={(s) => s.styleNo}
               ariaLabel="스타일 연결"
-              placeholder="스타일 미연결(기본)"
+              placeholder={styleLinkDisplay.placeholder}
               title="스타일 검색 — 고르면 그 스타일 BOM 자재만 선택할 수 있습니다"
               allowClear
               className="w-56"
             />
+            {styleLinkDisplay.connected ? (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs text-indigo-700 font-medium">{styleLinkDisplay.connectedLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => { setStyleSearch(null); setStyleLinkExplicitlyCleared(true); setItem(null); setQuantityInput(''); }}
+                  className="text-xs text-gray-500 underline hover:text-gray-700"
+                >
+                  연결 해제
+                </button>
+              </div>
+            ) : styleLinkDisplay.disconnectedNote ? (
+              <span className="text-xs text-amber-600 mt-1">{styleLinkDisplay.disconnectedNote}</span>
+            ) : null}
             {styleSearch && <span className="text-xs text-gray-400 mt-1">{styleRowsLoading ? '자재 목록 불러오는 중...' : `${styleMaterialRows.length}종 자재`}</span>}
           </div>
           <div className="flex flex-col" ref={itemFieldRef} tabIndex={-1}>

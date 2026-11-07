@@ -31,7 +31,9 @@ const resolveSubTypePayload = (value: string): { threadType?: ThreadType; tapeTy
   value === 'DADE' || value === 'AMHOL' ? { tapeType: value as TapeType } : { threadType: value as ThreadType };
 
 interface ItemsManagerProps {
-  onOrderItem?: (itemId: number) => void;
+  // PR-230: 이 화면은 항상 특정 스타일의 BOM을 보여주는 중이라, 발주 화면으로
+  // 넘어갈 때 그 스타일도 같이 넘긴다(연결 해제는 발주 화면에서 사용자가 선택).
+  onOrderItem?: (itemId: number, styleNo?: string) => void;
   // 오더관리(수주 등록/오더 목록)에서 "자재명세 보기"를 누르면 넘어오는 styleNo —
   // App.tsx의 poPrefillItemId/StylesManager의 initialStyleNo와 동일한 cross-tab 패턴.
   // 이 값이 오면 검색 없이 바로 그 스타일의 BOM을 연다.
@@ -1185,7 +1187,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                           )}
                           {onOrderItem && it.material?.id && !buildEditableOrderByItem(pendingOrders).get(it.material.id) && (
                             <button
-                              onClick={() => onOrderItem(it.material.id)}
+                              onClick={() => onOrderItem(it.material.id, selectedStyleNo ?? undefined)}
                               className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-blue-700 whitespace-nowrap"
                             >
                               발주하기

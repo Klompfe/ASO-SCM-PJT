@@ -115,6 +115,10 @@ function App() {
   const isManagerOrAdmin = canManageUsers;
   // Items(자재명세) 화면에서 "발주하기"를 누르면 이 값을 채우고 Purchase Orders 탭으로 이동한다.
   const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(null);
+  // PR-230: 자재·BOM 조회는 항상 특정 스타일을 보는 중이라, 품목과 함께 그 스타일도
+  // 넘겨 [B] 발주 입력 칸에 스타일이 기본으로 연결되게 한다(poPrefillItemId와 같은
+  // consume-once 패턴, onPrefillConsumed에서 같이 지운다).
+  const [poPrefillItemStyleNo, setPoPrefillItemStyleNo] = useState<string | null>(null);
   // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"를 누르면 그 스타일번호를
   // 채우고 발주관리 탭으로 이동한다(poPrefillItemId와 동일한 패턴).
   const [poPrefillStyleNo, setPoPrefillStyleNo] = useState<string | null>(null);
@@ -168,8 +172,9 @@ function App() {
   const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import' | 'exportPerformance'>('export');
   const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing' | 'multiStyleBulkOrder' | 'unlinked'>('list');
 
-  const handleOrderItem = (itemId: number) => {
+  const handleOrderItem = (itemId: number, styleNo?: string) => {
     setPoPrefillItemId(itemId);
+    setPoPrefillItemStyleNo(styleNo ?? null);
     setActiveTab('purchaseOrders');
   };
 
@@ -344,7 +349,8 @@ function App() {
             {purchaseOrdersSubTab === 'list' ? (
               <PurchaseOrdersManager
                 prefillItemId={poPrefillItemId}
-                onPrefillConsumed={() => setPoPrefillItemId(null)}
+                prefillItemStyleNo={poPrefillItemStyleNo}
+                onPrefillConsumed={() => { setPoPrefillItemId(null); setPoPrefillItemStyleNo(null); }}
                 prefillStyleNo={poPrefillStyleNo}
                 onStylePrefillConsumed={() => setPoPrefillStyleNo(null)}
               />
