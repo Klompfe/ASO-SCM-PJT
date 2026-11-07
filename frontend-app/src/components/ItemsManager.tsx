@@ -23,8 +23,8 @@ import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.ser
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { formatBomItemQty } from '../utils/materialRequirementDisplay';
 import { filterBomRows, distinctNonEmptySorted } from '../utils/bomLookupFilter';
-import { buildColorQtyMap, resolveAppliedQuantity } from '../utils/appliedQuantity';
-import { resolveZeroQtyReason, describeZeroQtyReason, UNIT_CHANGE_CONFIRM_TEXT, isUnitChanged } from '../utils/bomQtyReason';
+import { buildColorQtyMap, resolveAppliedQuantity, APPLIED_BASIS_LABEL, type AppliedQuantityResult } from '../utils/appliedQuantity';
+import { UNIT_CHANGE_CONFIRM_TEXT, isUnitChanged, resolveLiveQtyReason, describeLiveQtyReason, describeSnapshotNote } from '../utils/bomQtyReason';
 
 // PR-175: 실/테이프 통합 드롭다운 값을 서버 필드(threadType/tapeType) 중 하나로 나눈다.
 const resolveSubTypePayload = (value: string): { threadType?: ThreadType; tapeType?: TapeType } =>
@@ -362,19 +362,18 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   // PR-218: "필요량" 칸의 소수 표시를 BomRequirementReport/StyleShortagePanel과 같은 규칙으로
   // 맞춘다 — threadType/tapeType이 이미 BOM 행에 지정돼 있으므로(computeRawRowPackaging처럼
   // 자재명 추론이 필요 없다) formatBomItemQty에 그대로 넘긴다.
-  const bomItemQtyDisplay = (it: BomItemRow) =>
-    formatBomItemQty(it.requiredQty, { subtype: it.threadType ?? it.tapeType, itemName: it.material?.name, itemUnit: it.material?.unit }, packagingRules);
+  const bomItemFormatOpts = (it: BomItemRow) => ({
+    subtype: it.threadType ?? it.tapeType,
+    itemName: it.material?.name,
+    itemUnit: it.material?.unit,
+  });
 
-  // PR-227: 소요수량이 0일 때 "0" 대신 이유를 보여준다(resolveZeroQtyReason, 보고서 1절) —
-  // 계산 로직은 바꾸지 않고 표시만 바꾼다. 0이 아니면 null(이유 없음).
-  const bomItemZeroReason = (it: BomItemRow) =>
-    describeZeroQtyReason(
-      resolveZeroQtyReason({ consumption: Number(it.consumption) || 0, requiredQty: Number(it.requiredQty) || 0, styleTotalQty: selectedStyleTotalQty }),
-    );
-
-  // PR-227: 저장된 소요수량(스냅샷)과 별개로, PR-226과 같은 규칙으로 지금 다시 계산하면
-  // 어떤 값이 나오는지 참고용으로 보여준다(계산 근거) — 저장/계산 로직에는 영향 없음.
-  const bomItemAppliedQtyFormula = (it: BomItemRow) =>
+  // PR-229: "소요수량"의 주 값을 저장 스냅샷(BomItem.requiredQty, 커밋 시점에 한 번
+  // 저장되고 그 뒤로는 갱신되지 않음 — 원인 규명은 PR-227/보고서 1절)이 아니라, PR-226과
+  // 같은 규칙(resolveAppliedQuantity)으로 지금 다시 계산한 값으로 보여준다. 계산 자체를
+  // 바꾸지 않고(새 공식 없음) 기존 순수 함수(resolveAppliedQuantity, formatBomItemQty)만
+  // 재사용한다.
+  const bomItemApplied = (it: BomItemRow): AppliedQuantityResult =>
     resolveAppliedQuantity({
       consumption: it.consumption,
       totalQty: selectedStyleTotalQty,
@@ -383,7 +382,63 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       itemUnit: it.material?.unit ?? null,
       colorCode: it.colorCode,
       colorQtyMap: selectedStyleColorQtyMap,
-    }).formula;
+    });
+
+  // 계산 자체가 안 되는 두 경우(색상별 수량표/작지 값 둘 다 근거 없음, 또는 스타일
+  // 총수량 미입력)에만 숫자 대신 이유를 보여준다 — 그 외에는 항상 지금 계산한 값.
+  const bomItemLiveReason = (applied: AppliedQuantityResult) =>
+    describeLiveQtyReason(resolveLiveQtyReason({ basis: applied.basis, styleTotalQty: selectedStyleTotalQty }));
+
+  // 저장된 스냅샷은 더 이상 주 값이 아니지만, 지금 계산한 값과 다르면("스냅샷이
+  // 오래됐다"는 뜻) 작은 보조 표시로만 남긴다 — 같으면 표시하지 않는다.
+  const bomItemSnapshotNote = (it: BomItemRow, liveText: string) =>
+    describeSnapshotNote(liveText, formatBomItemQty(it.requiredQty, bomItemFormatOpts(it), packagingRules).text);
+
+  const fmtBomQty = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
+
+  // 자재·BOM 조회 표 "소요수량" 칸 — 수정/보기 모드가 똑같은 내용을 보여주므로 한
+  // 곳에서만 만든다. 계산 불가 이유(reason)가 있으면 그것만 보여주고, 그 외에는 항상
+  // 근거 배지(작지/색상수량표/계산)·불일치·비정상 요척 경고(PR-226/228과 같은 문구)를
+  // 함께 보여준다 — 경고 조건·문구는 StyleShortagePanel.tsx의 같은 경고와 동일하게
+  // 맞춘다(사용자가 화면마다 다른 문구를 보지 않게).
+  const renderBomItemQtyCell = (it: BomItemRow) => {
+    const applied = bomItemApplied(it);
+    const reason = bomItemLiveReason(applied);
+    const display = formatBomItemQty(applied.qty, bomItemFormatOpts(it), packagingRules);
+    const snapshotNote = reason ? null : bomItemSnapshotNote(it, display.text);
+    const basisLabel = APPLIED_BASIS_LABEL[applied.basis];
+    return (
+      <>
+        {reason ? <span title={reason.title}>{reason.text}</span> : display.text}
+        {!reason && basisLabel && (
+          <span className="block text-xs text-emerald-700" title={applied.formula}>{basisLabel} 기준</span>
+        )}
+        {!reason && (display.kind === 'SUBTYPE_NEEDED' || display.kind === 'UNIT_MISMATCH') && (
+          <span className="block text-xs text-amber-700">⚠ {display.warning}</span>
+        )}
+        {!reason && display.kind === 'PACKAGED' && <span className="block text-xs text-gray-400">{display.formula}</span>}
+        {!reason && applied.mismatch && (
+          <span className="block text-xs text-amber-700">
+            ⚠ 작지 수량({fmtBomQty(applied.sheetQty ?? 0)})과 계산값(요척×기획수량, {fmtBomQty(applied.computedQty)})이 달라 확인이 필요합니다
+            {applied.sheetQtyLooksLikeTotalQtyMisread && (
+              <span className="block">
+                작지 값이 총수량과 같습니다 — 출고량 칸이 아닌 수량을 읽었을 수 있습니다
+                {applied.quantityUnitKind === 'unknown' && ' — 단위를 확인해 주세요'}
+              </span>
+            )}
+          </span>
+        )}
+        {!reason && applied.extremeConsumptionMismatch && (
+          <span className="block text-xs text-red-700 font-medium" title="요척(단위소요량)을 확인해 주세요.">
+            ⚠ 요척이 비정상적으로 보입니다(계산값 {fmtBomQty(applied.computedQty)} / 작지 값 {fmtBomQty(applied.sheetQty ?? 0)}) — 요척을 확인해 주세요
+          </span>
+        )}
+        {snapshotNote && (
+          <span className="block text-xs text-gray-400" title="저장 시점 스냅샷(BomItem.requiredQty) — 참고용, 계산에는 쓰이지 않습니다.">{snapshotNote}</span>
+        )}
+      </>
+    );
+  };
 
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
@@ -964,24 +1019,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                             onChange={(e) => setEditBomItemForm({ ...editBomItemForm, consumption: e.target.value })}
                           />
                         </td>
-                        <td className="px-4 py-2 text-right">
-                          {(() => {
-                            const q = bomItemQtyDisplay(it);
-                            const zeroReason = bomItemZeroReason(it);
-                            return (
-                              <>
-                                {zeroReason ? <span title={zeroReason.title}>{zeroReason.text}</span> : q.text}
-                                {(q.kind === 'SUBTYPE_NEEDED' || q.kind === 'UNIT_MISMATCH') && (
-                                  <span className="block text-xs text-amber-700">⚠ {q.warning}</span>
-                                )}
-                                {q.kind === 'PACKAGED' && <span className="block text-xs text-gray-400">{q.formula}</span>}
-                                {/* PR-227: 저장값은 스냅샷이라, PR-226과 같은 규칙으로 지금 계산하면
-                                    어떻게 되는지 참고용으로만 보여준다(값을 바꾸지 않음). */}
-                                <span className="block text-xs text-gray-400">계산 근거(참고): {bomItemAppliedQtyFormula(it)}</span>
-                              </>
-                            );
-                          })()}
-                        </td>
+                        <td className="px-4 py-2 text-right">{renderBomItemQtyCell(it)}</td>
                         <td className="px-4 py-2">{it.supplier}</td>
                         <td className="px-4 py-2 text-right">{it.unitPrice}</td>
                         <td className="px-4 py-2">{it.remarks}</td>
@@ -1031,22 +1069,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         {/* PR-227: 품목 마스터 단위 — 비어 있으면 "-". */}
                         <td className="px-4 py-2">{it.material?.unit || '-'}</td>
                         <td className="px-4 py-2 text-right">{it.consumption}</td>
-                        <td className="px-4 py-2 text-right">
-                          {(() => {
-                            const q = bomItemQtyDisplay(it);
-                            const zeroReason = bomItemZeroReason(it);
-                            return (
-                              <>
-                                {zeroReason ? <span title={zeroReason.title}>{zeroReason.text}</span> : q.text}
-                                {(q.kind === 'SUBTYPE_NEEDED' || q.kind === 'UNIT_MISMATCH') && (
-                                  <span className="block text-xs text-amber-700">⚠ {q.warning}</span>
-                                )}
-                                {q.kind === 'PACKAGED' && <span className="block text-xs text-gray-400">{q.formula}</span>}
-                                <span className="block text-xs text-gray-400">계산 근거(참고): {bomItemAppliedQtyFormula(it)}</span>
-                              </>
-                            );
-                          })()}
-                        </td>
+                        <td className="px-4 py-2 text-right">{renderBomItemQtyCell(it)}</td>
                         <td className="px-4 py-2">{it.supplier}</td>
                         <td className="px-4 py-2 text-right">{it.unitPrice}</td>
                         <td className="px-4 py-2">{it.remarks}</td>

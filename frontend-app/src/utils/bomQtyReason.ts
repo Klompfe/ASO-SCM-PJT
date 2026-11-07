@@ -59,3 +59,55 @@ export const UNIT_CHANGE_CONFIRM_TEXT =
 export function isUnitChanged(originalUnit: string | null | undefined, newUnit: string): boolean {
   return newUnit.trim() !== (originalUnit ?? '').trim();
 }
+
+// PR-229: 자재·BOM 조회 표의 "소요수량" 주 값을 저장 스냅샷이 아니라 지금 규칙으로
+// 계산한 값(appliedQuantity.ts의 resolveAppliedQuantity)으로 바꾼다 — 계산 자체가 안
+// 되는 두 경우에만(색상 수량표에도 작지 값에도 근거가 없음 / 스타일 총수량 미입력)
+// 숫자 대신 이유를 보여준다. resolveZeroQtyReason(PR-227, 스냅샷용)과는 별개다 —
+// 스냅샷을 더 이상 주 값으로 쓰지 않으므로 "저장된 값 0(다시 저장 필요)" 문구는
+// 쓰지 않는다(요구사항: 사용자에게 다시 저장을 요구하지 않는다).
+export type LiveQtyReasonKind = 'needs-color-qty' | 'missing-total-qty';
+
+export interface LiveQtyReasonInput {
+  basis: 'sheet' | 'color-qty' | 'computed' | 'unknown';
+  styleTotalQty: number | null;
+}
+
+// basis==='unknown'(색상은 있는데 수량표에도 없고 단위 맞는 작지 값도 없음)이거나,
+// basis==='computed'(공통/무색상)인데 총수량이 아직 없으면(0 이하 포함) 이유를
+// 돌려준다. 'sheet'/'color-qty'는 총수량과 무관하게 이미 값이 있으므로 이유가 없다.
+export function resolveLiveQtyReason(input: LiveQtyReasonInput): LiveQtyReasonKind | null {
+  if (input.basis === 'unknown') return 'needs-color-qty';
+  if (input.basis === 'computed' && (input.styleTotalQty == null || input.styleTotalQty <= 0)) {
+    return 'missing-total-qty';
+  }
+  return null;
+}
+
+export interface LiveQtyReasonText {
+  text: string;
+  title: string;
+}
+
+const LIVE_QTY_MESSAGES: Record<LiveQtyReasonKind, LiveQtyReasonText> = {
+  'needs-color-qty': {
+    text: '색상별 수량 확인 필요',
+    title: '이 색상의 수량을 스타일의 색상×사이즈 수량표에서 찾지 못했고, 단위가 맞는 작지 수량도 없어 지금은 계산할 수 없습니다 — 수량표 또는 작지 값을 확인하세요.',
+  },
+  'missing-total-qty': {
+    text: '스타일 총수량 미입력',
+    title: '이 스타일의 총수량이 입력되지 않아 지금은 계산할 수 없습니다 — 스타일 관리에서 총수량을 입력하세요.',
+  },
+};
+
+export function describeLiveQtyReason(kind: LiveQtyReasonKind | null): LiveQtyReasonText | null {
+  if (kind == null) return null;
+  return LIVE_QTY_MESSAGES[kind];
+}
+
+// PR-229: 저장된 스냅샷(BomItem.requiredQty)은 더 이상 주 값이 아니지만, 지금 계산한
+// 값과 다르면("스냅샷이 오래됐다"는 뜻) 작은 보조 표시로 남겨 둔다 — 같으면 표시하지
+// 않는다(화면에 똑같은 숫자를 두 번 보여줄 필요가 없다).
+export function describeSnapshotNote(liveText: string, snapshotText: string): string | null {
+  return liveText === snapshotText ? null : `저장 당시 값 ${snapshotText}`;
+}
