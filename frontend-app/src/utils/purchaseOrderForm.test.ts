@@ -370,3 +370,43 @@ describe('trackBadgeLabel / isQuantityFilled', () => {
     expect(isQuantityFilled('5')).toBe(true);
   });
 });
+
+import { resolveStyleLinkDisplay } from './purchaseOrderForm';
+
+describe('resolveStyleLinkDisplay — [B] 스타일 연결 표시 (PR-230)', () => {
+  it('styleNo가 있으면 연결됨 라벨(스타일명 포함)을 보여주고 안내는 없다', () => {
+    const r = resolveStyleLinkDisplay({ styleNo: 'MB62SLM103Z', styleName: '테스트 스타일', explicitlyCleared: false });
+    expect(r.connected).toBe(true);
+    expect(r.connectedLabel).toBe('연결됨: MB62SLM103Z (테스트 스타일)');
+    expect(r.disconnectedNote).toBeNull();
+  });
+
+  it('스타일명이 없으면 번호만 보여준다', () => {
+    const r = resolveStyleLinkDisplay({ styleNo: 'MB62SLM103Z', styleName: null, explicitlyCleared: false });
+    expect(r.connectedLabel).toBe('연결됨: MB62SLM103Z');
+  });
+
+  it('styleNo가 없고 해제한 적도 없으면(직접 입력 진입) — 연결 가능함을 알리는 placeholder만, 안내는 없다', () => {
+    const r = resolveStyleLinkDisplay({ styleNo: null, explicitlyCleared: false });
+    expect(r.connected).toBe(false);
+    expect(r.disconnectedNote).toBeNull();
+    expect(r.placeholder).toBe('스타일 미연결 (스타일을 선택하면 연결됩니다)');
+  });
+
+  it('연결돼 있다가 명시적으로 해제하면 — 미연결 + 집계 제외 안내를 보여준다', () => {
+    const r = resolveStyleLinkDisplay({ styleNo: null, explicitlyCleared: true });
+    expect(r.connected).toBe(false);
+    expect(r.disconnectedNote).toBe('스타일 미연결 — 스타일별 집계에 포함되지 않습니다');
+  });
+
+  it('해제했다가 다시 연결하면 — 연결됨 라벨로 돌아가고(explicitlyCleared 값과 무관하게 styleNo 우선)', () => {
+    const r = resolveStyleLinkDisplay({ styleNo: 'MB62SLM103Z', explicitlyCleared: true });
+    expect(r.connected).toBe(true);
+    expect(r.disconnectedNote).toBeNull();
+  });
+
+  it('두 미연결 상태 모두 같은 placeholder를 쓴다("기본"이라는 말은 쓰지 않음)', () => {
+    expect(resolveStyleLinkDisplay({ styleNo: null, explicitlyCleared: false }).placeholder).not.toContain('기본');
+    expect(resolveStyleLinkDisplay({ styleNo: null, explicitlyCleared: true }).placeholder).not.toContain('기본');
+  });
+});

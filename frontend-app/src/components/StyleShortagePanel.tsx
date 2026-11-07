@@ -178,7 +178,9 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
 // 바꾸지 않는 "보조 검색"이다: 스타일을 고르면 그 스타일의 활성 BOM으로 필요 자재/이미 발주/부족을 보여주고(PR-120 소요명세서와
 // 같은 서버 계산), 부족한 자재를 골라 발주 폼으로 넘긴다.
 export const StyleShortagePanel: React.FC<{
-  onPickMaterial: (row: MaterialRequirementRow, styleNo: string) => void;
+  // PR-230: 스타일명도 같이 넘겨 [B]에 "연결됨: 스타일번호 (스타일명)"으로 보여줄 수
+  // 있게 한다(없으면 undefined — 번호만 보여줘도 된다).
+  onPickMaterial: (row: MaterialRequirementRow, styleNo: string, styleName?: string | null) => void;
   // PR-185 B: "미연결 발주 N개" 안내를 눌렀을 때 발주 목록 화면으로 이동.
   onGoToList?: () => void;
   refreshKey?: number;
@@ -311,7 +313,7 @@ export const StyleShortagePanel: React.FC<{
             )}
             <ShortageTable
               rows={rows}
-              onPick={(row) => onPickMaterial(row, style!.styleNo)}
+              onPick={(row) => onPickMaterial(row, style!.styleNo, style!.overview?.styleName ?? null)}
               onGoToList={onGoToList}
               editable={editable}
               onEdit={onEdit}

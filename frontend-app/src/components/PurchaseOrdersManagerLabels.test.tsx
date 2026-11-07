@@ -23,7 +23,9 @@ describe('PurchaseOrdersManager — 스타일 연결/트랙 필터/단가표 참
   it('발주 폼에 "스타일 연결" 선택란과 수량 입력(기본값 1 없음), 목록에 트랙 필터 버튼이 렌더된다', () => {
     const html = renderToStaticMarkup(createElement(PurchaseOrdersManager, {}));
     expect(html).toContain('스타일 연결(선택)');
-    expect(html).toContain('스타일 미연결(기본)');
+    // PR-230: "스타일 미연결(기본)"은 연결이 불가능한 것처럼 들려 바꿨다 — 연결이
+    // 가능함을 알리는 문구로 대체(placeholderOnlyNote 요구사항·resolveStyleLinkDisplay 테스트 참고).
+    expect(html).toContain('스타일 미연결 (스타일을 선택하면 연결됩니다)');
     expect(html).toContain('전체');
     expect(html).toContain('스타일 미연결');
     // 수량 입력란에 기본값 1이 더 이상 없다(PR-185 B 회귀 확인) — value="1"이 아니라 value=""로 시작.
