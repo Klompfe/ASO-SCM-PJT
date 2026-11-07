@@ -26,6 +26,11 @@ export interface BomItemRow {
   hsCode?: string;
   threadType?: ThreadType | null;
   tapeType?: TapeType | null;
+  // PR-220: 작지 인식 경로에서만 채워지는 원본 출고량·단위 — GET /boms(findActiveByStyleNo)가
+  // select 없이 엔티티를 그대로 돌려줘 서버 응답에는 이미 들어 있었다(PR-227에서 타입만
+  // 추가 — 백엔드 변경 없음). "소요수량"(requiredQty)이 왜 0인지 참고하는 데만 쓴다.
+  sheetQty?: number | null;
+  sheetQtyUnit?: string | null;
   material: BomItemMaterial;
 }
 

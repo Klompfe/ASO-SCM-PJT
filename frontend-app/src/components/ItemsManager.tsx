@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getAllItems, getItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
-import { getMasterStyles, type MasterStyle } from '../api/styles.service';
+import { getMasterStyles, getStyleColorSizeQuantities, type MasterStyle } from '../api/styles.service';
 import { getBomByStyleNo, updateBomItem, deleteBomItem, swapBomItemMaterial, addBomLabelSet, type BomDetail, type BomItemRow, type ThreadType, type TapeType } from '../api/boms.service';
 import { SearchSelectField } from './SearchSelectField';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
@@ -23,6 +23,8 @@ import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.ser
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { formatBomItemQty } from '../utils/materialRequirementDisplay';
 import { filterBomRows, distinctNonEmptySorted } from '../utils/bomLookupFilter';
+import { buildColorQtyMap, resolveAppliedQuantity } from '../utils/appliedQuantity';
+import { resolveZeroQtyReason, describeZeroQtyReason, UNIT_CHANGE_CONFIRM_TEXT, isUnitChanged } from '../utils/bomQtyReason';
 
 // PR-175: 실/테이프 통합 드롭다운 값을 서버 필드(threadType/tapeType) 중 하나로 나눈다.
 const resolveSubTypePayload = (value: string): { threadType?: ThreadType; tapeType?: TapeType } =>
@@ -52,6 +54,11 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   const [searchResults, setSearchResults] = useState<MasterStyle[]>([]);
   const [selectedStyleNo, setSelectedStyleNo] = useState<string | null>(null);
   const [bom, setBom] = useState<BomDetail | null>(null);
+  // PR-227: "소요수량"(BomItem.requiredQty)은 저장 시점 스냅샷이라, 실시간 계산
+  // (PR-226, resolveAppliedQuantity와 같은 규칙)을 참고로 보여주려면 이 스타일의
+  // 총수량·색상×사이즈 수량표가 필요하다 — 계산/저장에는 쓰지 않는다(표시 전용).
+  const [selectedStyleTotalQty, setSelectedStyleTotalQty] = useState<number | null>(null);
+  const [selectedStyleColorQtyMap, setSelectedStyleColorQtyMap] = useState<Map<string, number>>(new Map());
   // PR-177: 미입고 발주가 있는 자재는 "발주하기" 대신 "수정하기"로 바꾼다.
   const [pendingOrders, setPendingOrders] = useState<PurchaseOrder[]>([]);
   const [editing, setEditing] = useState<{ order: PurchaseOrder; pendingCount: number } | null>(null);
@@ -113,7 +120,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   // PR-197: 요척/규격/색상/구분도 여기서 함께 고친다(실제 사례 — 엑셀 요척 2.9가 BOM에는
   // 2.7로 저장돼 필요량이 틀렸던 건을 고칠 화면이 없었다).
   const [editingBomItemId, setEditingBomItemId] = useState<number | null>(null);
-  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '' });
+  // PR-227: unit은 BomItem이 아니라 자재(Item) 마스터 값이다 — 저장 시 PATCH /boms/items/:id
+  // 가 아니라 기존 PATCH /items/:id로 따로 보낸다(아래 handleUpdateBomItem 참고).
+  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string; unit: string }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '' });
   // PR-099: "라벨류 기본 세트 추가" 버튼 처리 중 표시.
   const [addingLabelSet, setAddingLabelSet] = useState(false);
   // PR-197: BOM 행 삭제/자재 교체 — 사람이 버튼을 눌러야만 동작(자동 정리 없음).
@@ -174,12 +183,28 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
     setBomNameFilter('');
     setBomCategoryFilter('');
     setBomColorFilter('');
+    // PR-227: "소요수량"(BomItem.requiredQty)은 저장 시점 스냅샷일 뿐 실시간 계산이
+    // 아니다(원인 규명 — 보고서 1절) — 참고용 실시간 계산값(계산 근거·0 이유 표시용)을
+    // 보여주려고 총수량과 색상×사이즈 수량표를 같은 규칙(resolveAppliedQuantity, PR-226)
+    // 으로 가져온다. 기존 API만 쓴다(새 API 없음), 계산/저장 로직은 바꾸지 않는다.
+    setSelectedStyleTotalQty(null);
+    setSelectedStyleColorQtyMap(new Map());
     try {
       const res = await getBomByStyleNo(styleNo);
       setBom(res);
     } catch (err: any) {
       setBomError(getErrorMessage(err, '자재명세를 불러오는 데 실패했습니다.'));
     }
+    getMasterStyles({ styleNo })
+      .then((res) => {
+        const list = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
+        const match = list.find((s: MasterStyle) => s.styleNo === styleNo);
+        setSelectedStyleTotalQty(match?.overview?.totalQty ?? null);
+      })
+      .catch(() => setSelectedStyleTotalQty(null));
+    getStyleColorSizeQuantities(styleNo)
+      .then((data) => setSelectedStyleColorQtyMap(buildColorQtyMap(data.totalByColor ?? [])))
+      .catch(() => setSelectedStyleColorQtyMap(new Map()));
   };
 
   // PR-224: 목록(콤보)에서 스타일을 고르면 검색 버튼 없이 바로 조회한다 — 기존
@@ -330,6 +355,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
     setEditBomItemForm({
       composition: row.composition || '', hsCode: row.hsCode || '', threadType: row.threadType || row.tapeType || '',
       consumption: String(row.consumption ?? ''), spec: row.spec || '', colorCode: row.colorCode || '', category: row.category || '',
+      unit: row.material?.unit || '',
     });
   };
 
@@ -339,9 +365,29 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   const bomItemQtyDisplay = (it: BomItemRow) =>
     formatBomItemQty(it.requiredQty, { subtype: it.threadType ?? it.tapeType, itemName: it.material?.name, itemUnit: it.material?.unit }, packagingRules);
 
+  // PR-227: 소요수량이 0일 때 "0" 대신 이유를 보여준다(resolveZeroQtyReason, 보고서 1절) —
+  // 계산 로직은 바꾸지 않고 표시만 바꾼다. 0이 아니면 null(이유 없음).
+  const bomItemZeroReason = (it: BomItemRow) =>
+    describeZeroQtyReason(
+      resolveZeroQtyReason({ consumption: Number(it.consumption) || 0, requiredQty: Number(it.requiredQty) || 0, styleTotalQty: selectedStyleTotalQty }),
+    );
+
+  // PR-227: 저장된 소요수량(스냅샷)과 별개로, PR-226과 같은 규칙으로 지금 다시 계산하면
+  // 어떤 값이 나오는지 참고용으로 보여준다(계산 근거) — 저장/계산 로직에는 영향 없음.
+  const bomItemAppliedQtyFormula = (it: BomItemRow) =>
+    resolveAppliedQuantity({
+      consumption: it.consumption,
+      totalQty: selectedStyleTotalQty,
+      sheetQty: it.sheetQty ?? null,
+      sheetQtyUnit: it.sheetQtyUnit ?? null,
+      itemUnit: it.material?.unit ?? null,
+      colorCode: it.colorCode,
+      colorQtyMap: selectedStyleColorQtyMap,
+    }).formula;
+
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
-    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '' });
+    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '' });
   };
 
   const handleUpdateBomItem = async (id: number) => {
@@ -357,6 +403,16 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
       const ok = window.confirm(`요척 ${original.consumption} → ${newConsumption} (필요량이 바뀝니다). 저장하시겠습니까?`);
       if (!ok) return;
     }
+    // PR-227: 단위는 BomItem이 아니라 자재(Item) 마스터 값이다 — 이 자재를 쓰는 모든
+    // 스타일에 적용되므로(이 자재를 쓰는 스타일 수를 알려주는 기존 API가 없어 문구에는
+    // 넣지 않는다) 바뀌었을 때만 별도 확인을 받고 PATCH /items/:id로 저장한다.
+    const originalUnit = original?.material?.unit || '';
+    const newUnit = editBomItemForm.unit.trim();
+    const unitChanged = original?.material != null && isUnitChanged(originalUnit, newUnit);
+    if (unitChanged) {
+      const ok = window.confirm(UNIT_CHANGE_CONFIRM_TEXT);
+      if (!ok) return;
+    }
     try {
       await updateBomItem(id, {
         composition: editBomItemForm.composition,
@@ -367,9 +423,15 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
         colorCode: editBomItemForm.colorCode,
         category: editBomItemForm.category,
       });
+      if (unitChanged && original?.material) {
+        await updateItem(original.material.id, { unit: newUnit });
+      }
       toast.success('자재명세 항목이 수정되었습니다.');
       cancelEditBomItem();
       if (selectedStyleNo) {
+        // PR-227: 단위가 바뀌면 포장단위 환산 경고("단위 확인 필요")·N롤/N콘 표시가
+        // material.unit을 다시 읽어야 갱신된다 — BOM을 다시 불러오면 자동으로 반영된다
+        // (PurchaseOrdersManager의 styleMaterialRows 캐시 갱신과 같은 패턴).
         const res = await getBomByStyleNo(selectedStyleNo);
         setBom(res);
       }
@@ -805,6 +867,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                     <th className="px-4 py-2 text-left">카테고리</th>
                     <th className="px-4 py-2 text-left">색상</th>
                     <th className="px-4 py-2 text-left">규격</th>
+                    {/* PR-227: 품목 마스터 단위(Item.unit) — 사용자 보고: "표에는 아예
+                        단위 열이 없다" */}
+                    <th className="px-4 py-2 text-left">단위</th>
                     <th className="px-4 py-2 text-right">단위소요량</th>
                     <th className="px-4 py-2 text-right">소요수량</th>
                     <th className="px-4 py-2 text-left">공급업체</th>
@@ -822,7 +887,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                       <tr key={it.id} className="bg-indigo-50">
                         <td className="px-4 py-2 font-mono">{it.material?.code}</td>
                         <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
-                        <td colSpan={12} className="px-4 py-2">
+                        <td colSpan={13} className="px-4 py-2">
                           <div className="flex items-center gap-2">
                             <span className="text-sm text-gray-600">교체할 자재:</span>
                             <SearchSelectField<{ id: number; name: string; code: string }>
@@ -868,6 +933,26 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                             onChange={(e) => setEditBomItemForm({ ...editBomItemForm, spec: e.target.value })}
                           />
                         </td>
+                        <td className="px-4 py-2">
+                          {/* PR-227: 단위는 자재(품목) 마스터 값 — 기존에 쓰이는 값 중에서
+                              고르거나 직접 입력할 수 있다(datalist, 새 검증 규칙은 추가하지 않음). */}
+                          <input
+                            list="bom-unit-options"
+                            className="border rounded px-2 py-1 w-20"
+                            aria-label="단위"
+                            value={editBomItemForm.unit}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, unit: e.target.value })}
+                          />
+                          <datalist id="bom-unit-options">
+                            <option value="EA" />
+                            <option value="M" />
+                            <option value="Y" />
+                            <option value="YD" />
+                            <option value="KG" />
+                            <option value="ROLL" />
+                            <option value="CONE" />
+                          </datalist>
+                        </td>
                         <td className="px-4 py-2 text-right">
                           <input
                             type="number"
@@ -882,13 +967,17 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         <td className="px-4 py-2 text-right">
                           {(() => {
                             const q = bomItemQtyDisplay(it);
+                            const zeroReason = bomItemZeroReason(it);
                             return (
                               <>
-                                {q.text}
+                                {zeroReason ? <span title={zeroReason.title}>{zeroReason.text}</span> : q.text}
                                 {(q.kind === 'SUBTYPE_NEEDED' || q.kind === 'UNIT_MISMATCH') && (
                                   <span className="block text-xs text-amber-700">⚠ {q.warning}</span>
                                 )}
                                 {q.kind === 'PACKAGED' && <span className="block text-xs text-gray-400">{q.formula}</span>}
+                                {/* PR-227: 저장값은 스냅샷이라, PR-226과 같은 규칙으로 지금 계산하면
+                                    어떻게 되는지 참고용으로만 보여준다(값을 바꾸지 않음). */}
+                                <span className="block text-xs text-gray-400">계산 근거(참고): {bomItemAppliedQtyFormula(it)}</span>
                               </>
                             );
                           })()}
@@ -939,17 +1028,21 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                         <td className="px-4 py-2 whitespace-pre-line">{it.category}</td>
                         <td className="px-4 py-2">{it.colorCode}</td>
                         <td className="px-4 py-2">{it.spec}</td>
+                        {/* PR-227: 품목 마스터 단위 — 비어 있으면 "-". */}
+                        <td className="px-4 py-2">{it.material?.unit || '-'}</td>
                         <td className="px-4 py-2 text-right">{it.consumption}</td>
                         <td className="px-4 py-2 text-right">
                           {(() => {
                             const q = bomItemQtyDisplay(it);
+                            const zeroReason = bomItemZeroReason(it);
                             return (
                               <>
-                                {q.text}
+                                {zeroReason ? <span title={zeroReason.title}>{zeroReason.text}</span> : q.text}
                                 {(q.kind === 'SUBTYPE_NEEDED' || q.kind === 'UNIT_MISMATCH') && (
                                   <span className="block text-xs text-amber-700">⚠ {q.warning}</span>
                                 )}
                                 {q.kind === 'PACKAGED' && <span className="block text-xs text-gray-400">{q.formula}</span>}
+                                <span className="block text-xs text-gray-400">계산 근거(참고): {bomItemAppliedQtyFormula(it)}</span>
                               </>
                             );
                           })()}
