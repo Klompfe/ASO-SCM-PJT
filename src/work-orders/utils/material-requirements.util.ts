@@ -108,6 +108,14 @@ export interface MaterialRequirementRow {
   // 계산값과 크게 다르면, 출고량 칸이 아니라 총수량(또는 다른 칸)을 잘못 읽었을
   // 가능성이 크다 — mismatch는 그대로 두고(적용은 여전히 계산값) 이 표시만 추가한다.
   sheetQtyLooksLikeTotalQtyMisread?: boolean;
+  // PR-228: 화면이 sheetQtyLooksLikeTotalQtyMisread 문구에 "단위를 확인해 주세요"를
+  // 덧붙일지 결정하는 데 쓴다(unitKind==='unknown'일 때만) — 개수 단위면 그 경고
+  // 자체가 뜨지 않으므로(위 함수가 false를 돌려줌) 이 필드는 그 경우엔 의미가 없다.
+  quantityUnitKind?: QuantityUnitKind;
+  // PR-228: 계산값과 작지 값의 비율이 10배를 넘거나 1/10 미만이면 true — 요척 자체가
+  // 틀렸을 가능성이 크다는 강한 경고(기존 ±5% mismatch와 별도). true면 화면은 "이
+  // 자재로 발주하기"를 눌러도 [B] 수량을 비워 둔다(계산값을 그대로 넣지 않음).
+  extremeConsumptionMismatch?: boolean;
 }
 
 export interface SuggestedPackagingConversion extends PackagingConversion {
@@ -136,10 +144,47 @@ const SHEET_QTY_MISMATCH_THRESHOLD_PCT = 0.05;
 // 안 함 — "499 vs 499.0001"도 다른 값으로 본다, 추측 금지) 출고량 칸이 아니라 다른
 // 칸(총수량 등)을 읽었을 가능성이 크다. mismatch가 이미 나 있을 때만 의미가 있다 —
 // mismatch 자체가 없으면(계산값과 거의 같으면) 이 표시는 붙이지 않는다.
-export function sheetQtyLooksLikeTotalQtyMisread(sheetQty: number | null | undefined, totalQty: number | null | undefined, mismatch: boolean): boolean {
+// PR-228: 개수 단위(EA/PC/PCS/개/SET/장 등) 품목은 "1개당 1" 이 정상이라, 작지 값이
+// 총수량과 같은 것이 오히려 맞는 값이다 — sheetQtyLooksLikeTotalQtyMisread를 그런
+// 품목에는 적용하지 않는다(사용자 보고: 수기로 추가한 금속장식(EA) 행에서 정상적인
+// "작지=총수량"을 오독으로 오경고). 길이 단위(yd/m/mm/cm 등)에서만 그대로 적용하고,
+// 단위를 모르면(비어 있거나 분류 불가) 기존처럼 경고하되 화면이 "단위를 확인해
+// 주세요"를 덧붙일 수 있게 unitKind를 노출한다.
+export type QuantityUnitKind = 'count' | 'length' | 'unknown';
+
+const COUNT_UNIT_TOKENS = new Set(['EA', 'PC', 'PCS', '개', 'SET', '세트', '장', 'PAIR', '족']);
+const LENGTH_UNIT_TOKENS = new Set(['M', 'YD', 'Y', 'MM', 'CM', 'KM', 'MT']);
+
+export function classifyQuantityUnit(unit: string | null | undefined): QuantityUnitKind {
+  const u = (unit ?? '').trim().toUpperCase();
+  if (!u) return 'unknown';
+  if (COUNT_UNIT_TOKENS.has(u)) return 'count';
+  if (LENGTH_UNIT_TOKENS.has(u)) return 'length';
+  return 'unknown';
+}
+
+export function sheetQtyLooksLikeTotalQtyMisread(
+  sheetQty: number | null | undefined,
+  totalQty: number | null | undefined,
+  mismatch: boolean,
+  unitKind: QuantityUnitKind = 'unknown',
+): boolean {
+  if (unitKind === 'count') return false;
   if (!mismatch) return false;
   if (sheetQty == null || totalQty == null) return false;
   return sheetQty === totalQty;
+}
+
+// PR-228: 계산값(consumptionPerUnit × totalQty)과 작지 값의 비율이 10배를 넘거나
+// 1/10 미만이면, 기존 ±5% 불일치(mismatch)와는 별도로 "요척 자체가 틀렸을 가능성이
+// 크다"는 강한 경고를 낸다(사용자 보고 사례: 요척에 수량(499)이 잘못 들어가
+// 499×499=249,001처럼 부풀려진 값이 나온 경우).
+const EXTREME_CONSUMPTION_RATIO = 10;
+export function isExtremeConsumptionMismatch(computedQty: number | null | undefined, sheetQty: number | null | undefined): boolean {
+  if (computedQty == null || sheetQty == null) return false;
+  if (computedQty === 0 || sheetQty === 0) return false;
+  const ratio = Math.abs(computedQty) / Math.abs(sheetQty);
+  return ratio > EXTREME_CONSUMPTION_RATIO || ratio < 1 / EXTREME_CONSUMPTION_RATIO;
 }
 
 // PR-220b: 색상 비교 정규화 — 앞뒤 공백 제거 + 대소문자 무시 + 내부 연속 공백을 1칸으로만.
@@ -426,6 +471,7 @@ export function calculateMaterialRequirements(
     // 있었으면"(sheetPresentCount) 항상 계산값과 비교한다 — 계산값을 적용한 행도 작지
     // 값과 차이가 크면 확인 필요를 알려야 하기 때문이다(적용값 자체는 바뀌지 않음).
     row.computedQty = round4(row.consumptionPerUnit * target);
+    row.quantityUnitKind = classifyQuantityUnit(row.unit);
     if (row.sheetPresentCount > 0) {
       row.sheetQty = row.sheetPresentSum;
       let mismatch = row.computedVsSheetMismatch;
@@ -436,7 +482,8 @@ export function calculateMaterialRequirements(
         mismatch = mismatch || diffPct > SHEET_QTY_MISMATCH_THRESHOLD_PCT;
       }
       row.mismatch = mismatch;
-      row.sheetQtyLooksLikeTotalQtyMisread = sheetQtyLooksLikeTotalQtyMisread(row.sheetQty, target, row.mismatch);
+      row.sheetQtyLooksLikeTotalQtyMisread = sheetQtyLooksLikeTotalQtyMisread(row.sheetQty, target, row.mismatch, row.quantityUnitKind);
+      row.extremeConsumptionMismatch = isExtremeConsumptionMismatch(row.computedQty, row.sheetQty);
     }
     const usedBases: Array<'sheet' | 'color-qty' | 'computed'> = [];
     if (row.sheetAppliedCount > 0) usedBases.push('sheet');

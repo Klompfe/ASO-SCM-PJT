@@ -57,6 +57,13 @@ export interface MaterialRequirementRow {
   // PR-226 추가(사용자 확인): mismatch일 때 작지 값이 스타일 총수량과 정확히 같으면
   // 출고량 칸이 아니라 다른 칸(총수량 등)을 읽었을 가능성이 크다는 서버 계산 표시.
   sheetQtyLooksLikeTotalQtyMisread?: boolean;
+  // PR-228: sheetQtyLooksLikeTotalQtyMisread 문구에 "단위를 확인해 주세요"를 덧붙일지
+  // 판단하는 데 쓴다(unitKind==='unknown'일 때만 — 개수 단위면 그 경고 자체가 안 뜬다).
+  quantityUnitKind?: 'count' | 'length' | 'unknown';
+  // PR-228: 계산값과 작지 값의 비율이 10배를 넘거나 1/10 미만이면 true — 기존 ±5%
+  // mismatch와 별도인 강한 경고(요척 자체가 틀렸을 가능성). true면 "이 자재로
+  // 발주하기"를 눌러도 [B] 수량을 비워 둔다.
+  extremeConsumptionMismatch?: boolean;
 }
 
 export type RequirementReason = 'NO_STYLE_NO' | 'NO_BOM' | null;

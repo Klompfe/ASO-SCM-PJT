@@ -18,6 +18,7 @@ import {
   createEmptyBomItem,
   removeBomItem,
   shiftIndexesAfterRemoval,
+  suggestConsumptionFromSheetQty,
 } from './salesOrderBomReview';
 import type { AiBomItem, AiHandwrittenCandidate, AiSalesOrderResult } from '../api/salesOrders.service';
 
@@ -106,6 +107,21 @@ describe('handwrittenCandidateToBomItem / appendBomItemFromCandidate (PR-223)', 
   it('name이 null이면 rawText를 자재명으로 쓴다(빈 자재명 방지)', () => {
     const item = handwrittenCandidateToBomItem(candidate({ name: null, rawText: 'BE-WH…' }));
     expect(item.itemName).toBe('BE-WH…');
+  });
+
+  // PR-228 원인 규명: 후보 입력칸에는 "수량"(requiredQty) 하나만 있고 요척(consumption)
+  // 입력칸은 없다 — 수량만 있는 후보를 변환해도 수량이 요척에 복사되지 않고 요척은
+  // 비어 있는 채로 남는다(사용자 보고 사례의 원인이 이 매핑 쪽 코드 버그가 아님을 확인).
+  it('수량(requiredQty)만 있는 후보는 requiredQty에만 들어가고 요척(consumption)은 비어 있다', () => {
+    const item = handwrittenCandidateToBomItem(candidate({ requiredQty: 499, requiredQtyUnit: 'EA' }));
+    expect(item.requiredQty).toBe(499);
+    expect(item.consumption).toBeNull();
+  });
+
+  it('요척이 명시된 후보는 요척이 그대로 들어간다', () => {
+    const item = handwrittenCandidateToBomItem(candidate({ consumption: 1.2, requiredQty: 10 }));
+    expect(item.consumption).toBe(1.2);
+    expect(item.requiredQty).toBe(10);
   });
 
   it('수량/요척이 없는 후보는 자동으로 숫자를 만들어 넣지 않는다(비어 있음)', () => {
@@ -366,5 +382,33 @@ describe('removeBomItem / shiftIndexesAfterRemoval (PR-225) — 직접 추가 �
 
   it('빈 Set을 지워도 빈 Set이다', () => {
     expect(shiftIndexesAfterRemoval(new Set(), 0)).toEqual(new Set());
+  });
+});
+
+// PR-228: 수기로 추가한 행(후보/직접 추가)에서 요척(consumption)이 비어 있을 때,
+// 작지수량(requiredQty) ÷ 총수량으로 "개당 수량"을 제안한다 — 자동으로 넣지 않고
+// 호출하는 쪽(SalesOrderUploadModal)이 버튼을 눌렀을 때만 적용한다(이 함수는 제안값만
+// 계산한다).
+describe('suggestConsumptionFromSheetQty (PR-228)', () => {
+  it('작지수량 499·총수량 499·요척 빈칸 → 1.00을 제안한다', () => {
+    expect(suggestConsumptionFromSheetQty({ consumption: null, requiredQty: 499 }, 499)).toBe(1);
+  });
+
+  it('소수 둘째 자리까지 반올림한다', () => {
+    expect(suggestConsumptionFromSheetQty({ consumption: null, requiredQty: 100 }, 3)).toBeCloseTo(33.33, 2);
+  });
+
+  it('요척이 이미 있으면 제안하지 않는다(null)', () => {
+    expect(suggestConsumptionFromSheetQty({ consumption: 1.2, requiredQty: 499 }, 499)).toBeNull();
+  });
+
+  it('작지수량이 없거나 0이면 제안하지 않는다', () => {
+    expect(suggestConsumptionFromSheetQty({ consumption: null, requiredQty: null }, 499)).toBeNull();
+    expect(suggestConsumptionFromSheetQty({ consumption: null, requiredQty: 0 }, 499)).toBeNull();
+  });
+
+  it('총수량이 없거나 0이면 제안하지 않는다(칩 없음)', () => {
+    expect(suggestConsumptionFromSheetQty({ consumption: null, requiredQty: 499 }, null)).toBeNull();
+    expect(suggestConsumptionFromSheetQty({ consumption: null, requiredQty: 499 }, 0)).toBeNull();
   });
 });

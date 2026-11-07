@@ -180,6 +180,49 @@ describe('ShortageTable 작지 수량 출처/불일치 표시 (PR-220)', () => {
     );
     expect(html).not.toContain('총수량과 같습니다');
   });
+
+  // PR-228: 단위를 개수/길이로 판별할 수 없을 때만(quantityUnitKind==='unknown')
+  // "단위를 확인해 주세요"를 덧붙인다 — 서버가 이미 개수 단위면 sheetQtyLooksLikeTotalQtyMisread
+  // 자체를 false로 내려주므로(화면은 그 값을 그대로 쓸 뿐 단위를 다시 판별하지 않는다).
+  it('sheetQtyLooksLikeTotalQtyMisread:true + quantityUnitKind:unknown이면 "단위를 확인해 주세요"가 덧붙는다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, {
+        rows: [row({ basis: 'computed', mismatch: true, sheetQty: 499, computedQty: 758.48, sheetQtyLooksLikeTotalQtyMisread: true, quantityUnitKind: 'unknown' })],
+        onPick: vi.fn(),
+      }),
+    );
+    expect(html).toContain('단위를 확인해 주세요');
+  });
+
+  it('quantityUnitKind:length면 "단위를 확인해 주세요"가 붙지 않는다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, {
+        rows: [row({ basis: 'computed', mismatch: true, sheetQty: 499, computedQty: 758.48, sheetQtyLooksLikeTotalQtyMisread: true, quantityUnitKind: 'length' })],
+        onPick: vi.fn(),
+      }),
+    );
+    expect(html).not.toContain('단위를 확인해 주세요');
+  });
+});
+
+// PR-228: 계산값/작지 값 비율이 비정상(10배 초과/1·10 미만)이면 ±5% mismatch와 별도로
+// 강한 경고를 보여준다(요척 자체가 틀렸을 가능성 — 사용자 보고 사례: 249,001 vs 499).
+describe('ShortageTable extremeConsumptionMismatch 표시 (PR-228)', () => {
+  it('extremeConsumptionMismatch:true면 "비정상적으로 보입니다" 경고가 뜬다', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShortageTable, {
+        rows: [row({ basis: 'computed', requiredQty: 249001, computedQty: 249001, sheetQty: 499, extremeConsumptionMismatch: true })],
+        onPick: vi.fn(),
+      }),
+    );
+    expect(html).toContain('비정상적으로 보입니다');
+    expect(html).toContain('249,001');
+  });
+
+  it('extremeConsumptionMismatch가 없으면(기본) 그 경고가 없다', () => {
+    const html = renderToStaticMarkup(createElement(ShortageTable, { rows: [row({ basis: 'sheet' })], onPick: vi.fn() }));
+    expect(html).not.toContain('비정상적으로 보입니다');
+  });
 });
 
 // PR-220b: 색상 있는 BOM 행에 작지 수량/색상×사이즈 수량표 근거가 전혀 없으면 숫자를

@@ -81,8 +81,23 @@ export const ShortageTable: React.FC<ShortageTableProps> = ({ rows, onPick, edit
                     {r.sheetQtyLooksLikeTotalQtyMisread && (
                       <span className="block" data-testid={`sheet-looks-like-total-qty-${r.itemId}`}>
                         작지 값이 총수량과 같습니다 — 출고량 칸이 아닌 수량을 읽었을 수 있습니다
+                        {/* PR-228: 단위를 개수/길이로 판별할 수 없을 때만(개수 단위면 이 경고 자체가
+                            뜨지 않는다) "단위를 확인해 주세요"를 덧붙인다. */}
+                        {r.quantityUnitKind === 'unknown' && ' — 단위를 확인해 주세요'}
                       </span>
                     )}
+                  </span>
+                )}
+                {/* PR-228: 계산값과 작지 값의 비율이 10배 초과/1·10 미만이면 ±5% mismatch와
+                    별도로 강한 경고 — 요척 자체가 틀렸을 가능성이 크다는 사용자 보고
+                    사례(요척에 수량이 잘못 들어가 249,001처럼 부풀려진 값). */}
+                {r.extremeConsumptionMismatch && (
+                  <span
+                    className="block text-xs text-red-700 font-medium"
+                    data-testid={`extreme-consumption-mismatch-${r.itemId}`}
+                    title="자재·BOM 조회 > 해당 행 수정 > 단위소요량에서 고치세요."
+                  >
+                    ⚠ 요척이 비정상적으로 보입니다(계산값 {fmt(r.computedQty ?? 0)} / 작지 값 {fmt(r.sheetQty ?? 0)}) — 요척을 확인해 주세요
                   </span>
                 )}
                 {r.packaging && <span className="block text-xs text-amber-700">{r.packaging.conversionFormula}</span>}

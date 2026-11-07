@@ -116,6 +116,21 @@ export function createEmptyBomItem(): AiBomItem {
   };
 }
 
+// PR-228: 요척(consumption)이 비어 있고 작지수량(requiredQty)과 스타일 총수량이 모두
+// 있으면 "요척(개당 수량) = 작지수량 ÷ 총수량"을 제안한다 — 사용자 보고 사례(수기로
+// 추가한 개수 품목에서 요척 칸에 수량을 잘못 넣어 249,001처럼 부풀려진 값이 나옴)를
+// 막기 위해, 수량을 요척 칸에 자동으로 복사하지 않고 버튼을 눌러야만 적용되는 제안만
+// 보여준다(자동 적용 금지). 총수량이 0/없으면 제안하지 않는다(나눗셈 무의미).
+export function suggestConsumptionFromSheetQty(
+  item: Pick<AiBomItem, 'consumption' | 'requiredQty'>,
+  totalQty: number | null | undefined,
+): number | null {
+  if (item.consumption != null) return null;
+  if (item.requiredQty == null || item.requiredQty <= 0) return null;
+  if (totalQty == null || totalQty <= 0) return null;
+  return Math.round((item.requiredQty / totalQty) * 100) / 100;
+}
+
 // PR-225: 직접 추가한 행의 "삭제" — 배열에서 실제로 제거한다(인식된 원본 행에는
 // 쓰지 않음, 그쪽은 기존 "제외" 체크만 유지). 가운데 행을 지우면 이후 인덱스가
 // 한 칸씩 당겨지므로, 호출자는 shiftIndexesAfterRemoval로 다른 index 기반 상태

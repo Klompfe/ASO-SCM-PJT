@@ -22,6 +22,7 @@ import {
   createEmptyBomItem,
   removeBomItem,
   shiftIndexesAfterRemoval,
+  suggestConsumptionFromSheetQty,
 } from '../utils/salesOrderBomReview';
 import { getAllItems } from '../api/items.service';
 import { buildUploadFailureInfo, resolveUploadFailureToastMessage, type UploadFailureInfo } from '../utils/salesOrderUploadError';
@@ -1101,7 +1102,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           </p>
                           <div className="overflow-x-auto max-h-96 overflow-y-auto">
                             <table className="border text-sm">
-                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1 min-w-[48px]">제외</th><th className="border p-1 min-w-[72px]">구분</th><th className="border p-1 min-w-[140px]">자재명</th><th className="border p-1 min-w-[72px]">규격</th><th className="border p-1 min-w-[72px]">소요량</th><th className="border p-1 min-w-[140px]">작지수량(출고량)</th><th className="border p-1 min-w-[150px]">발주수량(적용)</th><th className="border p-1 min-w-[96px]">공급사</th><th className="border p-1 min-w-[72px]">비고</th><th className="border p-1 min-w-[120px]">실/테이프 종류</th><th className="border p-1 min-w-[280px]">확인 필요</th></tr></thead>
+                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1 min-w-[48px]">제외</th><th className="border p-1 min-w-[72px]">구분</th><th className="border p-1 min-w-[140px]">자재명</th><th className="border p-1 min-w-[72px]">규격</th><th className="border p-1 min-w-[72px]" title="제품 1개당 들어가는 양입니다. 총수량이 아닙니다.">개당 소요량(요척)</th><th className="border p-1 min-w-[140px]" title="작지에 인쇄된 총 출고량(필요수량)입니다.">작지 출고량(총 필요 수량)</th><th className="border p-1 min-w-[150px]">발주수량(적용)</th><th className="border p-1 min-w-[96px]">공급사</th><th className="border p-1 min-w-[72px]">비고</th><th className="border p-1 min-w-[120px]">실/테이프 종류</th><th className="border p-1 min-w-[280px]">확인 필요</th></tr></thead>
                               <tbody>
                                 {result.bomItems.map((item, i) => {
                                   const candidate = item.materialSubTypeCandidate ?? null;
@@ -1201,6 +1202,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           step="any"
                                           className="border rounded px-1 py-0.5 w-16 text-xs text-right"
                                           data-testid={`bom-consumption-${index}-${i}`}
+                                          title="개당 소요량(요척) — 제품 1개당 들어가는 양입니다. 총수량이 아닙니다."
                                           value={item.consumption ?? ''}
                                           disabled={isExcluded}
                                           onChange={(e) => updateBomItemField(index, i, 'consumption', e.target.value === '' ? null : Number(e.target.value))}
@@ -1219,6 +1221,24 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                             ))}
                                           </div>
                                         )}
+                                        {/* PR-228: 요척이 비어 있고 작지수량·총수량이 모두 있을 때만 제안
+                                            칩을 보여준다 — 클릭해야 값이 들어간다(자동 적용 금지). */}
+                                        {(() => {
+                                          const suggestion = suggestConsumptionFromSheetQty(item, result.overview.totalQty);
+                                          if (suggestion == null) return null;
+                                          return (
+                                            <div className="mt-0.5" data-testid={`consumption-suggestion-${index}-${i}`}>
+                                              <button
+                                                type="button"
+                                                onClick={() => updateBomItemField(index, i, 'consumption', suggestion)}
+                                                className="px-1 py-0.5 rounded bg-sky-50 border border-sky-200 text-[10px] text-sky-800 hover:bg-sky-100"
+                                                title="작지 출고량 ÷ 총수량을 요척으로 사용합니다(적용 전까지 요척 칸은 비어 있습니다)."
+                                              >
+                                                요척(개당 수량)이 비어 있습니다 — 작지 수량 ÷ 총수량 = {suggestion.toFixed(2)}을 요척으로 사용할까요? [적용]
+                                              </button>
+                                            </div>
+                                          );
+                                        })()}
                                       </td>
                                       <td className="border p-1">
                                         {/* PR-220: 작지에 인쇄된 이 행의 수량("출고량") 원문값·단위 — 계산하지
@@ -1230,6 +1250,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                             step="any"
                                             className="border rounded px-1 py-0.5 w-14 text-xs text-right"
                                             data-testid={`bom-sheet-qty-${index}-${i}`}
+                                            title="작지 출고량(총 필요 수량) — 작지에 인쇄된 총 수량입니다."
                                             value={item.requiredQty ?? ''}
                                             disabled={isExcluded}
                                             onChange={(e) => updateBomItemField(index, i, 'requiredQty', e.target.value === '' ? null : Number(e.target.value))}
@@ -1292,8 +1313,24 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                                   {applied.sheetQtyLooksLikeTotalQtyMisread && (
                                                     <span className="block" data-testid={`applied-qty-looks-like-total-qty-${index}-${i}`}>
                                                       작지 값이 총수량과 같습니다 — 출고량 칸이 아닌 수량을 읽었을 수 있습니다
+                                                      {/* PR-228: 단위를 개수/길이로 판별할 수 없을 때만 덧붙인다(개수 단위면
+                                                          이 경고 자체가 뜨지 않는다 — applied.sheetQtyLooksLikeTotalQtyMisread
+                                                          가 이미 false). */}
+                                                      {applied.quantityUnitKind === 'unknown' && ' — 단위를 확인해 주세요'}
                                                     </span>
                                                   )}
+                                                </div>
+                                              )}
+                                              {/* PR-228: 계산값과 작지 값 비율이 10배 초과/1·10 미만이면 강한 경고 —
+                                                  요척 자체가 틀렸을 가능성이 크다는 사용자 보고 사례(요척에 수량이
+                                                  잘못 들어가 249,001처럼 부풀려진 값). */}
+                                              {applied.extremeConsumptionMismatch && (
+                                                <div
+                                                  className="text-[10px] text-red-700 font-medium mt-0.5"
+                                                  data-testid={`applied-qty-extreme-mismatch-${index}-${i}`}
+                                                  title="자재·BOM 조회 > 해당 행 수정 > 단위소요량에서 고치세요."
+                                                >
+                                                  ⚠ 요척이 비정상적으로 보입니다(계산값 {applied.computedQty.toLocaleString('ko-KR')} / 작지 값 {applied.sheetQty != null ? applied.sheetQty.toLocaleString('ko-KR') : '-'}) — 요척을 확인해 주세요
                                                 </div>
                                               )}
                                               {(display.kind === 'SUBTYPE_NEEDED' || display.kind === 'UNIT_MISMATCH') && (

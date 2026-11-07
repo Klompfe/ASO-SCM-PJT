@@ -285,6 +285,23 @@ describe('suggestStyleLinkedQuantity', () => {
     expect(r.unitLabel).toBeNull();
     expect(r.note).toContain('색상별 수량 확인 필요');
   });
+
+  // PR-228: 계산값과 작지 값의 비율이 비정상(10배 초과/1·10 미만)이면 요척 자체가
+  // 틀렸을 가능성이 크므로, packaging/conversionWarning보다 먼저 확인해 [B] 수량을
+  // 비운다(계산값을 그대로 넣지 않음) — 사용자 보고 사례(249,001 vs 499).
+  it('extremeConsumptionMismatch면 packaging이 있어도 수량을 비우고 안내한다', () => {
+    const r = suggestStyleLinkedQuantity(baseRow({
+      extremeConsumptionMismatch: true,
+      packaging: { packagingUnitLabel: '콘', unitLengthM: 4000, requiredPackages: 76, shortagePackages: 26, conversionFormula: 'x' },
+    }));
+    expect(r.quantity).toBeNull();
+    expect(r.note).toContain('비정상');
+  });
+
+  it('extremeConsumptionMismatch가 없으면(정상) 기존대로 수량을 제안한다', () => {
+    const r = suggestStyleLinkedQuantity(baseRow({ requiredQty: 100.2, orderedQty: 30, shortageQty: 70.2 }));
+    expect(r.quantity).toBe(71);
+  });
 });
 
 // PR-187 C: "이 자재로 발주하기"(스타일 미연결 경로)도 경고/콘·롤 행에서는 미터 수량을
@@ -318,6 +335,11 @@ describe('suggestUnlinkedQuantity (PR-187 C)', () => {
   it('일반 자재는 기존 suggestedQuantity(ceil 또는 최소 1)와 동일하게 동작한다(이 경로의 기존 동작 유지)', () => {
     expect(suggestUnlinkedQuantity(baseRow({ shortageQty: 70.2 }))).toBe(suggestedQuantity(70.2));
     expect(suggestUnlinkedQuantity(baseRow({ shortageQty: 0 }))).toBe(suggestedQuantity(0));
+  });
+
+  // PR-228: 스타일 미연결 경로도 같은 원칙 — 요척이 비정상적으로 보이면 수량을 비운다.
+  it('extremeConsumptionMismatch면 수량이 비어야 한다(null)', () => {
+    expect(suggestUnlinkedQuantity(baseRow({ extremeConsumptionMismatch: true, shortageQty: 70.2 }))).toBeNull();
   });
 
   it('어떤 행이든 undefined가 아니라 number | null을 돌려준다 — 이전 품목의 quantityInput이 남지 않는 전제', () => {

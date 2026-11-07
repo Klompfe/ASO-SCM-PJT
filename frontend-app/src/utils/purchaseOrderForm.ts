@@ -136,7 +136,15 @@ export interface StyleQuantitySuggestion {
 const fmtQty = (n: number): string => n.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 const SUFFICIENT_NOTE = '소요량 충족 — 추가 발주는 수량을 직접 입력하세요.';
 
+const EXTREME_CONSUMPTION_NOTE = '요척이 비정상적으로 보입니다 — 수량을 직접 확인해 입력하세요.';
+
 export function suggestStyleLinkedQuantity(row: MaterialRequirementRow): StyleQuantitySuggestion {
+  // PR-228: 계산값과 작지 값의 비율이 10배를 넘거나 1/10 미만이면(요척 자체가 틀렸을
+  // 가능성) [B] 수량을 자동으로 채우지 않는다 — PR-220의 "종류 미지정/색상 확인 필요
+  // 때는 수량을 비워 둔다"는 원칙과 같다.
+  if (row.extremeConsumptionMismatch) {
+    return { quantity: null, unitLabel: null, summary: `소요 ${fmtQty(row.requiredQty)} / 기발주 ${fmtQty(row.orderedQty)} / 부족 ${fmtQty(row.shortageQty)}`, note: EXTREME_CONSUMPTION_NOTE };
+  }
   if (row.packaging) {
     const { requiredPackages, shortagePackages, packagingUnitLabel } = row.packaging;
     return {
@@ -165,6 +173,8 @@ export function suggestStyleLinkedQuantity(row: MaterialRequirementRow): StyleQu
 // — 이 경로의 원래 동작을 바꾸지 않기 위함. 항상 number | null을 돌려줘(undefined 없음)
 // 호출자가 quantityInput을 매번 명시적으로 설정하게 해서 이전 품목의 수량이 남지 않는다.
 export function suggestUnlinkedQuantity(row: MaterialRequirementRow): number | null {
+  // PR-228: 스타일 미연결 경로도 같은 원칙 — 요척이 비정상적으로 보이면 수량을 비워 둔다.
+  if (row.extremeConsumptionMismatch) return null;
   if (row.packaging) {
     return row.packaging.shortagePackages > 0 ? row.packaging.shortagePackages : null;
   }

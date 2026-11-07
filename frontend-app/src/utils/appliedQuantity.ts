@@ -30,17 +30,54 @@ export interface AppliedQuantityResult {
   // (소수 오차 허용 안 함) 출고량 칸이 아니라 총수량(또는 다른 칸)을 읽었을 가능성이
   // 크다는 표시 — 적용은 그래도 계산값(또는 basis='sheet'면 작지 값) 그대로.
   sheetQtyLooksLikeTotalQtyMisread: boolean;
+  // PR-228: 화면이 sheetQtyLooksLikeTotalQtyMisread 문구에 "단위를 확인해 주세요"를
+  // 덧붙일지 결정하는 데 쓴다(unitKind==='unknown'일 때만).
+  quantityUnitKind: QuantityUnitKind;
+  // PR-228: 계산값과 작지 값의 비율이 10배를 넘거나 1/10 미만이면 true — 기존 ±5%
+  // mismatch와 별도인 강한 경고(요척 자체가 틀렸을 가능성).
+  extremeConsumptionMismatch: boolean;
 }
 
 const normUnit = (u: string | null | undefined): string => (u ?? '').trim().toUpperCase();
 const SHEET_QTY_MISMATCH_THRESHOLD_PCT = 0.05;
 
-// 백엔드 material-requirements.util.ts의 같은 이름 함수와 동일한 순수 로직 — 두 TS
-// 프로젝트가 분리돼 있어 복제한다(이 파일의 다른 함수들과 같은 기존 패턴).
-export function sheetQtyLooksLikeTotalQtyMisread(sheetQty: number | null | undefined, totalQty: number | null | undefined, mismatch: boolean): boolean {
+// PR-228: 백엔드 material-requirements.util.ts의 같은 이름 타입·함수와 동일한 순수
+// 로직 — 두 TS 프로젝트가 분리돼 있어 복제한다(이 파일의 다른 함수들과 같은 기존 패턴).
+// 개수 단위(EA/PC/PCS/개/SET/장 등) 품목은 "1개당 1"이 정상이라 작지 값이 총수량과
+// 같은 것이 오경고가 아니다(사용자 보고: 수기 추가한 금속장식(EA) 행).
+export type QuantityUnitKind = 'count' | 'length' | 'unknown';
+
+const COUNT_UNIT_TOKENS = new Set(['EA', 'PC', 'PCS', '개', 'SET', '세트', '장', 'PAIR', '족']);
+const LENGTH_UNIT_TOKENS = new Set(['M', 'YD', 'Y', 'MM', 'CM', 'KM', 'MT']);
+
+export function classifyQuantityUnit(unit: string | null | undefined): QuantityUnitKind {
+  const u = (unit ?? '').trim().toUpperCase();
+  if (!u) return 'unknown';
+  if (COUNT_UNIT_TOKENS.has(u)) return 'count';
+  if (LENGTH_UNIT_TOKENS.has(u)) return 'length';
+  return 'unknown';
+}
+
+export function sheetQtyLooksLikeTotalQtyMisread(
+  sheetQty: number | null | undefined,
+  totalQty: number | null | undefined,
+  mismatch: boolean,
+  unitKind: QuantityUnitKind = 'unknown',
+): boolean {
+  if (unitKind === 'count') return false;
   if (!mismatch) return false;
   if (sheetQty == null || totalQty == null) return false;
   return sheetQty === totalQty;
+}
+
+// PR-228: 계산값과 작지 값의 비율이 10배를 넘거나 1/10 미만이면 강한 경고 — 백엔드
+// isExtremeConsumptionMismatch와 동일한 순수 로직.
+const EXTREME_CONSUMPTION_RATIO = 10;
+export function isExtremeConsumptionMismatch(computedQty: number | null | undefined, sheetQty: number | null | undefined): boolean {
+  if (computedQty == null || sheetQty == null) return false;
+  if (computedQty === 0 || sheetQty === 0) return false;
+  const ratio = Math.abs(computedQty) / Math.abs(sheetQty);
+  return ratio > EXTREME_CONSUMPTION_RATIO || ratio < 1 / EXTREME_CONSUMPTION_RATIO;
 }
 
 // 백엔드 normalizeColorForMatch와 동일: 앞뒤 공백 제거 + 대소문자 무시 + 내부 연속
@@ -122,9 +159,12 @@ export function resolveAppliedQuantity(opts: {
     mismatch = diffPct > SHEET_QTY_MISMATCH_THRESHOLD_PCT;
   }
 
+  const quantityUnitKind = classifyQuantityUnit(opts.itemUnit);
   return {
     basis, qty, computedQty: computedRowQty, sheetQty, mismatch, formula,
-    sheetQtyLooksLikeTotalQtyMisread: sheetQtyLooksLikeTotalQtyMisread(sheetQty, target || null, mismatch),
+    sheetQtyLooksLikeTotalQtyMisread: sheetQtyLooksLikeTotalQtyMisread(sheetQty, target || null, mismatch, quantityUnitKind),
+    quantityUnitKind,
+    extremeConsumptionMismatch: isExtremeConsumptionMismatch(computedRowQty || null, sheetQty),
   };
 }
 

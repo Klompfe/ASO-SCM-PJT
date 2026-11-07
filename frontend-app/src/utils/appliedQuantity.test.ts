@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildColorQtyMap, resolveAppliedQuantity, formatLotBreakdown, sheetQtyLooksLikeTotalQtyMisread } from './appliedQuantity';
+import { buildColorQtyMap, resolveAppliedQuantity, formatLotBreakdown, sheetQtyLooksLikeTotalQtyMisread, classifyQuantityUnit, isExtremeConsumptionMismatch } from './appliedQuantity';
 import { formatBomItemQty, ceilToInt, type PackagingRuleLike } from './materialRequirementDisplay';
 
 const RULES: PackagingRuleLike[] = [
@@ -233,5 +233,72 @@ describe('resolveAppliedQuantity (PR-226 추가) — 총수량 오독 방어 통
     });
     expect(r.mismatch).toBe(true);
     expect(r.sheetQtyLooksLikeTotalQtyMisread).toBe(false);
+  });
+});
+
+describe('classifyQuantityUnit (PR-228 추가) — 순수 함수, 백엔드와 동일한 분류', () => {
+  it('개수 단위는 count, 길이 단위는 length, 그 외/빈 값은 unknown', () => {
+    expect(classifyQuantityUnit('EA')).toBe('count');
+    expect(classifyQuantityUnit('개')).toBe('count');
+    expect(classifyQuantityUnit('YD')).toBe('length');
+    expect(classifyQuantityUnit('M')).toBe('length');
+    expect(classifyQuantityUnit('ROLL')).toBe('unknown');
+    expect(classifyQuantityUnit(null)).toBe('unknown');
+  });
+});
+
+describe('isExtremeConsumptionMismatch (PR-228 추가) — 순수 함수, 백엔드와 동일한 로직', () => {
+  it('비율이 10배를 넘거나 1/10 미만이면 true, 10배 이내면 false', () => {
+    expect(isExtremeConsumptionMismatch(249001, 499)).toBe(true);
+    expect(isExtremeConsumptionMismatch(49.9, 499)).toBe(true);
+    expect(isExtremeConsumptionMismatch(758.48, 499)).toBe(false);
+    expect(isExtremeConsumptionMismatch(null, 499)).toBe(false);
+  });
+});
+
+// PR-228: 사용자 보고 — 수기로 추가한 개수 품목(단위 EA)에서 요척 칸에 수량(499)이
+// 잘못 들어가 계산값이 249,001(=499×499)로 부풀고, 작지 값(499)이 총수량(499)과 같아
+// PR-226의 "총수량 오독" 경고까지 겹쳐 떴다. 개수 단위는 "1개당 1"이 정상 케이스라
+// 그 경고를 내지 않아야 하고, 대신 비율이 비정상(499배)이므로 별도의 강한 경고를 낸다
+// — 서버(material-requirements.util.spec.ts)와 같은 합성 값으로 교차 검증한다.
+describe('resolveAppliedQuantity — 개수 품목 오경고 방지 + 비정상 요척 방어 (PR-228 추가)', () => {
+  it('단위 EA·요척 1(정상)·작지 499·총수량 499 → 경고 없음', () => {
+    const r = resolveAppliedQuantity({
+      consumption: 1, totalQty: 499, sheetQty: 499, sheetQtyUnit: 'EA', itemUnit: 'EA',
+      colorCode: '', colorQtyMap: new Map(),
+    });
+    expect(r.mismatch).toBe(false);
+    expect(r.sheetQtyLooksLikeTotalQtyMisread).toBe(false);
+    expect(r.extremeConsumptionMismatch).toBe(false);
+  });
+
+  it('사용자 보고 재현: 단위 EA·요척에 수량이 잘못 들어감(499)·작지 499·총수량 499 → 개수 품목이라 "총수량과 같음" 오경고는 없고, 비정상 요척 강한 경고만 뜬다', () => {
+    const r = resolveAppliedQuantity({
+      consumption: 499, totalQty: 499, sheetQty: 499, sheetQtyUnit: 'EA', itemUnit: 'EA',
+      colorCode: '', colorQtyMap: new Map(),
+    });
+    expect(r.qty).toBe(249001);
+    expect(r.mismatch).toBe(true);
+    expect(r.sheetQtyLooksLikeTotalQtyMisread).toBe(false);
+    expect(r.extremeConsumptionMismatch).toBe(true);
+    expect(r.quantityUnitKind).toBe('count');
+  });
+
+  it('단위 yd(길이)면 같은 상황에서도 "총수량과 같음" 경고가 그대로 뜬다(PR-226 케이스 유지)', () => {
+    const r = resolveAppliedQuantity({
+      consumption: 1.52, totalQty: 499, sheetQty: 499, sheetQtyUnit: 'YD', itemUnit: 'YD',
+      colorCode: '', colorQtyMap: new Map(),
+    });
+    expect(r.sheetQtyLooksLikeTotalQtyMisread).toBe(true);
+    expect(r.quantityUnitKind).toBe('length');
+  });
+
+  it('단위를 개수/길이로 판별할 수 없으면(예: ROLL) quantityUnitKind는 unknown이다', () => {
+    const r = resolveAppliedQuantity({
+      consumption: 1.52, totalQty: 499, sheetQty: 499, sheetQtyUnit: 'ROLL', itemUnit: 'ROLL',
+      colorCode: '', colorQtyMap: new Map(),
+    });
+    expect(r.sheetQtyLooksLikeTotalQtyMisread).toBe(true);
+    expect(r.quantityUnitKind).toBe('unknown');
   });
 });

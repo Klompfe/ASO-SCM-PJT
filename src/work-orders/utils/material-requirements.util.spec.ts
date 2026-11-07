@@ -1,4 +1,4 @@
-import { calculateMaterialRequirements, sheetQtyLooksLikeTotalQtyMisread } from './material-requirements.util';
+import { calculateMaterialRequirements, sheetQtyLooksLikeTotalQtyMisread, classifyQuantityUnit, isExtremeConsumptionMismatch } from './material-requirements.util';
 
 const mat = (id: number, name: string) => ({ id, code: `M${id}`, name });
 // PR-220b: 기본 colorCode를 ''(공통/FREE 취급)으로 둔다 — 색상 비교 로직이 생기기 전에는
@@ -891,5 +891,106 @@ describe('calculateMaterialRequirements — 총수량 오독 방어 통합 (PR-2
     expect(row.requiredQty).toBe(499); // 자동으로 버리지 않고 적용은 그대로 작지 값
     expect(row.mismatch).toBe(true);
     expect(row.sheetQtyLooksLikeTotalQtyMisread).toBe(true);
+  });
+});
+
+describe('classifyQuantityUnit (PR-228 추가) — 순수 함수', () => {
+  it('개수 단위(EA/PC/PCS/개/SET/장 등)는 count다', () => {
+    expect(classifyQuantityUnit('EA')).toBe('count');
+    expect(classifyQuantityUnit('ea')).toBe('count');
+    expect(classifyQuantityUnit('개')).toBe('count');
+    expect(classifyQuantityUnit('SET')).toBe('count');
+  });
+  it('길이 단위(YD/M/MM/CM 등)는 length다', () => {
+    expect(classifyQuantityUnit('YD')).toBe('length');
+    expect(classifyQuantityUnit('M')).toBe('length');
+    expect(classifyQuantityUnit('mm')).toBe('length');
+  });
+  it('비어 있거나 판단할 수 없으면 unknown이다', () => {
+    expect(classifyQuantityUnit(null)).toBe('unknown');
+    expect(classifyQuantityUnit('')).toBe('unknown');
+    expect(classifyQuantityUnit('ROLL')).toBe('unknown');
+  });
+});
+
+describe('sheetQtyLooksLikeTotalQtyMisread — unitKind 반영 (PR-228 추가)', () => {
+  it('개수 단위(count)면 작지 값이 총수량과 같아도 false다(정상적인 1개당 1)', () => {
+    expect(sheetQtyLooksLikeTotalQtyMisread(499, 499, true, 'count')).toBe(false);
+  });
+  it('길이 단위(length)면 기존처럼 true다', () => {
+    expect(sheetQtyLooksLikeTotalQtyMisread(499, 499, true, 'length')).toBe(true);
+  });
+  it('단위를 모르면(unknown, 기본값) 기존처럼 true다 — 화면이 "단위 확인" 문구를 덧붙인다', () => {
+    expect(sheetQtyLooksLikeTotalQtyMisread(499, 499, true)).toBe(true);
+    expect(sheetQtyLooksLikeTotalQtyMisread(499, 499, true, 'unknown')).toBe(true);
+  });
+});
+
+describe('isExtremeConsumptionMismatch (PR-228 추가) — 순수 함수', () => {
+  it('비율이 10배를 넘으면 true다(요척에 수량이 잘못 들어간 사례: 249,001 vs 499)', () => {
+    expect(isExtremeConsumptionMismatch(249001, 499)).toBe(true);
+  });
+  it('비율이 1/10 미만이어도 true다', () => {
+    expect(isExtremeConsumptionMismatch(49.9, 499)).toBe(true);
+  });
+  it('정상 범위(10배 이내)면 false다', () => {
+    expect(isExtremeConsumptionMismatch(758.48, 499)).toBe(false);
+  });
+  it('값이 없거나 0이면 false다(비교 불가)', () => {
+    expect(isExtremeConsumptionMismatch(null, 499)).toBe(false);
+    expect(isExtremeConsumptionMismatch(249001, null)).toBe(false);
+    expect(isExtremeConsumptionMismatch(0, 499)).toBe(false);
+    expect(isExtremeConsumptionMismatch(249001, 0)).toBe(false);
+  });
+});
+
+describe('calculateMaterialRequirements — 개수 품목 오경고 방지 + 비정상 요척 방어 (PR-228 추가, 합성 값)', () => {
+  const matUnit = (id: number, name: string, unit: string | null) => ({ id, code: `M${id}`, name, unit });
+
+  it('단위 EA·요척 1(정상)·작지 499·총수량 499 → 경고 없음(계산값과 작지 값이 같아 mismatch 자체가 없음)', () => {
+    const [row] = calculateMaterialRequirements(
+      499,
+      [{ id: 1, material: matUnit(10, '금속장식', 'EA'), consumption: 1, category: '부자재', colorCode: '', sheetQty: 499, sheetQtyUnit: 'EA' }],
+      new Map(),
+    );
+    expect(row.requiredQty).toBe(499);
+    expect(row.mismatch).toBe(false);
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBeFalsy();
+    expect(row.extremeConsumptionMismatch).toBeFalsy();
+  });
+
+  it('사용자 보고 재현: 단위 EA·요척에 수량이 잘못 들어감(499)·작지 499·총수량 499 → 계산값 249,001로 부풀지만 개수 품목이라 "총수량과 같음" 오경고는 뜨지 않고, 비정상 요척 강한 경고만 뜬다', () => {
+    const [row] = calculateMaterialRequirements(
+      499,
+      [{ id: 1, material: matUnit(10, '금속장식', 'EA'), consumption: 499, category: '부자재', colorCode: '', sheetQty: 499, sheetQtyUnit: 'EA' }],
+      new Map(),
+    );
+    expect(row.computedQty).toBe(249001);
+    expect(row.mismatch).toBe(true);
+    // 개수 단위라 "작지 값이 총수량과 같음"(정상 케이스) 오경고는 뜨지 않는다 — PR-226이 그대로였다면 true였을 상황.
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBe(false);
+    // 대신 계산값/작지 값 비율(499배)이 비정상이므로 별도의 강한 경고가 뜬다.
+    expect(row.extremeConsumptionMismatch).toBe(true);
+  });
+
+  it('단위 yd·작지 499·총수량 499·계산값 758.48 → 길이 단위라 "총수량과 같음" 경고가 그대로 뜬다(PR-226 케이스 유지)', () => {
+    const [row] = calculateMaterialRequirements(
+      499,
+      [{ id: 1, material: matUnit(10, '겉감', 'YD'), consumption: 1.52, category: '겉감', colorCode: '', sheetQty: 499, sheetQtyUnit: 'YD' }],
+      new Map(),
+    );
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBe(true);
+    expect(row.quantityUnitKind).toBe('length');
+    expect(row.extremeConsumptionMismatch).toBe(false); // 758.48/499 ≈ 1.52배, 10배 이내
+  });
+
+  it('단위를 개수/길이로 판별할 수 없으면(예: ROLL) 기존처럼 "총수량과 같음" 경고가 뜨고 quantityUnitKind는 unknown이다(화면이 "단위 확인" 문구를 덧붙일 신호)', () => {
+    const [row] = calculateMaterialRequirements(
+      499,
+      [{ id: 1, material: matUnit(10, '겉감', 'ROLL'), consumption: 1.52, category: '겉감', colorCode: '', sheetQty: 499, sheetQtyUnit: 'ROLL' }],
+      new Map(),
+    );
+    expect(row.sheetQtyLooksLikeTotalQtyMisread).toBe(true);
+    expect(row.quantityUnitKind).toBe('unknown');
   });
 });
