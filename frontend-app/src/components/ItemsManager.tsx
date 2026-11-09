@@ -16,7 +16,7 @@ import { Pagination } from './Pagination';
 import { selectBulkApproveTargets } from '../utils/mappingApproval';
 import { extractNotices, type StyleCommitResult } from '../utils/commitNotices';
 import { BulkApproveResult } from './CommitResultPanel';
-import { fetchItemPage, hasAnySearchCondition } from '../utils/listQueries';
+import { fetchItemPage } from '../utils/listQueries';
 import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
 import { buildEditableOrderByItem } from '../utils/purchaseOrderForm';
 import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.service';
@@ -273,13 +273,13 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   }, [catalogOpen, filter.type, filter.keyword]);
 
   // PR-103: 구분(type)/키워드(이름·코드) 검색 — 검색 시 page를 1로 리셋한다.
-  // PR-139: 구분도 안 고르고 키워드도 비어있으면(그냥 전체 목록이 나오는 대신) 경고하고 조회를 막는다.
+  // PR-232: 예전엔(PR-139) 구분도 안 고르고 키워드도 비어있으면 경고 토스트만 띄우고
+  // 조회 자체를 막았다 — 그런데 이 화면은 "검색 조건을 몰라도 전체 목록을 보고 싶을
+  // 수 있는" 품목 마스터 관리 화면이라, 조건 없이 눌러도 그냥 전체 목록(첫 페이지)을
+  // 보여주는 쪽으로 바꾼다(다른 화면(작업지시 목록 등)의 같은 패턴은 건드리지 않음 —
+  // hasAnySearchCondition/toast 가드는 이 화면에서만 뗐다).
   const handleItemSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hasAnySearchCondition(searchType, searchKeyword)) {
-      toast.error('검색 조건을 하나 이상 선택하거나 입력해 주세요.');
-      return;
-    }
     setFilter({ page: 1, limit: 10, type: searchType || undefined, keyword: searchKeyword || undefined });
   };
 
@@ -1292,7 +1292,10 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
             <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50 self-end" disabled={loading}>Create</button>
           </form>
 
-          {/* PR-103: 구분(type)/키워드(이름·코드) 검색 — 기존 백엔드 필터를 화면에 연결. */}
+          {/* PR-103: 구분(type)/키워드(이름·코드) 검색 — 기존 백엔드 필터를 화면에 연결.
+              PR-232: 위쪽 등록 폼과 헷갈리지 않게 작은 제목을 붙이고, placeholder에
+              예시를 넣어 이름/코드 둘 다 검색된다는 걸 알린다(레이아웃은 그대로). */}
+          <p className="text-sm font-medium text-gray-600 mt-2">품목 검색</p>
           <form onSubmit={handleItemSearchSubmit} className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <select
               className="border border-gray-300 rounded px-3 py-2"
@@ -1306,7 +1309,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
             </select>
             <input
               className="border border-gray-300 rounded px-3 py-2"
-              placeholder="품목명/코드 검색"
+              placeholder="품목명 또는 코드(예: 다데, MAT-12345)"
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
             />

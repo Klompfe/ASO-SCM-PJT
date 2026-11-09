@@ -59,10 +59,19 @@ describe('MappingCommitService', () => {
     ],
   };
 
+  // PR-233: commit()이 신규 Item을 구분할 때 이제 material.id로 기존 BomItem과 매칭한다
+  // (이름 비교를 normalizeForFuzzyMatch로 올리면서, 같은 payload 안에서 자재명이 다른
+  // 두 행이 둘 다 "id 없음(undefined)"으로 저장되면 서로 같은 자재로 오인되는 걸 막기
+  // 위해, 실제 DB의 autoincrement처럼 저장 시 고유 id를 부여해야 한다).
+  let nextMockItemId = 1000;
+
   beforeEach(async () => {
     jest.clearAllMocks();
+    nextMockItemId = 1000;
     mockDataSource.createQueryRunner.mockReturnValue(mockQueryRunner);
-    mockQueryRunnerManager.save.mockImplementation((_entity: any, data: any) => Promise.resolve(data));
+    mockQueryRunnerManager.save.mockImplementation((entity: any, data: any) =>
+      Promise.resolve(entity === Item && data?.id == null ? { ...data, id: nextMockItemId++ } : data),
+    );
     mockQueryRunnerManager.create.mockImplementation((_entity: any, data: any) => data);
     mockQueryRunnerManager.findOne.mockResolvedValue(null);
     mockQueryRunnerManager.find.mockResolvedValue([]); // 기본: 이 스타일에 등록된 BOM 없음
@@ -169,10 +178,9 @@ describe('MappingCommitService', () => {
 
     it('기존 자재(Item)가 이미 있으면 재생성하지 않고 재사용해야 한다', async () => {
       const existingMaterial = { id: 42, name: 'POLY BAG' };
-      mockQueryRunnerManager.findOne.mockImplementation((entity: any) => {
-        if (entity === Item) return Promise.resolve(existingMaterial);
-        return Promise.resolve(null);
-      });
+      mockQueryRunnerManager.find.mockImplementation((entity: any) =>
+        Promise.resolve(entity === Item ? [existingMaterial] : []),
+      );
 
       await service.commit(validPayload);
 
@@ -305,12 +313,13 @@ describe('MappingCommitService', () => {
     beforeEach(() => {
       mockQueryRunnerManager.findOne.mockImplementation((entity: any, options?: any) => {
         if (entity === MasterStyle) return Promise.resolve({ ...existingStyle, overview: { ...existingOverview } });
-        if (entity === Item) return Promise.resolve({ id: 10, name: '원단' });
         return Promise.resolve(null);
       });
-      mockQueryRunnerManager.find.mockImplementation((entity: any) =>
-        Promise.resolve(entity === Bom ? [{ ...existingBom, items: [{ ...existingBomItem }] }] : []),
-      );
+      mockQueryRunnerManager.find.mockImplementation((entity: any) => {
+        if (entity === Bom) return Promise.resolve([{ ...existingBom, items: [{ ...existingBomItem }] }]);
+        if (entity === Item) return Promise.resolve([{ id: 10, name: '원단' }]);
+        return Promise.resolve([]);
+      });
     });
 
     it('(a) 기존 BomItem은 그대로 유지되고 수정 저장되지 않는다', async () => {
@@ -409,7 +418,11 @@ describe('MappingCommitService', () => {
       return saves[0][1].bom.id;
     };
     const givenBoms = (boms: any[]) =>
-      mockQueryRunnerManager.find.mockImplementation((entity: any) => Promise.resolve(entity === Bom ? boms : []));
+      mockQueryRunnerManager.find.mockImplementation((entity: any) => {
+        if (entity === Bom) return Promise.resolve(boms);
+        if (entity === Item) return Promise.resolve([{ id: 10, name: '원단' }]);
+        return Promise.resolve([]);
+      });
 
     it('(e) id가 더 큰 BOM이 비활성이면 활성(더 오래된) BOM에 병합한다', async () => {
       givenBoms([bomWith(50, true), bomWith(90, false)]);

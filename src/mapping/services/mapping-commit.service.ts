@@ -20,6 +20,7 @@ import {
   type BomDiffRow,
   type BomSimilarPair,
 } from '../utils/bom-diff.util';
+import { normalizeForFuzzyMatch } from '../../boms/utils/bom-name-normalize.util';
 
 // PR-132: commit()이 사용자에게 알려야 하는 두 종류의 사실을 문자열 패턴이 아니라 구조로 구분한다.
 // - NEEDS_REVIEW: 병합 중 "자동 반영을 보류"했다 → 사용자가 확인하고 필요하면 수동으로 고쳐야 한다.
@@ -194,9 +195,29 @@ export class MappingCommitService {
         bom.items = [];
       }
 
+      // PR-233: 이름 비교를 "정규화 일치"로 올린다(normalizeForFuzzyMatch, PR-198).
+      // 같은 작지를 재인식해 AI가 공백/괄호 종류/대소문자만 다르게 내는 경우 새 Item을
+      // 또 만들지 않는다. 괄호 "안" 내용은 지우지 않으므로(다데<면> → 다데면, 다데<실크>
+      // → 다데실크) 실제로 다른 자재는 여전히 구분된다. 정규화 이름이 같은 Item이 이미
+      // 여러 개면(과거 중복) id가 가장 작은(가장 오래된) 것을 결정적으로 재사용한다 — 이
+      // PR은 과거에 이미 생긴 중복은 정리하지 않는다(별도 PR 대상). 이번 payload 안에서
+      // 새로 만든 Item도 바로 아래 맵에 더해 같은 payload의 다른 행이 다시 새 Item을
+      // 만들지 않게 한다.
+      const allItems = await queryRunner.manager.find(Item);
+      const materialsByNormalizedName = new Map<string, Item[]>();
+      for (const it of allItems) {
+        const key = normalizeForFuzzyMatch(it.name);
+        if (!key) continue;
+        const arr = materialsByNormalizedName.get(key) ?? [];
+        arr.push(it);
+        materialsByNormalizedName.set(key, arr);
+      }
+
       for (const item of bomItems) {
         // 5. Register Material if not exists
-        let material = await queryRunner.manager.findOne(Item, { where: { name: item.itemName } });
+        const normalizedItemName = normalizeForFuzzyMatch(item.itemName);
+        let material = (materialsByNormalizedName.get(normalizedItemName) ?? [])
+          .sort((a, b) => a.id - b.id)[0];
         if (!material) {
           material = await queryRunner.manager.save(Item, {
             code: `MAT-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
@@ -204,12 +225,15 @@ export class MappingCommitService {
             type: ItemType.RAW_MATERIAL,
             unit: 'EA'
           });
+          if (normalizedItemName) {
+            materialsByNormalizedName.set(normalizedItemName, [material]);
+          }
         }
 
         const colorCode = normalizeKeyPart(item.colorCode);
         const spec = normalizeKeyPart(item.spec);
         const existingBomItem = (bom.items ?? []).find(
-          (bi) => bi.material?.name === item.itemName && bi.colorCode === colorCode && bi.spec === spec,
+          (bi) => bi.material?.id === material.id && bi.colorCode === colorCode && bi.spec === spec,
         );
 
         if (existingBomItem) {

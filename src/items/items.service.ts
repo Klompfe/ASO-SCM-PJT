@@ -145,14 +145,23 @@ export class ItemsService {
 
     const queryBuilder = this.itemRepository.createQueryBuilder('item');
 
-    if (filter?.type) {
-      queryBuilder.andWhere('item.type = :type', { type: filter.type });
+    const type = filter?.type?.trim();
+    if (type) {
+      queryBuilder.andWhere('item.type = :type', { type });
     }
 
-    if (filter?.keyword) {
+    // PR-232: Postgres의 LIKE는 기본적으로 대소문자를 구분한다(sqlite의 LIKE는 ASCII만
+    // 자동으로 대소문자를 구분하지 않아 테스트 DB에서는 숨겨져 있었다) — 코드(MAT-… 등
+    // 영문 코드)를 다른 대소문자로 검색하면 운영 DB(Postgres)에서만 0건이 될 수 있었다.
+    // LOWER()로 양쪽을 맞춰 두 DB에서 같은 결과가 나오게 한다. 앞뒤 공백은 트림(프런트도
+    // 트림하지만, 이 API를 다른 곳에서 직접 호출할 때도 같게 동작하도록 서버도 트림 —
+    // PurchaseOrdersManager.tsx의 searchRawMaterials처럼 trim 없이 바로 getItems를
+    // 부르는 다른 화면도 이 서버 쪽 트림으로 같이 보호된다).
+    const keyword = filter?.keyword?.trim();
+    if (keyword) {
       queryBuilder.andWhere(
-        '(item.name LIKE :keyword OR item.code LIKE :keyword)',
-        { keyword: `%${filter.keyword}%` },
+        '(LOWER(item.name) LIKE LOWER(:keyword) OR LOWER(item.code) LIKE LOWER(:keyword))',
+        { keyword: `%${keyword}%` },
       );
     }
 

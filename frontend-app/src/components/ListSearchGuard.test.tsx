@@ -35,9 +35,13 @@ describe('목록 화면 검색 UX (PR-139)', () => {
     expect(html).toContain('초기화');
   });
 
-  it('품목관리(품목 마스터 목록): 구분/키워드 검색 UI가 그대로 있다(검색 자체는 남고, 빈 조건 판정만 추가)', () => {
+  // PR-232: 빈 조건 검색이 토스트로 막히던 걸(품목명/코드 검색이 "항상 0건"처럼
+  // 보이게 하는 원인 중 하나였던 UX) 전체 목록을 보여주는 쪽으로 바꿨다 — 이 화면만
+  // hasAnySearchCondition 가드를 뗐다(작업지시 목록은 그대로 유지, 위 테스트 참고).
+  it('품목관리(품목 마스터 목록): 구분/키워드 검색 UI가 있고, placeholder/제목이 PR-232로 바뀌었다', () => {
     const html = renderToStaticMarkup(createElement(ItemsManager, {}));
     expect(html).toContain('전체 구분');
-    expect(html).toContain('placeholder="품목명/코드 검색"');
+    expect(html).toContain('품목 검색');
+    expect(html).toContain('placeholder="품목명 또는 코드(예: 다데, MAT-12345)"');
   });
 });
