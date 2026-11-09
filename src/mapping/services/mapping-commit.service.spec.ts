@@ -510,13 +510,15 @@ describe('MappingCommitService', () => {
     // MANUAL 보존 원칙과 같음) — 같은 (자재명,색상,규격)으로 다시 커밋해도(sheetQty가 같이
     // 와서 그 행이 실제로 저장되는 경우 포함) 수동 값은 그대로 유지된다.
     it('같은 작지를 다시 저장해도(sheetQty 갱신 포함) 기존 행의 수동 지정 값은 지워지지 않는다', async () => {
-      mockQueryRunnerManager.find.mockImplementation((entity: any) =>
-        Promise.resolve(
-          entity === Bom
-            ? [{ ...existingBom, items: [{ ...existingBomItem, manualRequiredQty: 499, manualRequiredQtyNote: '현장 확인', manualRequiredQtyAt: new Date('2026-01-01') }] }]
-            : [],
-        ),
-      );
+      mockQueryRunnerManager.find.mockImplementation((entity: any) => {
+        if (entity === Bom) {
+          return Promise.resolve([
+            { ...existingBom, items: [{ ...existingBomItem, manualRequiredQty: 499, manualRequiredQtyNote: '현장 확인', manualRequiredQtyAt: new Date('2026-01-01') }] },
+          ]);
+        }
+        if (entity === Item) return Promise.resolve([{ id: 10, name: '원단' }]);
+        return Promise.resolve([]);
+      });
       const payload = rebuildPayload();
       payload.bomItems[0] = { ...payload.bomItems[0], sheetQty: 760, sheetQtyUnit: 'Y' };
       await service.commit(payload);
