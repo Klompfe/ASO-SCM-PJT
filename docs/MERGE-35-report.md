@@ -113,6 +113,19 @@ ALTER TABLE "bom_item_details" DROP COLUMN "manualRequiredQty";
 
 ---
 
+## 게이트 2 — 병합
+
+"Render 확인 완료" 확인 후 진행.
+
+- 병합 전 main SHA: `36cdcdb`(게이트 0 검증 시점과 동일 — 재확인 완료, 변경 없음).
+- `git merge --ff-only feat/bom-manual-required-qty` — fast-forward, 병합 후 main SHA: `e47e43c`.
+- 병합 후 트리가 게이트 0에서 검증한 코드와 같은지 확인: `git diff --name-only 08b6015 e47e43c` → **`docs/MERGE-35-report.md` 1개만**(이 보고서 파일 자체, 게이트 1에서 추가) — 검증 이후 코드 변경 없음 확인.
+- `npm run build` 재실행 — ✅ 성공.
+
+**Render는 배포 시작 때 `npm run migration:run:prod`를 자동 실행하므로 이 push가 곧 운영 마이그레이션이다.**
+
+- `git push origin main` 완료.
+
 ## 여기서 멈춤
 
-"Render 확인 완료" 줄이 없으므로 **게이트 2(main 병합)는 진행하지 않았다.** main에는 어떤 커밋도 push하지 않았다. 다음 단계가 필요하면 "Render 확인 완료" 줄을 붙여 재지시한다.
+배포 대기 중 — 확인 후 알려 주세요.
