@@ -194,6 +194,56 @@ describe('SalesOrdersService', () => {
     });
   });
 
+  // PR-234(사용자 확인 사례): 자재명에서 분리된 영문 표기/사용 위치가 commit payload에
+  // 올바른 필드로 전달되는지 — 위치는 별도 컬럼이 없어 remarks에 합쳐진다.
+  describe('commitAnalysis - 영문 표기/사용 위치 전달 (PR-234)', () => {
+    const mockMasterStyleRepo = { findOne: jest.fn() };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === Contract ? mockContractRepo : mockMasterStyleRepo,
+      );
+      mockMasterStyleRepo.findOne.mockResolvedValue({ styleNo: 'S1', overview: { totalQty: 100 } });
+      mockMappingCommitService.commit.mockResolvedValue({ success: true, notices: [], warnings: [] });
+      mockSalesOrderSpecsService.save.mockResolvedValue({ id: 1 });
+    });
+
+    it('englishName은 그대로 전달되고, location은 remarks가 없으면 "위치: ..."로 채워진다', async () => {
+      await service.commitAnalysis({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 100, targetRdd: null, documentDate: null },
+        bomItems: [{ category: '부자재', itemName: '다데테이프(면)', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null, englishName: 'EDGE TAPE', location: '오비.주머니입구' }],
+        sizeSpecs: [], workNotes: null,
+      } as any);
+
+      const payload = mockMappingCommitService.commit.mock.calls[0][0];
+      expect(payload.bomItems[0].englishName).toBe('EDGE TAPE');
+      expect(payload.bomItems[0].remarks).toBe('위치: 오비.주머니입구');
+    });
+
+    it('기존 remarks가 있으면 지우지 않고 위치를 뒤에 덧붙인다', async () => {
+      await service.commitAnalysis({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 100, targetRdd: null, documentDate: null },
+        bomItems: [{ category: '부자재', itemName: '다데테이프(면)', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: '수입산', englishName: null, location: '오비.주머니입구' }],
+        sizeSpecs: [], workNotes: null,
+      } as any);
+
+      const payload = mockMappingCommitService.commit.mock.calls[0][0];
+      expect(payload.bomItems[0].remarks).toBe('수입산 / 위치: 오비.주머니입구');
+    });
+
+    it('location이 없으면 remarks를 그대로 둔다(값을 지어내지 않음)', async () => {
+      await service.commitAnalysis({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 100, targetRdd: null, documentDate: null },
+        bomItems: [{ category: '부자재', itemName: '다데테이프(면)', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: '수입산', englishName: null, location: null }],
+        sizeSpecs: [], workNotes: null,
+      } as any);
+
+      const payload = mockMappingCommitService.commit.mock.calls[0][0];
+      expect(payload.bomItems[0].remarks).toBe('수입산');
+    });
+  });
+
   describe('commitAnalysis - CMT단가 전달 (PR-168)', () => {
     const mockMasterStyleRepo = { findOne: jest.fn() };
     const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };

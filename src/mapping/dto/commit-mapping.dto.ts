@@ -161,6 +161,13 @@ export class CommitBomItemDto {
   @IsString()
   remarks?: string;
 
+  // PR-234: 자재명에서 분리된 영문 표기 — Item(자재 마스터).englishName에 반영된다.
+  // 이미 값이 있는 자재면 덮어쓰지 않는다(mapping-commit.service.ts commit() 참고).
+  @ApiPropertyOptional({ description: '영문 표기(자재 마스터 englishName에 반영, 이미 값이 있으면 덮어쓰지 않음)' })
+  @IsOptional()
+  @IsString()
+  englishName?: string;
+
   // PR-073: 수출 선적서류 자동생성용 혼용율/HS코드 — 둘 다 짝값이다(혼용율이 바뀌면
   // HS코드도 바뀐다). 지금 당장은 매핑 파이프라인(엑셀/AI분석)이 이 값을 채우지
   // 않으므로 optional로 두고, 실제 입력은 프론트 인라인 수정으로 이뤄진다.

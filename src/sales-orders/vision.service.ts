@@ -21,6 +21,7 @@ import {
   checkYocheokMismatch,
   groupBomItemsForYocheok,
   checkYocheokMismatchBundle,
+  cleanupRecognizedMaterialName,
   type VisionWarning,
 } from './utils/vision-guardrails.util';
 import { suggestCategoryCorrection, applyCategoryCorrection } from './utils/term-autocorrect.util';
@@ -108,6 +109,12 @@ export const RESPONSE_SCHEMA = {
             requiredQtyLots: { type: SchemaType.ARRAY, items: { type: SchemaType.NUMBER }, nullable: true, description: '출고량 칸에 LOT1/LOT2 또는 ①②③ 같은 동그라미 번호로 구분된 여러 줄 숫자들(있을 때만, 한 줄이면 생략 가능). 소수 둘째 자리까지 그대로. 줄마다 단위가 다르면 담지 말고 null로 두세요.' },
             supplier: { type: SchemaType.STRING, nullable: true },
             remarks: { type: SchemaType.STRING, nullable: true },
+            // PR-234: 추가만(required에 안 넣음, 하위 호환) — itemName에 영문 표기/작업
+            // 위치가 섞이지 않도록 별도 필드로 받는다. 서버도 itemName에서 같은 내용을
+            // 다시 분리하는 안전망을 두므로(vision-guardrails.util.ts), 모델이 이 필드를
+            // 못 채워도 괜찮다.
+            englishName: { type: SchemaType.STRING, nullable: true, description: '자재명에 함께 적힌 영문 표기(확신 없으면 null, 추측 금지)' },
+            location: { type: SchemaType.STRING, nullable: true, description: '자재명에 함께 적힌 사용(작업) 위치(확신 없으면 null, 추측 금지)' },
             materialSubTypeCandidate: {
               type: SchemaType.STRING,
               nullable: true,
@@ -179,6 +186,8 @@ documentDate와 targetRdd는 문서 안의 서로 다른 위치에 있는 서로
 handwrittenCmtPriceCandidate / handwrittenCmtPriceMemo: 바이어(buyer)가 "미도"로 명확히 인식된 문서에서만 채우세요. 문서 상단에 인쇄된 표 글자와 구분되는, 손으로 비교적 큰 글씨로 적힌 숫자가 있으면 추출하세요. "기본금액 + 230 = 7,500"처럼 계산식 형태면 candidate에는 식의 마지막 합계 숫자만, memo에는 식 전체를 보이는 그대로(원문 표기) 옮기세요(식이 없으면 memo에도 숫자만). 바이어가 미도가 아니거나, 바이어를 못 읽었거나, 그런 수기 숫자가 없거나, 여러 후보가 있어 어느 것인지 확신할 수 없으면 둘 다 반드시 null로 두고 절대 추측하지 마세요.
 
 2. bomItems(자재명세): 상단 소재 표(소재No./소재명/색상/규격/요척/출고량)와 하단 부자재 표(안감/심지/포켓감/테이프/재봉사/단추/라벨 등, 규격/소요량/비고)를 모두 각 행 하나씩 bomItems 배열 항목으로 변환하세요. category는 소재/안감/심지/부자재 등 표의 구분명, itemName은 소재명 또는 부자재명, spec은 규격/색상, consumption은 요척 또는 소요량(숫자만, 단위 제외). supplier(공급처)는 문서에 실제로 인쇄/기재된 값이 있을 때만 그대로 옮기고, 문서에 없으면 절대 추정하지 말고 반드시 null로 두세요 — 공급처는 작업지시서 시점에는 정해지지 않고 이후 발주 단계에서 결정되는 정보입니다.
+
+itemName에는 자재 이름만 넣으세요 — 영문 표기(예: EDGE TAPE)나 사용(작업) 위치(예: 오비.주머니입구)가 자재명 칸에 함께 적혀 있어도 itemName에는 섞지 마세요. 영문 표기는 englishName에, 사용 위치는 location에 각각 따로 담으세요(둘 다 확신 없으면 반드시 null, 추측하지 마세요). 다만 자재 종류를 나타내는 괄호/꺾쇠 안 글자(예: "다데<면>"의 "면", "다데(컬러실크)"의 "컬러실크")는 영문 표기나 위치가 아니라 자재명의 일부이니 itemName에 그대로 남겨 두세요.
 
 requiredQty(출고량)는 그 행에 인쇄된 숫자를 계산하지 말고 그대로 옮기세요(요척×수량으로 다시 계산하지 마세요). 같은 자재가 색상별로 행이 나뉘어 있으면 각 색상 행의 출고량을 각각 그대로 읽으세요(다른 색상 행의 값을 합치거나 복사하지 마세요). requiredQtyUnit은 출고량 칸 옆/안에 인쇄된 단위(Y/M/EA/KG 등)를 원문 그대로 옮기고, 단위가 안 보이면 null로 두세요(추측하지 마세요). "합계"/"TOTAL" 같은 합산 행은 개별 자재 행이 아니므로 bomItems에 넣지 마세요. **requiredQty는 반드시 그 행의 "출고량(요구수량)" 칸에 있는 값만 읽으세요 — 스타일 총수량, 주문수량, 장수처럼 다른 칸(보통 문서 상단이나 다른 표)에 적힌 숫자를 출고량 대신 넣지 마세요.** 출고량 칸이 비어 있거나 안 보이면 다른 칸의 숫자로 대신 채우지 말고 null로 두세요.
 
@@ -537,6 +546,19 @@ export class VisionService {
           const unknownSupplier = checkUnknownName(item.supplierName, context.supplierNames ?? [], 'UNKNOWN_SUPPLIER');
           if (unknownSupplier) warnings.push(unknownSupplier);
         }
+
+        // PR-234(사용자 확인 사례): itemName에 섞인 영문 표기/작업 위치를 분리한다.
+        // AI가 englishName/location을 이미 직접 채웠으면 그 값을 우선하고(모델이 프롬프트
+        // 지시를 따른 경우), 비어 있을 때만 itemName에서 분리한 값으로 채운다 — 어느
+        // 경로든 itemName 자체는 항상 이 정제 결과로 맞춘다(화면 표시값=저장값 일치).
+        const nameCleanup = cleanupRecognizedMaterialName(item.itemName);
+        if (nameCleanup.itemName !== item.itemName) {
+          const rawName = item.itemName;
+          item.itemName = nameCleanup.itemName;
+          warnings.push({ code: 'MATERIAL_NAME_CLEANED', message: `자재명에서 영문 표기/작업 위치를 분리했습니다(원문: ${rawName})` });
+        }
+        if (!item.englishName && nameCleanup.englishName) item.englishName = nameCleanup.englishName;
+        if (!item.location && nameCleanup.locationNote) item.location = nameCleanup.locationNote;
 
         // PR-208: 품목군(괄호 앞) 자모 오독 자동 교정 — 후보가 정확히 1개이고 자모
         // 편집거리 <= 1일 때만 바꾸고(예: 보봉사→본봉사), 원문/교정값을 nameCorrection에

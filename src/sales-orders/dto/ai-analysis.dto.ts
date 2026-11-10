@@ -128,6 +128,24 @@ export class AiBomItemDto {
   @ApiPropertyOptional() @IsOptional() @IsString() supplier: string | null;
   @ApiPropertyOptional() @IsOptional() @IsString() remarks: string | null;
 
+  // PR-234: 자재명에 섞여 들어오던 영문 표기를 담는 선택 필드 — AI가 직접 채우는
+  // 경우(모델이 프롬프트 지시를 따른 경우)와, 비어 있으면 서버가 itemName에서 라벨/
+  // 끝에 붙은 영문 덩어리를 분리해 채우는 경우(vision.service.ts applyGuardrails)
+  // 둘 다 있다. commitAnalysis가 이 값을 Item.englishName으로 넘긴다(이미 값이
+  // 있으면 덮어쓰지 않음, mapping-commit.service.ts 참고).
+  @ApiPropertyOptional({ description: '영문 표기(AI가 직접 채우거나, 서버가 itemName에서 분리)' })
+  @IsOptional()
+  @IsString()
+  englishName?: string | null;
+
+  // PR-234: 자재명에 섞여 들어오던 사용(작업) 위치 — AI가 직접 채우거나, 비어 있으면
+  // 서버가 "(작업위치)"/"(위치)" 라벨이 붙은 구절을 itemName에서 분리해 채운다. 저장
+  // 시 BomItem에 별도 컬럼이 없어 remarks(비고)에 합쳐 넣는다(마이그레이션 없음).
+  @ApiPropertyOptional({ description: '사용(작업) 위치(AI가 직접 채우거나, 서버가 itemName에서 분리) — 저장 시 remarks에 합쳐짐' })
+  @IsOptional()
+  @IsString()
+  location?: string | null;
+
   // PR-175: 실/테이프 종류 AI 후보 — 자재명/규격 텍스트에 단서가 있을 때만 채워지고
   // (vision.service.ts 프롬프트), 확신이 없으면 null(추측 금지, RESPONSE_SCHEMA가
   // 고정된 한글 라벨 5종만 허용). AI가 직접 BomItem.threadType/tapeType을 채우지

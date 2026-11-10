@@ -321,6 +321,68 @@ describe('VisionService.analyzeSalesOrder — PR-200 안전장치', () => {
     expect((outcome.results[0].overview as any).warnings).toBeUndefined();
     expect((outcome.results[0].bomItems[0] as any).warnings).toBeUndefined();
   });
+
+  // PR-234(사용자 확인 사례): 자재명에 섞인 영문 표기/작업 위치를 분리한다.
+  it('자재명에 영문표기/작업위치 라벨이 섞여 있으면 분리하고 MATERIAL_NAME_CLEANED 경고를 남긴다', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      {
+        overview: baseOverview,
+        bomItems: [
+          { category: null, itemName: '다데테이프(면) EDGE TAPE(영문표기) 오비.주머니입구(작업위치)', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null },
+        ],
+        sizeSpecs: [],
+        workNotes: null,
+      },
+    ]);
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('다데테이프(면)');
+    expect(item.englishName).toBe('EDGE TAPE');
+    expect(item.location).toBe('오비.주머니입구');
+    expect(item.warnings?.some((w: any) => w.code === 'MATERIAL_NAME_CLEANED')).toBe(true);
+  });
+
+  it('모델이 englishName/location을 이미 직접 채웠으면 그 값을 그대로 쓰고(itemName은 그래도 정제한다)', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      {
+        overview: baseOverview,
+        bomItems: [
+          { category: null, itemName: '다데(견래심지) EDGE TAPE', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null, englishName: 'MODEL EDGE TAPE', location: null },
+        ],
+        sizeSpecs: [],
+        workNotes: null,
+      },
+    ]);
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('다데(견래심지)'); // itemName은 서버가 그래도 정제한다.
+    expect(item.englishName).toBe('MODEL EDGE TAPE'); // 모델이 채운 값을 덮어쓰지 않는다.
+  });
+
+  it('꺾쇠/괄호 안 자재 종류는 영문표기·위치로 오인하지 않고 그대로 둔다(다데<면> ↔ 다데<실크> 보존)', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      {
+        overview: baseOverview,
+        bomItems: [
+          { category: null, itemName: '다데<면>', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null },
+          { category: null, itemName: '다데<실크>', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null },
+        ],
+        sizeSpecs: [],
+        workNotes: null,
+      },
+    ]);
+    const items = outcome.results[0].bomItems as any[];
+    expect(items[0].itemName).toBe('다데<면>');
+    expect(items[1].itemName).toBe('다데<실크>');
+    expect(items[0].warnings?.some((w: any) => w.code === 'MATERIAL_NAME_CLEANED')).not.toBe(true);
+  });
+
+  it('이름이 영문뿐이면(약어) 분리하지 않는다', async () => {
+    const outcome = await buildServiceWithFakeResponse([
+      { overview: baseOverview, bomItems: [{ category: null, itemName: 'DDM', spec: null, colorCode: null, consumption: 1, requiredQty: null, supplier: null, remarks: null }], sizeSpecs: [], workNotes: null },
+    ]);
+    const item = outcome.results[0].bomItems[0] as any;
+    expect(item.itemName).toBe('DDM');
+    expect(item.englishName).toBeUndefined();
+  });
 });
 
 // PR-226: 작지 출고량 칸의 LOT 여러 줄 합산 — 합성 응답만 사용(Gemini 호출 없음).

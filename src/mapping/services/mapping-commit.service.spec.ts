@@ -191,6 +191,51 @@ describe('MappingCommitService', () => {
       expect(bomItemSave[1].material).toEqual(existingMaterial);
     });
 
+    // PR-234(사용자 확인 사례): 신규 자재는 이번 행이 들고 온 영문 표기를 바로 채운다.
+    it('신규 자재를 만들 때 bomItem.englishName이 있으면 Item.englishName으로 저장된다', async () => {
+      await service.commit({
+        ...validPayload,
+        bomItems: [{ ...validPayload.bomItems[0], englishName: 'POLY BAG(EN)' }],
+      });
+
+      const itemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === Item);
+      expect(itemSave![1]).toMatchObject({ englishName: 'POLY BAG(EN)' });
+    });
+
+    // PR-234: 기존 자재는 영문명이 비어 있을 때만 채운다(이어지는 재저장에서 값이
+    // 있으면 덮어쓰지 않는다 — 아래 별도 테스트).
+    it('기존 자재의 englishName이 비어 있으면 이번 행의 englishName으로 채운다', async () => {
+      const existingMaterial = { id: 42, name: 'POLY BAG', englishName: null };
+      mockQueryRunnerManager.find.mockImplementation((entity: any) =>
+        Promise.resolve(entity === Item ? [existingMaterial] : []),
+      );
+
+      await service.commit({
+        ...validPayload,
+        bomItems: [{ ...validPayload.bomItems[0], englishName: 'POLY BAG(EN)' }],
+      });
+
+      const itemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === Item);
+      expect(itemSave![1]).toMatchObject({ id: 42, englishName: 'POLY BAG(EN)' });
+    });
+
+    it('기존 자재에 이미 englishName이 있으면 덮어쓰지 않는다(Item 저장 호출도 없음)', async () => {
+      const existingMaterial = { id: 42, name: 'POLY BAG', englishName: '기존영문명' };
+      mockQueryRunnerManager.find.mockImplementation((entity: any) =>
+        Promise.resolve(entity === Item ? [existingMaterial] : []),
+      );
+
+      await service.commit({
+        ...validPayload,
+        bomItems: [{ ...validPayload.bomItems[0], englishName: 'POLY BAG(EN)' }],
+      });
+
+      const itemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === Item);
+      expect(itemSave).toBeUndefined(); // Item 저장 자체가 호출되지 않는다.
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave[1].material.englishName).toBe('기존영문명'); // 그대로 유지.
+    });
+
     // PR-220: 신규 스타일(처음 커밋)에서도 sheetQty/sheetQtyUnit이 저장되는지 — 수주
     // 등록(작지 AI) 경로가 commitAnalysis를 통해 이 필드를 채워 보내는 경로의 기초.
     it('bomItems에 유효한 sheetQty/sheetQtyUnit이 있으면 신규 BomItem에 그대로 저장된다', async () => {

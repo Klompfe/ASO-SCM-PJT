@@ -223,11 +223,18 @@ export class MappingCommitService {
             code: `MAT-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
             name: item.itemName,
             type: ItemType.RAW_MATERIAL,
-            unit: 'EA'
+            unit: 'EA',
+            // PR-234: 신규 자재는 이번 행이 들고 온 영문 표기를 바로 채운다.
+            englishName: item.englishName || undefined,
           });
           if (normalizedItemName) {
             materialsByNormalizedName.set(normalizedItemName, [material]);
           }
+        } else if (item.englishName && !material.englishName) {
+          // PR-234: 기존 자재는 영문명이 "아직 비어 있을 때만" 채운다 — 이미 값이 있으면
+          // 덮어쓰지 않는다(사람이 입력했거나 이전에 채워진 값을 보존).
+          material.englishName = item.englishName;
+          material = await queryRunner.manager.save(Item, material);
         }
 
         const colorCode = normalizeKeyPart(item.colorCode);

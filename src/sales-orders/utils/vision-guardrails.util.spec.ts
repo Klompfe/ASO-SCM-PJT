@@ -11,6 +11,7 @@ import {
   checkYocheokMismatch,
   groupBomItemsForYocheok,
   checkYocheokMismatchBundle,
+  cleanupRecognizedMaterialName,
 } from './vision-guardrails.util';
 
 describe('STYLE_NO_FORMAT_REGEX — 완성 시트 118개 패턴(익명 합성값으로 대표 검증)', () => {
@@ -408,5 +409,48 @@ describe('checkYocheokMismatchBundle (PR-201) — 익명 합성값', () => {
   it('총수량이 없거나 요척이 없으면 비교하지 않음', () => {
     expect(checkYocheokMismatchBundle([{ consumption: 1.0, requiredQty: 100 }], null)).toBeNull();
     expect(checkYocheokMismatchBundle([{ consumption: null, requiredQty: 100 }], 1000)).toBeNull();
+  });
+});
+
+// PR-234(사용자 확인 사례): 자재명에 섞인 영문 표기/작업 위치 분리. 합성 값만 사용.
+describe('cleanupRecognizedMaterialName (PR-234)', () => {
+  it('라벨("(영문표기)", "(작업위치)")이 둘 다 있으면 각각 분리하고 자재명은 괄호 안 자재 종류를 보존한다', () => {
+    const result = cleanupRecognizedMaterialName('다데테이프(면) EDGE TAPE(영문표기) 오비.주머니입구(작업위치)');
+    expect(result).toEqual({ itemName: '다데테이프(면)', englishName: 'EDGE TAPE', locationNote: '오비.주머니입구' });
+  });
+
+  it('라벨 없이 한글 이름 뒤에 순수 영문 덩어리만 붙으면 영문명으로 분리한다', () => {
+    const result = cleanupRecognizedMaterialName('다데(견래심지) EDGE TAPE');
+    expect(result).toEqual({ itemName: '다데(견래심지)', englishName: 'EDGE TAPE', locationNote: null });
+  });
+
+  it('이름이 영문뿐이면(약어 등) 분리하지 않고 그대로 둔다', () => {
+    expect(cleanupRecognizedMaterialName('DDM')).toEqual({ itemName: 'DDM', englishName: null, locationNote: null });
+    expect(cleanupRecognizedMaterialName('EDGE TAPE')).toEqual({ itemName: 'EDGE TAPE', englishName: null, locationNote: null });
+  });
+
+  it('꺾쇠/괄호 안 자재 종류는 보존한다(다데<면> ↔ 다데<실크>는 서로 다른 자재로 남는다)', () => {
+    expect(cleanupRecognizedMaterialName('다데<면>')).toEqual({ itemName: '다데<면>', englishName: null, locationNote: null });
+    expect(cleanupRecognizedMaterialName('다데<실크>')).toEqual({ itemName: '다데<실크>', englishName: null, locationNote: null });
+    expect(cleanupRecognizedMaterialName('다데(컬러실크)')).toEqual({ itemName: '다데(컬러실크)', englishName: null, locationNote: null });
+  });
+
+  it('정제 결과 이름이 빈 문자열이 되면 원래 이름을 그대로 둔다', () => {
+    const result = cleanupRecognizedMaterialName('(영문표기)');
+    expect(result.itemName).toBe('(영문표기)');
+  });
+
+  it('위치 라벨만 있고 영문 라벨/덩어리가 없으면 영문명은 null이고, 이름 전체가 위치뿐이면(빈 문자열 방지) 원래 이름을 유지한다', () => {
+    const result = cleanupRecognizedMaterialName('오비.주머니입구(작업위치)');
+    expect(result).toEqual({ itemName: '오비.주머니입구(작업위치)', englishName: null, locationNote: '오비.주머니입구' });
+  });
+
+  it('라벨도 영문 덩어리도 없는 보통 한글 이름은 그대로 둔다', () => {
+    expect(cleanupRecognizedMaterialName('오바사')).toEqual({ itemName: '오바사', englishName: null, locationNote: null });
+  });
+
+  it('null/빈 문자열은 그대로 통과한다', () => {
+    expect(cleanupRecognizedMaterialName(null)).toEqual({ itemName: '', englishName: null, locationNote: null });
+    expect(cleanupRecognizedMaterialName('')).toEqual({ itemName: '', englishName: null, locationNote: null });
   });
 });

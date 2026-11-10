@@ -9,6 +9,7 @@ import { MappingCommitService } from '../mapping/services/mapping-commit.service
 import { AiSalesOrderResultDto } from './dto/ai-analysis.dto';
 import { SalesOrderSpecsService } from './sales-order-specs.service';
 import { AiUsageLogService } from './ai-usage-log.service';
+import { mergeRemarksWithLocation } from './utils/vision-guardrails.util';
 
 // PR-133: 수주(고객사로부터 받은 주문) 등록 흐름. 업로드하는 문서의 실물 이름은 "작업지시서"지만, 이 흐름이 만드는 것은
 // 내부 생산 실행 지시(WorkOrder)가 아니라 오더개요(StyleOverview)+자재명세(BOM)+작업명세(SalesOrderSpec)+계약(Contract, 승인 대기)이다.
@@ -101,7 +102,12 @@ export class SalesOrdersService {
         consumption: b.consumption ?? undefined,
         requiredQty: b.requiredQty ?? undefined,
         supplier: b.supplier ?? undefined,
-        remarks: b.remarks ?? undefined,
+        // PR-234: 사용(작업) 위치는 별도 컬럼이 없어 비고(remarks)에 합쳐 넣는다 — 기존
+        // 비고가 있으면 지우지 않고 뒤에 덧붙인다(mergeRemarksWithLocation).
+        remarks: mergeRemarksWithLocation(b.remarks, b.location) ?? undefined,
+        // PR-234: 자재명에서 분리된(또는 AI가 직접 채운) 영문 표기 — Item.englishName에
+        // 반영된다(mapping-commit.service.ts, 이미 값이 있으면 덮어쓰지 않음).
+        englishName: b.englishName ?? undefined,
         // PR-175: materialSubTypeCandidate(AI 후보)는 저장 대상이 아니다 — 검토
         // 화면에서 사람이 확인한 threadType/tapeType만 넘어온다.
         threadType: b.threadType ?? undefined,

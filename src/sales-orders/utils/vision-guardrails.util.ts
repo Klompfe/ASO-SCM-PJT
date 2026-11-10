@@ -188,6 +188,101 @@ export function splitSupplierItemName(raw: string): { supplierName: string; item
   return { supplierName, itemName };
 }
 
+// PR-234(사용자 확인 사례): 작지 인식 결과의 자재명 칸에 "영문 표기"·"작업(사용) 위치"가
+// 라벨과 함께, 또는 라벨 없이 뒤에 그대로 섞여 들어온다(예: "다데테이프(면) EDGE
+// TAPE(영문표기) 오비.주머니입구(작업위치)" — 진짜 자재명은 "다데테이프(면)"뿐). 이름이
+// 재인식마다 달라져 PR-233의 정규화 매칭으로도 다른 자재로 보여 중복이 생긴다. 이 함수는
+// 그 부가 정보를 이름에서 분리한다(값을 추측하지 않고 형식만 해석 — splitSupplierItemName과
+// 같은 원칙). 꺾쇠/괄호 "안" 내용(예: 다데<면>, 다데(컬러실크))은 자재 종류 구분이므로
+// 절대 건드리지 않는다 — 아래 두 라벨 패턴 모두 이름의 "실질 내용"이 아니라 정확히 이
+// 라벨 문구가 있을 때만, 또는 라벨 없이 순수 영문 덩어리가 "맨 끝"에 붙어 있을 때만 반응한다.
+const ENGLISH_NAME_LABEL_REGEX = /([A-Za-z0-9][A-Za-z0-9 ]*)\s*\((?:영문표기|영문명)\)/;
+const LOCATION_LABEL_REGEX = /([^()]+?)\s*\((?:작업위치|위치)\)/;
+const BARE_LABEL_TOKEN_REGEX = /\((?:영문표기|영문명|작업위치|위치)\)/g;
+const BARE_ENGLISH_WORD_REGEX = /^[A-Za-z]+$/;
+const HANGUL_REGEX = /[가-힣]/;
+
+// 라벨이 없을 때만 쓰는 보수적 규칙: 공백으로 나눈 토큰을 뒤에서부터 보며, 전부 순수
+// 영문(숫자·기호 없음)인 연속 토큰만 모아 영문명 후보로 뗀다. 남는 앞부분에 한글이
+// 전혀 없으면(DDM 같은 영문뿐인 약어) 분리하지 않는다 — 정규식 백트래킹이 "EDGE"까지
+// 당겨가 버리는 문제를 피하려고 토큰 단위로 직접 스캔한다.
+function splitTrailingBareEnglish(core: string): { namePart: string; englishPart: string } | null {
+  const tokens = core.split(/\s+/).filter(Boolean);
+  let i = tokens.length;
+  while (i > 0 && BARE_ENGLISH_WORD_REGEX.test(tokens[i - 1])) i--;
+  const englishTokens = tokens.slice(i);
+  const nameTokens = tokens.slice(0, i);
+  if (englishTokens.length === 0 || nameTokens.length === 0) return null;
+  const namePart = nameTokens.join(' ');
+  if (!HANGUL_REGEX.test(namePart)) return null;
+  return { namePart, englishPart: englishTokens.join(' ') };
+}
+
+export interface MaterialNameCleanupResult {
+  itemName: string;
+  englishName: string | null;
+  locationNote: string | null;
+}
+
+export function cleanupRecognizedMaterialName(raw: string | null | undefined): MaterialNameCleanupResult {
+  const original = (raw ?? '').trim();
+  if (!original) return { itemName: original, englishName: null, locationNote: null };
+
+  let englishName: string | null = null;
+  let locationNote: string | null = null;
+  const removals: { start: number; end: number }[] = [];
+
+  const locationMatch = LOCATION_LABEL_REGEX.exec(original);
+  if (locationMatch) {
+    const note = locationMatch[1].trim();
+    if (note) {
+      locationNote = note;
+      removals.push({ start: locationMatch.index, end: locationMatch.index + locationMatch[0].length });
+    }
+  }
+
+  const englishMatch = ENGLISH_NAME_LABEL_REGEX.exec(original);
+  if (englishMatch) {
+    const name = englishMatch[1].trim().replace(/\s+/g, ' ');
+    if (name) {
+      englishName = name;
+      removals.push({ start: englishMatch.index, end: englishMatch.index + englishMatch[0].length });
+    }
+  }
+
+  // 뒤에서부터(인덱스가 큰 것부터) 잘라내야 앞쪽 매치의 인덱스가 밀리지 않는다.
+  let core = original;
+  removals.sort((a, b) => b.start - a.start);
+  for (const r of removals) core = core.slice(0, r.start) + core.slice(r.end);
+  core = core.replace(BARE_LABEL_TOKEN_REGEX, '').replace(/\s+/g, ' ').trim();
+
+  // 명시적 라벨로 영문명을 못 찾았을 때만, 라벨 없이 끝에 붙은 순수 영문 덩어리를 분리한다.
+  if (englishName === null) {
+    const trailing = splitTrailingBareEnglish(core);
+    if (trailing) {
+      englishName = trailing.englishPart;
+      core = trailing.namePart;
+    }
+  }
+
+  // 정제로 이름이 빈 문자열이 되면(라벨만 있던 경우 등) 원래 이름을 그대로 둔다.
+  const itemName = core || original;
+  return { itemName, englishName, locationNote };
+}
+
+// PR-234: 사용(작업) 위치는 BomItem에 별도 컬럼이 없어(마이그레이션 금지) 기존
+// remarks(비고) 칸에 합쳐 넣는다 — AI가 실제로 읽은 비고가 있으면 지우지 않고 뒤에
+// "/ 위치: ..."로 덧붙이고, 비고가 비어 있거나(또는 기존 저장 관례상 'N/A') 위치만
+// 있으면 위치 문구만 넣는다. 위치가 없으면(location이 비어 있으면) remarks를 그대로
+// 돌려준다(이 함수가 remarks 값을 새로 지어내지 않음).
+export function mergeRemarksWithLocation(remarks: string | null | undefined, location: string | null | undefined): string | null {
+  const existing = (remarks ?? '').trim();
+  const loc = (location ?? '').trim();
+  if (!loc) return existing || null;
+  if (!existing || existing === 'N/A') return `위치: ${loc}`;
+  return `${existing} / 위치: ${loc}`;
+}
+
 // 마스터에서 "같은 길이에 정확히 한 글자만 다른" 이름을 찾는다(숫자 한 자리 오독 등).
 export function findOneCharDiffCandidates(name: string, masterNames: string[]): string[] {
   const upper = (name ?? '').trim().toUpperCase();
