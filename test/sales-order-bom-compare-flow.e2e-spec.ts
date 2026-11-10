@@ -177,4 +177,30 @@ describe('작지 저장 전 자재 비교 + 선택 반영 저장 (PR-235)', () =
       expect(itemRes.body.data.id).toBe(materialIdA); // 자재 마스터는 그대로 남아 있다.
     });
   });
+
+  // 위 테스트들은 /mapping/commit을 직접 썼다(경로 단축) — 실제 화면이 쓰는 진입점은
+  // /sales-orders/commit-analysis이므로, decisions가 그 경로로도 끝까지 전달되는지
+  // 별도로 한 번 더 확인한다(sales-orders.service.ts commitAnalysis()의 전달 경로).
+  it('/sales-orders/commit-analysis로도 decisions(mergeInto)가 끝까지 전달되어 확정 값이 보존된다', async () => {
+    const styleNo = `PR235-AIPATH-${tag}`;
+    const name = `자재AI${tag}`;
+
+    await post('/sales-orders/commit-analysis').send(
+      aiResult(styleNo, [{ category: '부자재', itemName: name, colorCode: null, consumption: 1, requiredQty: 100, supplier: null, remarks: null }]),
+    ).expect(201);
+
+    const bomRes = await get('/boms').query({ styleNo }).expect(200);
+    const bomItemId = bomRes.body.data.items[0].id;
+    await request(http()).patch(`/boms/items/${bomItemId}`).set('Authorization', `Bearer ${token}`)
+      .send({ manualRequiredQty: 42, manualRequiredQtyNote: '수기 확인' })
+      .expect(200);
+
+    const payload = aiResult(styleNo, [{ category: '부자재', itemName: `전혀다른이름${tag}`, colorCode: null, consumption: 9, requiredQty: 999, supplier: null, remarks: null }]);
+    (payload as any).decisions = { incoming: [{ index: 0, action: 'mergeInto', mergeIntoBomItemId: bomItemId }] };
+    await post('/sales-orders/commit-analysis').send(payload).expect(201);
+
+    const bomRes2 = await get('/boms').query({ styleNo }).expect(200);
+    expect(bomRes2.body.data.items).toHaveLength(1); // 새 행이 생기지 않았다.
+    expect(Number(bomRes2.body.data.items[0].manualRequiredQty)).toBe(42); // 확정 값 보존.
+  });
 });

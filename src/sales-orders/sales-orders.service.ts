@@ -118,6 +118,10 @@ export class SalesOrdersService {
         sheetQty: b.requiredQty ?? undefined,
         sheetQtyUnit: b.requiredQtyUnit ?? undefined,
       })),
+      // PR-235: 저장 전 비교 화면의 선택 — 없으면(undefined) commit()이 기존 동작 그대로
+      // 움직인다. bomItems와 같은 배열 순서(인덱스)를 기준으로 한다(위 bomItems가 그
+      // 필터링된 배열 그대로이므로, 비교 화면에 보여준 인덱스와 일치한다).
+      decisions: result.decisions,
     });
 
     // 수주(작업지시서) 등록(엑셀 매핑 경로는 해당 없음)은 계약을 자동으로 승인 대기 상태로

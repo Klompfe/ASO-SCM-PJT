@@ -235,6 +235,46 @@ describe('SalesOrdersService', () => {
     });
   });
 
+  // PR-235(PILOT-23 후속): 저장 전 비교 화면의 선택(decisions)이 commit() 요청까지
+  // 그대로 전달되는지 — 없으면 undefined로 넘어가 commit()의 기존 동작과 같다.
+  describe('commitAnalysis - decisions 전달 (PR-235)', () => {
+    const mockMasterStyleRepo = { findOne: jest.fn() };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === Contract ? mockContractRepo : mockMasterStyleRepo,
+      );
+      mockMasterStyleRepo.findOne.mockResolvedValue({ styleNo: 'S1', overview: { totalQty: 100 } });
+      mockMappingCommitService.commit.mockResolvedValue({ success: true, notices: [], warnings: [] });
+      mockSalesOrderSpecsService.save.mockResolvedValue({ id: 1 });
+    });
+
+    it('decisions을 보내면 commit() 요청에 그대로 전달된다', async () => {
+      const decisions = { incoming: [{ index: 0, action: 'mergeInto', mergeIntoBomItemId: 501 }], existing: [{ bomItemId: 502, action: 'delete' }] };
+      await service.commitAnalysis({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 100, targetRdd: null, documentDate: null },
+        bomItems: [{ category: '부자재', itemName: '자재A', spec: null, colorCode: null, consumption: 1, requiredQty: 100, supplier: null, remarks: null }],
+        sizeSpecs: [], workNotes: null,
+        decisions,
+      } as any);
+
+      const payload = mockMappingCommitService.commit.mock.calls[0][0];
+      expect(payload.decisions).toEqual(decisions);
+    });
+
+    it('decisions을 보내지 않으면 commit() 요청에도 undefined로 전달된다(기존 동작과 동일)', async () => {
+      await service.commitAnalysis({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 100, targetRdd: null, documentDate: null },
+        bomItems: [{ category: '부자재', itemName: '자재A', spec: null, colorCode: null, consumption: 1, requiredQty: 100, supplier: null, remarks: null }],
+        sizeSpecs: [], workNotes: null,
+      } as any);
+
+      const payload = mockMappingCommitService.commit.mock.calls[0][0];
+      expect(payload.decisions).toBeUndefined();
+    });
+  });
+
   // PR-234(사용자 확인 사례): 자재명에서 분리된 영문 표기/사용 위치가 commit payload에
   // 올바른 필드로 전달되는지 — 위치는 별도 컬럼이 없어 remarks에 합쳐진다.
   describe('commitAnalysis - 영문 표기/사용 위치 전달 (PR-234)', () => {
