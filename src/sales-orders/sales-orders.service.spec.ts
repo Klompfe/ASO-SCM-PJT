@@ -12,7 +12,7 @@ describe('SalesOrdersService', () => {
   let service: SalesOrdersService;
 
   const mockVisionService = { analyzeSalesOrder: jest.fn() };
-  const mockMappingCommitService = { commit: jest.fn() };
+  const mockMappingCommitService = { commit: jest.fn(), compareSalesOrderBom: jest.fn() };
   const mockSalesOrderSpecsService = { save: jest.fn(), findByStyleNo: jest.fn() };
   const mockAiUsageLogService = { log: jest.fn(), findByUser: jest.fn(), getSummaryByUser: jest.fn() };
   const mockDataSource = { getRepository: jest.fn() };
@@ -34,6 +34,47 @@ describe('SalesOrdersService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  // PR-235(PILOT-23 후속): 저장 전 비교 — commitAnalysis와 같은 bomItems 필드 매핑으로
+  // MappingCommitService.compareSalesOrderBom에 그대로 넘긴다(읽기 전용, DB 쓰기 없음).
+  describe('compareBom (PR-235)', () => {
+    it('styleNo와 bomItems(itemName/englishName/category/colorCode/spec/consumption/requiredQty)를 그대로 전달한다', async () => {
+      mockMappingCommitService.compareSalesOrderBom.mockResolvedValue({ hasExistingBom: false, rows: [] });
+
+      await service.compareBom({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 100, targetRdd: null, documentDate: null },
+        bomItems: [{ category: '부자재', itemName: '다데테이프(면)', spec: null, colorCode: null, consumption: 1, requiredQty: 100, supplier: null, remarks: null, englishName: 'EDGE TAPE' }],
+        sizeSpecs: [], workNotes: null,
+      } as any);
+
+      expect(mockMappingCommitService.compareSalesOrderBom).toHaveBeenCalledWith({
+        styleNo: 'S1',
+        bomItems: [{ itemName: '다데테이프(면)', englishName: 'EDGE TAPE', category: '부자재', colorCode: undefined, spec: undefined, consumption: 1, requiredQty: 100 }],
+      });
+    });
+
+    it('styleNo가 없으면 400을 던지고 compareSalesOrderBom을 호출하지 않는다', async () => {
+      await expect(
+        service.compareBom({
+          overview: { styleNo: null, styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null, targetRdd: null, documentDate: null },
+          bomItems: [], sizeSpecs: [], workNotes: null,
+        } as any),
+      ).rejects.toThrow();
+      expect(mockMappingCommitService.compareSalesOrderBom).not.toHaveBeenCalled();
+    });
+
+    it('결과를 그대로 반환한다(가공하지 않음)', async () => {
+      const compareResult = { hasExistingBom: true, rows: [{ type: 'same' }] };
+      mockMappingCommitService.compareSalesOrderBom.mockResolvedValue(compareResult);
+
+      const result = await service.compareBom({
+        overview: { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: null, factory: null, buyer: null, totalQty: null, targetRdd: null, documentDate: null },
+        bomItems: [], sizeSpecs: [], workNotes: null,
+      } as any);
+
+      expect(result).toBe(compareResult);
+    });
   });
 
   // PR-200: VisionService는 DB에 접근하지 않으므로 SalesOrdersService가 자재/공급업체/

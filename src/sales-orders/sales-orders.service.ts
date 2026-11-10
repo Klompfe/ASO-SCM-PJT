@@ -166,6 +166,29 @@ export class SalesOrdersService {
     return Object.assign(spec, { warnings: commitResult.warnings });
   }
 
+  // PR-235(PILOT-23 후속): 저장 버튼을 누르기 전에 호출하는 읽기 전용 비교 — DB에
+  // 아무것도 쓰지 않는다. commitAnalysis가 쓰는 것과 같은 bomItems 필드 매핑을
+  // 재사용해, 화면이 보는 비교 결과와 실제 저장 시 commit()이 쓸 매칭 키가 항상
+  // 일치하게 한다.
+  async compareBom(result: AiSalesOrderResultDto) {
+    const styleNo = result.overview.styleNo;
+    if (!styleNo) {
+      throw new BadRequestException('Style No.를 읽지 못했습니다 — 저장 전에 직접 입력해 주세요.');
+    }
+    return this.mappingCommitService.compareSalesOrderBom({
+      styleNo,
+      bomItems: result.bomItems.map((b) => ({
+        itemName: b.itemName,
+        englishName: b.englishName ?? undefined,
+        category: b.category ?? undefined,
+        colorCode: b.colorCode ?? undefined,
+        spec: b.spec ?? undefined,
+        consumption: b.consumption ?? undefined,
+        requiredQty: b.requiredQty ?? undefined,
+      })),
+    });
+  }
+
   async findSpecByStyleNo(styleNo: string) {
     return this.salesOrderSpecsService.findByStyleNo(styleNo);
   }
