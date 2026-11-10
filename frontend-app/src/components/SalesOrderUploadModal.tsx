@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { uploadSalesOrderImage, commitSalesOrderAnalysis, getAiUsageSummary, type AiSalesOrderResult, type AiUsageSummary } from '../api/salesOrders.service';
+import {
+  uploadSalesOrderImage,
+  commitSalesOrderAnalysis,
+  compareSalesOrderBom,
+  getAiUsageSummary,
+  type AiSalesOrderResult,
+  type AiUsageSummary,
+  type SalesOrderBomCompareRow,
+} from '../api/salesOrders.service';
+import { SalesOrderBomCompareStep } from './SalesOrderBomCompareStep';
 import { getErrorMessage } from '../utils/errorMessage';
 import {
   updateOverviewField as updateOverviewFieldPure,
@@ -119,6 +128,12 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   // 서로 배타적이다(같은 행이 둘 다에 들어가지 않음).
   const [manualBomIndexes, setManualBomIndexes] = useState<Map<number, Set<number>>>(new Map());
   const [focusManualRow, setFocusManualRow] = useState<{ index: number; bomIndex: number } | null>(null);
+
+  // PR-235(PILOT-23 후속): 저장 버튼 → 비교 API 호출 → 기존 BOM이 있는 스타일이면
+  // 이 상태가 채워져 비교 화면(SalesOrderBomCompareStep)이 뜬다. result는 비교에
+  // 보낸 것과 같은(이미 제외 행 필터링된) 객체 — "이 선택으로 저장"을 누르면 같은
+  // result에 decisions만 얹어 commitSalesOrderAnalysis를 호출한다.
+  const [compareState, setCompareState] = useState<{ index: number; result: AiSalesOrderResult; rows: SalesOrderBomCompareRow[] } | null>(null);
 
   useEffect(() => {
     if (!focusManualRow) return;
@@ -433,9 +448,35 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     }
     setSavingIndex(index);
     try {
+      // PR-235(PILOT-23 후속): 기존 BOM이 있는 스타일만 저장 전 비교 화면을 띄운다
+      // (처음 저장하는 스타일은 비교 없이 바로 저장 — 지금 흐름 그대로).
+      const compare = await compareSalesOrderBom(result);
+      if (compare.hasExistingBom) {
+        setCompareState({ index, result, rows: compare.rows });
+        return;
+      }
       await commitSalesOrderAnalysis(result);
       toast.success(`${result.overview.styleNo ?? `#${index + 1}`} 저장되었습니다.`);
       setSavedIndexes((prev) => new Set(prev).add(index));
+      onSuccess();
+    } catch (e) {
+      toast.error(getErrorMessage(e, '저장에 실패했습니다.'));
+    } finally {
+      setSavingIndex(null);
+    }
+  };
+
+  // PR-235: 비교 화면에서 "이 선택으로 저장"을 눌렀을 때 — decisions만 얹어 같은
+  // commitSalesOrderAnalysis를 호출한다(별도 API 아님, 기존 저장 경로 재사용).
+  const handleConfirmCompareSave = async (decisions: AiSalesOrderResult['decisions']) => {
+    if (!compareState) return;
+    const { index, result } = compareState;
+    setSavingIndex(index);
+    try {
+      await commitSalesOrderAnalysis({ ...result, decisions });
+      toast.success(`${result.overview.styleNo ?? `#${index + 1}`} 저장되었습니다.`);
+      setSavedIndexes((prev) => new Set(prev).add(index));
+      setCompareState(null);
       onSuccess();
     } catch (e) {
       toast.error(getErrorMessage(e, '저장에 실패했습니다.'));
@@ -557,6 +598,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setUploadError(null);
     setFallbackUsed(false);
     setSimilarStyleCandidates(new Map());
+    setCompareState(null);
     onClose();
   };
 
@@ -575,7 +617,17 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
             )}
           </div>
 
-          {step === 1 && (
+          {compareState && (
+            <SalesOrderBomCompareStep
+              styleNo={results[compareState.index]?.overview.styleNo ?? null}
+              rows={compareState.rows}
+              saving={savingIndex === compareState.index}
+              onCancel={() => setCompareState(null)}
+              onConfirm={handleConfirmCompareSave}
+            />
+          )}
+
+          {step === 1 && !compareState && (
             <div className="space-y-4">
               <label
                 onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
@@ -611,7 +663,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
             </div>
           )}
 
-          {step === 2 && (
+          {step === 2 && !compareState && (
             <div className="space-y-6">
               {isMock && (
                 <div className="bg-red-50 border-2 border-red-400 text-red-800 rounded-lg p-3 text-sm font-semibold">
