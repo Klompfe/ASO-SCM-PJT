@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { ProductionType } from '../../styles/entities/style-overview.entity';
+import { CommitDecisionsDto } from '../../mapping/dto/commit-mapping.dto';
 
 // 작업지시서 한 건(=오더개요) 정보. AI 분석은 문서에서 읽지 못한 값은 null로 둔다.
 export class AiOverviewDto {
@@ -278,4 +279,13 @@ export class AiSalesOrderResultDto {
   @ValidateNested({ each: true })
   @Type(() => AiHandwrittenCandidateDto)
   handwrittenCandidates?: AiHandwrittenCandidateDto[] | null;
+
+  // PR-235(PILOT-23 후속): 저장 전 비교 화면에서 고른 선택 — 없으면(기존 BOM이 없는
+  // 스타일, 또는 비교 화면을 안 거친 호출) commitAnalysis가 평소처럼 넘긴다(그대로
+  // mapping-commit.service.ts commit()의 기존 동작).
+  @ApiPropertyOptional({ type: CommitDecisionsDto, description: '저장 전 비교 화면의 선택 사항(없으면 기존 동작 그대로)' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CommitDecisionsDto)
+  decisions?: CommitDecisionsDto;
 }

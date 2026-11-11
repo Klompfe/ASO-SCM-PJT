@@ -13,6 +13,7 @@ import { PurchaseOrder, PurchaseOrderStatus } from '../../purchase-orders/entiti
 import { CommitMappingDto, CommitBomItemDto } from '../dto/commit-mapping.dto';
 import { BomDiffRequestDto } from '../dto/bom-diff.dto';
 import { BomReconcileRequestDto } from '../dto/bom-reconcile.dto';
+import { SalesOrderBomCompareRequestDto } from '../../sales-orders/dto/sales-order-bom-compare.dto';
 import {
   classifyBomDiff,
   type BomDiffExistingRow,
@@ -20,6 +21,12 @@ import {
   type BomDiffRow,
   type BomSimilarPair,
 } from '../utils/bom-diff.util';
+import {
+  classifySalesOrderBomCompare,
+  type SalesOrderBomCompareExistingRow,
+  type SalesOrderBomCompareIncomingRow,
+  type SalesOrderBomCompareRow,
+} from '../utils/sales-order-bom-compare.util';
 import { normalizeForFuzzyMatch } from '../../boms/utils/bom-name-normalize.util';
 
 // PR-132: commit()이 사용자에게 알려야 하는 두 종류의 사실을 문자열 패턴이 아니라 구조로 구분한다.
@@ -35,7 +42,9 @@ export type CommitNoticeCode =
   | 'QTY_KEPT_MANUAL'
   | 'QTY_UPDATED'
   | 'QTY_NOT_IN_SHEET'
-  | 'TOTAL_QTY_MISMATCH';
+  | 'TOTAL_QTY_MISMATCH'
+  // PR-235: 저장 전 비교 화면에서 "삭제"로 고른 기존 BOM 행을 실제로 지웠다는 알림.
+  | 'BOM_ITEM_DELETED';
 
 export interface CommitNotice {
   type: CommitNoticeType;
@@ -85,6 +94,13 @@ export interface BomDiffResponse {
   hasExistingBom: boolean;
   rows?: BomDiffRow[];
   similarPairs?: BomSimilarPair[];
+}
+
+// PR-235: hasExistingBom=false면 rows는 항상 빈 배열(화면은 비교 없이 바로 저장
+// 경로로 진행). true면 same/similar/new/existingOnly로 분류된 rows를 돌려준다.
+export interface SalesOrderBomCompareResponse {
+  hasExistingBom: boolean;
+  rows: SalesOrderBomCompareRow[];
 }
 
 export interface BomReconcileResult {
@@ -213,7 +229,31 @@ export class MappingCommitService {
         materialsByNormalizedName.set(key, arr);
       }
 
-      for (const item of bomItems) {
+      // PR-235: 저장 전 비교 화면에서 고른 선택 — 없으면(undefined) 비어 있는 Map이라
+      // 아래 로직은 전부 기존 동작 그대로 움직인다.
+      const incomingDecisionsByIndex = new Map(
+        (payload.decisions?.incoming ?? []).map((d) => [d.index, d]),
+      );
+
+      for (const [bomItemIndex, item] of bomItems.entries()) {
+        // PR-235: mergeInto — commit()의 기본 매칭(정규화 이름+색상+규격)과 무관하게,
+        // 사람이 비교 화면에서 고른 특정 기존 BOM 행에 강제로 합친다. 확정 값(수동
+        // 필요수량·확정 단가·종류 지정·비고)은 아래 공용 로직이 그대로 보존한다(기존
+        // 자연 매칭과 똑같이 sheetQty/sheetQtyUnit만 갱신) — 새 Item도 만들지 않는다
+        // ("기존 행의 Item을 그대로 쓴다").
+        const decision = incomingDecisionsByIndex.get(bomItemIndex);
+        if (decision?.action === 'mergeInto') {
+          if (decision.mergeIntoBomItemId == null) {
+            throw new BadRequestException(`행 ${bomItemIndex}: mergeInto에는 mergeIntoBomItemId가 필요합니다.`);
+          }
+          const target = (bom.items ?? []).find((bi) => bi.id === decision.mergeIntoBomItemId);
+          if (!target) {
+            throw new BadRequestException(`행 ${bomItemIndex}: BOM 행 #${decision.mergeIntoBomItemId}은(는) 스타일 ${styleNo}의 자재명세가 아닙니다.`);
+          }
+          await this.applyIncomingToExistingBomItem(item, target, notices, queryRunner);
+          continue;
+        }
+
         // 5. Register Material if not exists
         const normalizedItemName = normalizeForFuzzyMatch(item.itemName);
         let material = (materialsByNormalizedName.get(normalizedItemName) ?? [])
@@ -244,32 +284,7 @@ export class MappingCommitService {
         );
 
         if (existingBomItem) {
-          // 이미 등록된 (자재명, 색상, 규격) 조합 — 건드리지 않는다. 수량/요척만 달라도
-          // 실수로 잘못된 값으로 갈아엎지 않도록 자동 반영하지 않고 차이를 기록만 한다.
-          const newConsumption = item.consumption ?? 0;
-          const newRequiredQty = item.requiredQty ?? 0;
-          if (
-            Number(existingBomItem.consumption) !== Number(newConsumption) ||
-            Number(existingBomItem.requiredQty) !== Number(newRequiredQty)
-          ) {
-            notices.push({
-              type: 'NEEDS_REVIEW',
-              code: 'BOM_ITEM_VALUE_DIFF',
-              message:
-                `${item.itemName}(${colorCode}/${spec}) 기존 값(요척 ${existingBomItem.consumption}, 소요량 ${existingBomItem.requiredQty}) ` +
-                `→ 새 값(요척 ${newConsumption}, 소요량 ${newRequiredQty}) — 자동 반영하지 않음, 확인 후 수동 변경 필요`,
-            });
-          }
-          // PR-220: sheetQty/sheetQtyUnit은 위 "자동 반영 보류" 규칙의 예외다 — 소요량
-          // 계산 기준(발주수량)에 쓰이는 값이라, 재업로드로 들어온 작지 수량이 유한한
-          // 양수면 갱신한다(들어온 값이 없거나 못 읽었으면 기존 값을 null로 지우지
-          // 않는다, PR-211 방식). 다른 필드(요척 등)는 여전히 건드리지 않는다.
-          const resolved = resolveSheetQty(item);
-          if (resolved.sheetQty != null) {
-            existingBomItem.sheetQty = resolved.sheetQty;
-            existingBomItem.sheetQtyUnit = resolved.sheetQtyUnit;
-            await queryRunner.manager.save(BomItem, existingBomItem);
-          }
+          await this.applyIncomingToExistingBomItem(item, existingBomItem, notices, queryRunner);
           continue;
         }
 
@@ -314,10 +329,41 @@ export class MappingCommitService {
         bom.items = [...(bom.items ?? []), savedBomItem];
       }
 
+      // PR-235: 저장 전 비교 화면에서 "삭제"로 고른 기존 행 — 발주(취소 제외)가 하나라도
+      // 연결돼 있으면 서버가 다시 검증해 거부한다(화면의 비활성 처리와 별개로, 요청
+      // 자체가 조작되거나 화면과 서버 사이에 시간차가 있어도 안전). 자재 마스터(Item)는
+      // 절대 삭제하지 않는다 — BomItem(및 그 상세)만 지운다.
+      for (const d of payload.decisions?.existing ?? []) {
+        if (d.action !== 'delete') continue;
+        const target = (bom.items ?? []).find((bi) => bi.id === d.bomItemId);
+        if (!target) {
+          throw new BadRequestException(`BOM 행 #${d.bomItemId}은(는) 스타일 ${styleNo}의 자재명세가 아닙니다.`);
+        }
+        const materialId = target.material?.id;
+        const linkedCount = materialId
+          ? await queryRunner.manager.count(PurchaseOrder, {
+              where: { styleNo, itemId: materialId, status: Not(PurchaseOrderStatus.CANCELLED) },
+            })
+          : 0;
+        if (linkedCount > 0) {
+          throw new BadRequestException(
+            `BOM 행 #${d.bomItemId}(${target.material?.name ?? ''})은(는) 발주 ${linkedCount}건이 연결되어 삭제할 수 없습니다.`,
+          );
+        }
+        await queryRunner.manager.delete(BomItem, target.id);
+        bom.items = (bom.items ?? []).filter((bi) => bi.id !== target.id);
+        notices.push({
+          type: 'AUTO_APPLIED',
+          code: 'BOM_ITEM_DELETED',
+          message: `${target.material?.name ?? ''}(${target.colorCode}/${target.spec}) 행을 삭제했습니다(자재 마스터는 유지).`,
+        });
+      }
+
       await queryRunner.commitTransaction();
       return { success: true, styleNo, notices, warnings: notices.map((n) => n.message) };
     } catch (err) {
       await queryRunner.rollbackTransaction();
+      if (err instanceof BadRequestException || err instanceof NotFoundException) throw err;
       throw new InternalServerErrorException(err);
     } finally {
       await queryRunner.release();
@@ -367,6 +413,78 @@ export class MappingCommitService {
 
     const { rows, similarPairs } = classifyBomDiff(existingRows, incomingRows);
     return { hasExistingBom: true, rows, similarPairs };
+  }
+
+  // PR-235(PILOT-23 후속): 작지 저장 전 "기존 자재와 비교"(읽기 전용, 저장 안 함) —
+  // AI 인식 경로 전용. diff()와 원칙은 같지만(기존 BOM이 없거나 빈 스타일은 비교 없이
+  // 바로 저장) commit()이 실제로 쓰는 매칭 키(PR-233 정규화 이름+색상+규격)로 same을
+  // 판정해야 화면과 저장 결과가 어긋나지 않는다 — classifyBomDiff(이름 exact-trim)를
+  // 쓰지 않고 별도 분류 함수(sales-order-bom-compare.util.ts)를 쓴다.
+  async compareSalesOrderBom(payload: SalesOrderBomCompareRequestDto): Promise<SalesOrderBomCompareResponse> {
+    const { styleNo, bomItems } = payload;
+    const existingBoms = await this.dataSource.manager.find(Bom, {
+      where: { style: { styleNo } },
+      relations: ['items', 'items.material'],
+    });
+    const bom = pickActiveBom(existingBoms);
+    if (!bom || (bom.items ?? []).length === 0) {
+      return { hasExistingBom: false, rows: [] };
+    }
+
+    const materialIds = [...new Set((bom.items ?? []).map((i) => i.material?.id).filter((v): v is number => v != null))];
+    const linkedCounts = new Map<number, number>();
+    const receivedCounts = new Map<number, number>();
+    if (materialIds.length > 0) {
+      const pos = await this.dataSource.manager.find(PurchaseOrder, {
+        where: { styleNo, itemId: In(materialIds), status: Not(PurchaseOrderStatus.CANCELLED) },
+      });
+      for (const po of pos) {
+        linkedCounts.set(po.itemId, (linkedCounts.get(po.itemId) ?? 0) + 1);
+        if (po.status === PurchaseOrderStatus.RECEIVED) {
+          receivedCounts.set(po.itemId, (receivedCounts.get(po.itemId) ?? 0) + 1);
+        }
+      }
+    }
+
+    const existingRows: SalesOrderBomCompareExistingRow[] = (bom.items ?? []).map((i) => {
+      const linkedPurchaseOrderCount = (i.material?.id != null ? linkedCounts.get(i.material.id) : undefined) ?? 0;
+      const linkedReceivingCount = (i.material?.id != null ? receivedCounts.get(i.material.id) : undefined) ?? 0;
+      const canDelete = linkedPurchaseOrderCount === 0;
+      return {
+        bomItemId: i.id,
+        itemName: i.material?.name ?? '',
+        englishName: i.material?.englishName ?? null,
+        category: i.category ?? null,
+        colorCode: i.colorCode ?? null,
+        spec: i.spec ?? null,
+        consumption: Number(i.consumption),
+        requiredQty: Number(i.requiredQty),
+        unit: i.material?.unit ?? null,
+        remarks: i.remarks ?? null,
+        hasManualOverride: i.manualRequiredQty != null,
+        hasConfirmedUnitPrice: Number(i.unitPrice) > 0,
+        hasSubtypeAssignment: i.threadType != null || i.tapeType != null,
+        linkedPurchaseOrderCount,
+        linkedReceivingCount,
+        canDelete,
+        blockedReason: canDelete
+          ? null
+          : `발주 ${linkedPurchaseOrderCount}건 연결${linkedReceivingCount > 0 ? `(입고 ${linkedReceivingCount}건 포함)` : ''}`,
+      };
+    });
+
+    const incomingRows: SalesOrderBomCompareIncomingRow[] = bomItems.map((item) => ({
+      itemName: item.itemName,
+      englishName: item.englishName ?? null,
+      category: item.category ?? null,
+      colorCode: item.colorCode ?? null,
+      spec: item.spec ?? null,
+      consumption: item.consumption ?? null,
+      requiredQty: item.requiredQty ?? null,
+    }));
+
+    const rows = classifySalesOrderBomCompare(existingRows, incomingRows);
+    return { hasExistingBom: true, rows };
   }
 
   // PR-198: bom-diff 비교 화면에서 사람이 행별로 고른 동작을 적용한다(all-or-nothing —
@@ -514,6 +632,39 @@ export class MappingCommitService {
       throw new InternalServerErrorException(err);
     } finally {
       await queryRunner.release();
+    }
+  }
+
+  // commit()의 "이미 등록된 (자재명,색상,규격) 조합" 처리를 공용화한 것 — 자연
+  // 매칭(existingBomItem)과 PR-235의 mergeInto(사람이 비교 화면에서 강제로 지정한
+  // 기존 행) 양쪽에서 똑같이 쓴다. 확정 값(수동 필요수량·확정 단가·종류 지정·요척·
+  // 색상·규격·비고)은 항상 기존 그대로 두고, 차이는 NEEDS_REVIEW 알림으로만 기록한다
+  // (사람이 확인 후 수동 변경). sheetQty/sheetQtyUnit만 예외로 갱신한다(PR-220/211).
+  private async applyIncomingToExistingBomItem(
+    item: CommitBomItemDto,
+    existingBomItem: BomItem,
+    notices: CommitNotice[],
+    queryRunner: ReturnType<DataSource['createQueryRunner']>,
+  ): Promise<void> {
+    const newConsumption = item.consumption ?? 0;
+    const newRequiredQty = item.requiredQty ?? 0;
+    if (
+      Number(existingBomItem.consumption) !== Number(newConsumption) ||
+      Number(existingBomItem.requiredQty) !== Number(newRequiredQty)
+    ) {
+      notices.push({
+        type: 'NEEDS_REVIEW',
+        code: 'BOM_ITEM_VALUE_DIFF',
+        message:
+          `${item.itemName}(${existingBomItem.colorCode}/${existingBomItem.spec}) 기존 값(요척 ${existingBomItem.consumption}, 소요량 ${existingBomItem.requiredQty}) ` +
+          `→ 새 값(요척 ${newConsumption}, 소요량 ${newRequiredQty}) — 자동 반영하지 않음, 확인 후 수동 변경 필요`,
+      });
+    }
+    const resolved = resolveSheetQty(item);
+    if (resolved.sheetQty != null) {
+      existingBomItem.sheetQty = resolved.sheetQty;
+      existingBomItem.sheetQtyUnit = resolved.sheetQtyUnit;
+      await queryRunner.manager.save(BomItem, existingBomItem);
     }
   }
 

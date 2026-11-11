@@ -66,6 +66,14 @@ export class SalesOrdersController {
     return this.salesOrdersService.commitAnalysis(dto);
   }
 
+  // PR-235(PILOT-23 후속): 저장 버튼을 누르면 먼저 이걸 호출해 기존 BOM이 있는
+  // 스타일인지 확인한다(읽기 전용, 저장하지 않음) — 있으면 비교 화면을 보여준다.
+  @Post('bom-compare')
+  @ApiOperation({ summary: '수주 등록 — 저장 전 기존 자재명세와 비교(저장하지 않음)' })
+  async compareBom(@Body() dto: AiSalesOrderResultDto) {
+    return this.salesOrdersService.compareBom(dto);
+  }
+
   @Get('spec')
   @ApiOperation({ summary: '스타일별 작업명세(사이즈 스펙+지시사항) 조회' })
   @ApiQuery({ name: 'styleNo', required: true, example: 'MB62SLM103Z' })

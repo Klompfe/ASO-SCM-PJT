@@ -8,10 +8,11 @@ import { BomItem } from '../../boms/entities/bom-item.entity';
 import { ImportFile } from '../../imports/entities/import-file.entity';
 import { Item } from '../../items/entities/item.entity';
 import { MasterStyle } from '../../styles/entities/master-style.entity';
-import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
+import { PurchaseOrder, PurchaseOrderStatus } from '../../purchase-orders/entities/purchase-order.entity';
 import { CommitMappingDto } from '../dto/commit-mapping.dto';
 import { BomDiffRequestDto } from '../dto/bom-diff.dto';
 import { BomReconcileRequestDto } from '../dto/bom-reconcile.dto';
+import { SalesOrderBomCompareRequestDto } from '../../sales-orders/dto/sales-order-bom-compare.dto';
 
 describe('MappingCommitService', () => {
   let service: MappingCommitService;
@@ -828,6 +829,136 @@ describe('MappingCommitService', () => {
     });
   });
 
+  // PR-235(PILOT-23 후속): 저장 전 비교 화면에서 고른 선택(decisions)을 commit()이
+  // 반영한다 — decisions가 없으면(위의 다른 모든 commit() 테스트) 기존 동작 그대로다.
+  describe('commit — decisions (PR-235)', () => {
+    const mergeTargetBomItem: BomItem = {
+      id: 501,
+      bom: undefined as any,
+      material: { id: 10, name: '다데<실크>' } as any,
+      category: '부자재',
+      colorCode: 'N/A',
+      spec: 'N/A',
+      consumption: 2 as any,
+      requiredQty: 200 as any,
+      supplier: null,
+      unitPrice: 12.5 as any,
+      remarks: '수입산',
+      composition: null,
+      hsCode: null,
+      manualRequiredQty: 150 as any,
+      manualRequiredQtyNote: '현장 확인',
+      manualRequiredQtyAt: new Date('2026-01-01'),
+      threadType: 'COA_SA' as any,
+      tapeType: null,
+    } as any;
+    const deletableBomItem: BomItem = {
+      id: 502,
+      bom: undefined as any,
+      material: { id: 20, name: '삭제대상자재' } as any,
+      category: '부자재',
+      colorCode: 'N/A',
+      spec: 'N/A',
+      consumption: 1 as any,
+      requiredQty: 50 as any,
+      supplier: null,
+      unitPrice: 0 as any,
+      remarks: 'N/A',
+      composition: null,
+      hsCode: null,
+    } as any;
+    const existingBom: Bom = {
+      id: 90,
+      bomNo: 'BOM-DECISIONS-001',
+      version: 'V1',
+      isActive: true,
+      style: undefined as any,
+      items: [mergeTargetBomItem, deletableBomItem],
+    };
+    const existingStyle: MasterStyle = {
+      styleNo: 'DECISIONS-STYLE',
+      overview: { id: 1, factory: '베트남', totalQty: 100, buyer: '미도컴퍼니', status: StyleOverviewStatus.PENDING_APPROVAL } as any,
+      boms: [],
+    };
+
+    beforeEach(() => {
+      mockQueryRunnerManager.findOne.mockImplementation((entity: any) =>
+        entity === MasterStyle ? Promise.resolve({ ...existingStyle, overview: { ...existingStyle.overview } }) : Promise.resolve(null),
+      );
+      mockQueryRunnerManager.find.mockImplementation((entity: any) => {
+        if (entity === Bom) return Promise.resolve([{ ...existingBom, items: [{ ...mergeTargetBomItem }, { ...deletableBomItem }] }]);
+        return Promise.resolve([]);
+      });
+      mockQueryRunnerManager.count.mockResolvedValue(0);
+    });
+
+    const basePayload = (): CommitMappingDto => ({
+      styleNo: 'DECISIONS-STYLE',
+      overviewData: { styleNo: 'DECISIONS-STYLE', totalQty: 100, factory: '베트남', buyer: '미도컴퍼니', shipDate: '' },
+      bomItems: [],
+    });
+
+    it('mergeInto: 확정 값(수동 필요수량·확정 단가·종류 지정·비고)을 그대로 두고 sheetQty만 갱신하며, 새 Item을 만들지 않는다', async () => {
+      const payload = basePayload();
+      payload.bomItems = [{ itemName: '전혀다른이름', category: '부자재', consumption: 9, requiredQty: 999, sheetQty: 300, sheetQtyUnit: 'Y' } as any];
+      payload.decisions = { incoming: [{ index: 0, action: 'mergeInto', mergeIntoBomItemId: 501 }] };
+
+      await service.commit(payload);
+
+      const itemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === Item);
+      expect(itemSave).toBeUndefined(); // 새 Item 생성 없음(기존 Item 그대로 사용).
+
+      const bomItemSave = mockQueryRunnerManager.save.mock.calls.find(([entity]: any) => entity === BomItem);
+      expect(bomItemSave![1]).toMatchObject({
+        sheetQty: 300,
+        sheetQtyUnit: 'Y',
+        // 확정 값 — 들어온 새 값(consumption 9, requiredQty 999)으로 바뀌지 않았다.
+        consumption: 2,
+        requiredQty: 200,
+        unitPrice: 12.5,
+        remarks: '수입산',
+        manualRequiredQty: 150,
+        threadType: 'COA_SA',
+      });
+    });
+
+    it('existing delete: 연결된 발주(취소 제외)가 있으면 거부되고 전체 롤백된다', async () => {
+      mockQueryRunnerManager.count.mockResolvedValue(3);
+      const payload = basePayload();
+      payload.decisions = { existing: [{ bomItemId: 502, action: 'delete' }] };
+
+      await expect(service.commit(payload)).rejects.toThrow(/발주 3건/);
+      expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalled();
+      expect(mockQueryRunnerManager.delete).not.toHaveBeenCalled();
+    });
+
+    it('existing delete: 연결된 발주가 없으면 BomItem만 삭제되고 자재 마스터(Item)는 지우지 않는다', async () => {
+      const payload = basePayload();
+      payload.decisions = { existing: [{ bomItemId: 502, action: 'delete' }] };
+
+      await service.commit(payload);
+
+      expect(mockQueryRunnerManager.delete).toHaveBeenCalledWith(BomItem, 502);
+      expect(mockQueryRunnerManager.delete.mock.calls.some(([entity]: any) => entity === Item)).toBe(false);
+    });
+
+    it('existing keep: 아무 일도 일어나지 않는다(기본 동작과 동일)', async () => {
+      const payload = basePayload();
+      payload.decisions = { existing: [{ bomItemId: 502, action: 'keep' }] };
+
+      await service.commit(payload);
+
+      expect(mockQueryRunnerManager.delete).not.toHaveBeenCalled();
+    });
+
+    it('존재하지 않는 bomItemId를 delete로 보내면 400으로 거부된다', async () => {
+      const payload = basePayload();
+      payload.decisions = { existing: [{ bomItemId: 9999, action: 'delete' }] };
+
+      await expect(service.commit(payload)).rejects.toThrow(/스타일 .* 자재명세가 아닙니다/);
+    });
+  });
+
   // PR-198: 저장 전 "기존 BOM과 비교"(읽기 전용) — MB73SKM109Z 실사례(다데<실크> 2.7→2.9) 재현.
   describe('diff (PR-198)', () => {
     const existingBomItem: BomItem = {
@@ -888,6 +1019,90 @@ describe('MappingCommitService', () => {
       });
       const result = await service.diff(diffPayload);
       expect(result.rows?.[0].existing?.linkedPoCount).toBe(2);
+    });
+  });
+
+  // PR-235(PILOT-23 후속): 작지 저장 전 비교 — 읽기 전용(DB 쓰기 없음).
+  describe('compareSalesOrderBom (PR-235)', () => {
+    const existingBomItem: BomItem = {
+      id: 501,
+      bom: undefined as any,
+      material: { id: 10, name: '다데<실크>', englishName: null, unit: 'Y' } as any,
+      category: '부자재',
+      colorCode: 'N/A',
+      spec: 'N/A',
+      consumption: 2.7 as any,
+      requiredQty: 2646 as any,
+      supplier: null,
+      unitPrice: 0 as any,
+      remarks: 'N/A',
+      composition: null,
+      hsCode: null,
+      manualRequiredQty: null,
+      threadType: null,
+      tapeType: null,
+    } as any;
+    const existingBom: Bom = {
+      id: 77,
+      bomNo: 'BOM-MB73SKM109Z-001',
+      version: 'V1',
+      isActive: true,
+      style: undefined as any,
+      items: [existingBomItem],
+    };
+    const comparePayload: SalesOrderBomCompareRequestDto = {
+      styleNo: 'MB73SKM109Z',
+      bomItems: [{ itemName: '다데<실크>', category: '부자재', consumption: 2.9 } as any],
+    };
+
+    it('그 스타일에 등록된 BOM이 없으면 hasExistingBom=false, rows는 빈 배열', async () => {
+      mockDataSourceManager.find.mockResolvedValue([]);
+      const result = await service.compareSalesOrderBom(comparePayload);
+      expect(result).toEqual({ hasExistingBom: false, rows: [] });
+    });
+
+    it('정규화 이름+색상+규격이 같으면 same으로 분류된다', async () => {
+      mockDataSourceManager.find.mockImplementation((entity: any) => Promise.resolve(entity === Bom ? [existingBom] : []));
+      const result = await service.compareSalesOrderBom(comparePayload);
+      expect(result.hasExistingBom).toBe(true);
+      expect(result.rows).toEqual([expect.objectContaining({ type: 'same', incomingIndex: 0 })]);
+    });
+
+    it('기존 행의 연결 정보(발주/입고 건수, 삭제 가능 여부, 수동·확정값 보유)가 담긴다', async () => {
+      mockDataSourceManager.find.mockImplementation((entity: any) => {
+        if (entity === Bom) return Promise.resolve([existingBom]);
+        if (entity === PurchaseOrder) {
+          return Promise.resolve([
+            { itemId: 10, status: PurchaseOrderStatus.RECEIVED },
+            { itemId: 10, status: PurchaseOrderStatus.PENDING },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+      const result = await service.compareSalesOrderBom(comparePayload);
+      expect(result.rows[0].existing).toMatchObject({
+        linkedPurchaseOrderCount: 2,
+        linkedReceivingCount: 1,
+        canDelete: false,
+        blockedReason: expect.stringContaining('발주 2건'),
+        hasManualOverride: false,
+        hasConfirmedUnitPrice: false,
+        hasSubtypeAssignment: false,
+      });
+    });
+
+    it('연결된 발주가 없으면 canDelete=true, blockedReason=null', async () => {
+      mockDataSourceManager.find.mockImplementation((entity: any) => Promise.resolve(entity === Bom ? [existingBom] : []));
+      const result = await service.compareSalesOrderBom(comparePayload);
+      expect(result.rows[0].existing).toMatchObject({ canDelete: true, blockedReason: null });
+    });
+
+    it('비교는 읽기 전용이다 — save/delete/create/count가 전혀 호출되지 않는다', async () => {
+      mockDataSourceManager.find.mockImplementation((entity: any) => Promise.resolve(entity === Bom ? [existingBom] : []));
+      await service.compareSalesOrderBom(comparePayload);
+      expect(mockQueryRunnerManager.save).not.toHaveBeenCalled();
+      expect(mockQueryRunnerManager.delete).not.toHaveBeenCalled();
+      expect(mockQueryRunner.startTransaction).not.toHaveBeenCalled();
     });
   });
 

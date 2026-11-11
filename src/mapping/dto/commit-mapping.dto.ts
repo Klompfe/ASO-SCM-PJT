@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -225,6 +226,57 @@ export class CommitBomItemDto {
   sheetQtyUnit?: string;
 }
 
+// PR-235: 저장 전 비교 화면에서 사람이 고른 행별 선택 — commit()의 기본 동작을
+// 좁혀서 덮어쓰는 "선택 사항"이다. 보내지 않으면(undefined) commit()은 지금 동작
+// 그대로 움직인다(엑셀 경로·기존 호출은 전혀 영향받지 않는다).
+export class CommitDecisionIncomingDto {
+  // bomItems 배열에서 이 선택이 적용되는 행의 인덱스(0부터).
+  @ApiProperty({ example: 0 })
+  @IsNumber()
+  index: number;
+
+  // update: commit()의 기본 매칭(정규화 이름+색상+규격)대로 둔다(사실상 무동작 — 이미
+  // 기본 동작이 하는 일). mergeInto: 이 행을 commit()의 기본 매칭과 무관하게 지정한
+  // 기존 BOM 행에 강제로 합친다(확정 값은 항상 기존 유지, 새 Item 생성 안 함). add:
+  // 새 자재로 추가(기본 동작과 동일 — 매칭되는 기존 행이 없을 때 하던 일).
+  @ApiProperty({ enum: ['update', 'mergeInto', 'add'] })
+  @IsIn(['update', 'mergeInto', 'add'])
+  action: 'update' | 'mergeInto' | 'add';
+
+  @ApiPropertyOptional({ description: 'mergeInto일 때 합칠 대상 기존 BOM 행 id' })
+  @IsOptional()
+  @IsNumber()
+  mergeIntoBomItemId?: number;
+}
+
+export class CommitDecisionExistingDto {
+  @ApiProperty({ example: 501 })
+  @IsNumber()
+  bomItemId: number;
+
+  // keep: 손대지 않음(기본 동작과 동일). delete: 삭제 요청 — 서버가 발주 연결 여부를
+  // 다시 검증하고, 연결된 발주(취소 제외)가 있으면 거부(전체 롤백)한다.
+  @ApiProperty({ enum: ['keep', 'delete'] })
+  @IsIn(['keep', 'delete'])
+  action: 'keep' | 'delete';
+}
+
+export class CommitDecisionsDto {
+  @ApiPropertyOptional({ type: [CommitDecisionIncomingDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CommitDecisionIncomingDto)
+  incoming?: CommitDecisionIncomingDto[];
+
+  @ApiPropertyOptional({ type: [CommitDecisionExistingDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CommitDecisionExistingDto)
+  existing?: CommitDecisionExistingDto[];
+}
+
 export class CommitMappingDto {
   @ApiProperty({ example: 'MB62SLM103Z' })
   @IsNotEmpty()
@@ -252,4 +304,11 @@ export class CommitMappingDto {
   @ValidateNested({ each: true })
   @Type(() => CommitColorSizeQuantityDto)
   colorSizeQuantities?: CommitColorSizeQuantityDto[];
+
+  // PR-235: 저장 전 비교 화면의 선택 사항 — 없으면(undefined) 기존 동작 그대로.
+  @ApiPropertyOptional({ type: CommitDecisionsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CommitDecisionsDto)
+  decisions?: CommitDecisionsDto;
 }

@@ -67,6 +67,10 @@ export interface AiBomItem {
   requiredQtyLots?: number[] | null;
   supplier: string | null;
   remarks: string | null;
+  // PR-234: 자재명에서 분리된(또는 모델이 직접 채운) 영문 표기/사용 위치 — 저장 시
+  // englishName은 Item.englishName, location은 remarks에 합쳐 저장된다.
+  englishName?: string | null;
+  location?: string | null;
   // PR-175: AI 후보(읽기전용 참고) — 실/테이프 종류 한글 라벨 중 하나 또는 null.
   materialSubTypeCandidate?: string | null;
   // 사람이 검토 화면에서 확정한 최종값(저장 대상). AI가 직접 채우지 않는다.
@@ -113,12 +117,65 @@ export interface AiHandwrittenCandidate {
   locationHint: string | null;
 }
 
+// PR-235(PILOT-23 후속): 저장 전 비교 화면에서 고른 선택 — 없으면 commit()이 기존
+// 동작 그대로 움직인다. incoming의 index는 bomItems 배열의 인덱스와 같아야 한다.
+export interface SalesOrderBomCompareDecisions {
+  incoming?: { index: number; action: 'update' | 'mergeInto' | 'add'; mergeIntoBomItemId?: number }[];
+  existing?: { bomItemId: number; action: 'keep' | 'delete' }[];
+}
+
 export interface AiSalesOrderResult {
   overview: AiOverview;
   bomItems: AiBomItem[];
   sizeSpecs: AiSizeSpecRow[];
   workNotes: string | null;
   handwrittenCandidates?: AiHandwrittenCandidate[] | null;
+  decisions?: SalesOrderBomCompareDecisions;
+}
+
+// PR-235: 저장 전 "기존 자재와 비교" 응답 — 기존 BOM이 있는 스타일에서만 rows가 채워진다.
+export interface SalesOrderBomCompareExistingRow {
+  bomItemId: number;
+  itemName: string;
+  englishName: string | null;
+  category: string | null;
+  colorCode: string | null;
+  spec: string | null;
+  consumption: number;
+  requiredQty: number;
+  unit: string | null;
+  remarks: string | null;
+  hasManualOverride: boolean;
+  hasConfirmedUnitPrice: boolean;
+  hasSubtypeAssignment: boolean;
+  linkedPurchaseOrderCount: number;
+  linkedReceivingCount: number;
+  canDelete: boolean;
+  blockedReason: string | null;
+}
+
+export interface SalesOrderBomCompareIncomingRow {
+  itemName: string;
+  englishName?: string | null;
+  category?: string | null;
+  colorCode?: string | null;
+  spec?: string | null;
+  consumption?: number | null;
+  requiredQty?: number | null;
+}
+
+export type SalesOrderBomCompareRowType = 'same' | 'similar' | 'new' | 'existingOnly';
+
+export interface SalesOrderBomCompareRow {
+  type: SalesOrderBomCompareRowType;
+  incomingIndex?: number;
+  existing?: SalesOrderBomCompareExistingRow;
+  incoming?: SalesOrderBomCompareIncomingRow;
+}
+
+export interface SalesOrderBomCompareResponse {
+  hasExistingBom: boolean;
+  rows: SalesOrderBomCompareRow[];
 }
 
 // PR-192: 백엔드가 240초 한도로 재시도·폴백을 끝내므로, 그보다 약간 긴 270초로 맞춰
@@ -133,6 +190,9 @@ export const uploadSalesOrderImage = (file: File): Promise<any> => {
 };
 export const commitSalesOrderAnalysis = (result: AiSalesOrderResult): Promise<any> =>
   apiClient.post('/sales-orders/commit-analysis', result);
+// PR-235: 저장 버튼을 누르면 먼저 호출하는 읽기 전용 비교 — DB에 아무것도 쓰지 않는다.
+export const compareSalesOrderBom = (result: AiSalesOrderResult): Promise<SalesOrderBomCompareResponse> =>
+  apiClient.post('/sales-orders/bom-compare', result);
 export const getSalesOrderSpec = (styleNo: string): Promise<any> =>
   apiClient.get('/sales-orders/spec', { params: { styleNo } });
 

@@ -118,6 +118,10 @@ export class SalesOrdersService {
         sheetQty: b.requiredQty ?? undefined,
         sheetQtyUnit: b.requiredQtyUnit ?? undefined,
       })),
+      // PR-235: 저장 전 비교 화면의 선택 — 없으면(undefined) commit()이 기존 동작 그대로
+      // 움직인다. bomItems와 같은 배열 순서(인덱스)를 기준으로 한다(위 bomItems가 그
+      // 필터링된 배열 그대로이므로, 비교 화면에 보여준 인덱스와 일치한다).
+      decisions: result.decisions,
     });
 
     // 수주(작업지시서) 등록(엑셀 매핑 경로는 해당 없음)은 계약을 자동으로 승인 대기 상태로
@@ -164,6 +168,29 @@ export class SalesOrdersService {
     // PR-098: 병합 중 자동 반영을 보류한 항목(기존 factory 충돌, 기존 BomItem과 수량/
     // 요척 차이 등)을 업로드 화면이 사용자에게 보여줄 수 있게 그대로 얹어서 돌려준다.
     return Object.assign(spec, { warnings: commitResult.warnings });
+  }
+
+  // PR-235(PILOT-23 후속): 저장 버튼을 누르기 전에 호출하는 읽기 전용 비교 — DB에
+  // 아무것도 쓰지 않는다. commitAnalysis가 쓰는 것과 같은 bomItems 필드 매핑을
+  // 재사용해, 화면이 보는 비교 결과와 실제 저장 시 commit()이 쓸 매칭 키가 항상
+  // 일치하게 한다.
+  async compareBom(result: AiSalesOrderResultDto) {
+    const styleNo = result.overview.styleNo;
+    if (!styleNo) {
+      throw new BadRequestException('Style No.를 읽지 못했습니다 — 저장 전에 직접 입력해 주세요.');
+    }
+    return this.mappingCommitService.compareSalesOrderBom({
+      styleNo,
+      bomItems: result.bomItems.map((b) => ({
+        itemName: b.itemName,
+        englishName: b.englishName ?? undefined,
+        category: b.category ?? undefined,
+        colorCode: b.colorCode ?? undefined,
+        spec: b.spec ?? undefined,
+        consumption: b.consumption ?? undefined,
+        requiredQty: b.requiredQty ?? undefined,
+      })),
+    });
   }
 
   async findSpecByStyleNo(styleNo: string) {
