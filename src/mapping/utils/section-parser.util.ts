@@ -92,6 +92,15 @@ export class SectionParser {
   ): any[] {
     const headers = rawData[bomStartIndex].map(h => h?.trim().toUpperCase());
     const toNum = (val: string | undefined | null) => parseFloat(val || '0') || 0;
+    // PR-236: xlsx가 수식 셀을 "캐시된 계산 결과의 원래 타입"으로 돌려준다 — 예를 들어
+    // 사이즈 라벨 칸(C4)이 엑셀에서 숫자로 입력돼 있으면, 그 칸을 참조하는 수식
+    // (=C4)도 문자열 '55'가 아니라 숫자 55로 온다(다른 시트는 C4가 텍스트라 문제없이
+    // 문자열로 온다 — 같은 수식, 다른 결과). excel-parser.util.ts가 `string[][]`로
+    // 타입을 선언했지만 실제 런타임 값은 그대로(SheetJS 원본 타입)라 숫자·불리언이
+    // 그대로 들어올 수 있다. colorOf/spec은 commit DTO에서 @IsString이라 숫자가 그대로
+    // 넘어가면 "bomItems.N.colorOf must be a string"으로 저장 자체가 거부된다 —
+    // 항상 문자열로 정규화한다(숫자→문자열, null/undefined→빈 문자열, 앞뒤 공백 제거).
+    const toSafeString = (val: unknown): string => (val == null ? '' : String(val).trim());
     const consIndex = headers.indexOf("CON'S");
 
     // ITEM 컬럼(0열)이 여러 행에 걸쳐 병합된 경우, 그건 하나의 자재 항목이 소요량 보조정보를
@@ -141,8 +150,8 @@ export class SectionParser {
         itemName: itemName.toUpperCase(),
         consumption: toNum(row[consIndex]),
         requiredQty: toNum(row[consIndex]) * totalQty,
-        colorOf: row[2],
-        spec: row[8],
+        colorOf: toSafeString(row[2]),
+        spec: toSafeString(row[8]),
       });
     }
 

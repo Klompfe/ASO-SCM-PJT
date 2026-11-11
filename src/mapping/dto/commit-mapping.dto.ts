@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
@@ -10,6 +10,16 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ProductionType } from '../../styles/entities/style-overview.entity';
+
+// PR-236: 엑셀 파서가 이제 colorOf/spec을 항상 문자열로 만들어 보내지만(근본 수정,
+// section-parser.util.ts), 이미 저장된 초안·구버전 프런트가 보낼 수 있는 비문자 값도
+// 안전망으로 한 번 더 받아낸다 — 숫자/불리언은 문자열로 바꾸고, null/undefined는
+// 그대로 둬 @IsOptional이 처리하게 한다. 객체·배열은 그대로 통과시켜(값을 바꾸지
+// 않음) @IsString이 계속 거부하게 한다(지시사항: "검증 자체를 지우지 않는다").
+const toStringIfPrimitive = ({ value }: { value: unknown }): unknown => {
+  if (value == null || typeof value === 'object') return value;
+  return String(value).trim();
+};
 
 export class CommitOverviewDto {
   @ApiProperty({ example: 'MB62SLM103Z' })
@@ -112,6 +122,7 @@ export class CommitBomItemDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(toStringIfPrimitive)
   @IsString()
   category?: string;
 
@@ -132,21 +143,25 @@ export class CommitBomItemDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(toStringIfPrimitive)
   @IsString()
   colorOf?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(toStringIfPrimitive)
   @IsString()
   spec?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(toStringIfPrimitive)
   @IsString()
   colorCode?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(toStringIfPrimitive)
   @IsString()
   supplier?: string;
 
@@ -158,6 +173,7 @@ export class CommitBomItemDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(toStringIfPrimitive)
   @IsString()
   remarks?: string;
 
@@ -165,6 +181,7 @@ export class CommitBomItemDto {
   // 이미 값이 있는 자재면 덮어쓰지 않는다(mapping-commit.service.ts commit() 참고).
   @ApiPropertyOptional({ description: '영문 표기(자재 마스터 englishName에 반영, 이미 값이 있으면 덮어쓰지 않음)' })
   @IsOptional()
+  @Transform(toStringIfPrimitive)
   @IsString()
   englishName?: string;
 

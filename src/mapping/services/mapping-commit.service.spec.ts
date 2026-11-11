@@ -293,6 +293,60 @@ describe('MappingCommitService', () => {
     });
   });
 
+  // PR-236(사용자 보고): "bomItems.13.colorOf must be a string" — 엑셀 파서 근본 수정
+  // (section-parser.util.ts)과는 별개로, DTO 레벨에도 안전망을 둔다(저장된 초안·
+  // 구버전 프런트가 비문자 값을 보내도 받아낸다). 숫자·불리언은 문자열로 바꾸고,
+  // 객체·배열 같은 "이상한 값"은 계속 거부해야 한다(검증 자체를 지우지 않음).
+  describe('CommitBomItemDto colorOf/spec 등 — 비문자 값 안전망 (PR-236)', () => {
+    it.each([
+      ['숫자', 55, '55'],
+      ['0(숫자)', 0, '0'],
+      ['불리언', true, 'true'],
+      ['앞뒤 공백 있는 문자열', '  BK  ', 'BK'],
+    ])('colorOf가 %s면 문자열 "%s"로 변환되어 검증을 통과한다', async (_label, raw, expected) => {
+      const dto = plainToInstance(CommitMappingDto, {
+        ...validPayload,
+        bomItems: [{ ...validPayload.bomItems[0], colorOf: raw }],
+      });
+      const errors = await validate(dto);
+      expect(errors).toHaveLength(0);
+      expect((dto.bomItems[0] as any).colorOf).toBe(expected);
+    });
+
+    it('colorOf가 null/undefined면 그대로 두고(@IsOptional) 검증을 통과한다', async () => {
+      for (const raw of [null, undefined]) {
+        const dto = plainToInstance(CommitMappingDto, {
+          ...validPayload,
+          bomItems: [{ ...validPayload.bomItems[0], colorOf: raw }],
+        });
+        const errors = await validate(dto);
+        expect(errors).toHaveLength(0);
+      }
+    });
+
+    it('colorOf가 객체·배열이면 문자열로 바꾸지 않고 여전히 거부한다(이상한 값은 계속 거부)', async () => {
+      for (const raw of [{ nested: true }, [1, 2, 3]]) {
+        const dto = plainToInstance(CommitMappingDto, {
+          ...validPayload,
+          bomItems: [{ ...validPayload.bomItems[0], colorOf: raw }],
+        });
+        const errors = await validate(dto);
+        const bomItemsErrors = errors.find((e) => e.property === 'bomItems');
+        expect(bomItemsErrors).toBeDefined();
+      }
+    });
+
+    it('spec도 colorOf와 같은 안전망을 쓴다(숫자 → 문자열)', async () => {
+      const dto = plainToInstance(CommitMappingDto, {
+        ...validPayload,
+        bomItems: [{ ...validPayload.bomItems[0], spec: 36 }],
+      });
+      const errors = await validate(dto);
+      expect(errors).toHaveLength(0);
+      expect((dto.bomItems[0] as any).spec).toBe('36');
+    });
+  });
+
   // PR-098: 같은 styleNo로 재커밋될 때 기존 StyleOverview/Bom을 통째로 교체·중복
   // 생성하지 않고 병합하는지 검증한다. LB6YSLM107Z(기존 BK 컬러 215장 + 신규 CR/BR
   // 컬러 추가) 실사례를 그대로 재현한다.

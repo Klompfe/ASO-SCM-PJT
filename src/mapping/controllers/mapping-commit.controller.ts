@@ -1,9 +1,10 @@
-import { BadRequestException, Controller, Get, Post, Body, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Body, Query, UseFilters } from '@nestjs/common';
 import { MappingCommitService } from '../services/mapping-commit.service';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { CommitMappingDto } from '../dto/commit-mapping.dto';
 import { BomDiffRequestDto } from '../dto/bom-diff.dto';
 import { BomReconcileRequestDto } from '../dto/bom-reconcile.dto';
+import { BomItemValidationErrorFilter } from '../filters/bom-item-validation-error.filter';
 
 @ApiTags('데이터 매핑 커밋 API')
 @Controller('mapping')
@@ -18,8 +19,12 @@ export class MappingCommitController {
     return await this.mappingCommitService.checkExists(styleNo);
   }
 
+  // PR-236: class-validator의 영문 오류("bomItems.N.필드 must be a string")를 행
+  // 번호(1부터)·한글 항목명으로 바꾼다 — 이 라우트에만 적용(전역 아님, 다른 응답
+  // 모양·메시지는 그대로).
   @ApiOperation({ summary: '최종 매핑 데이터 저장' })
   @Post('commit')
+  @UseFilters(BomItemValidationErrorFilter)
   async commit(@Body() payload: CommitMappingDto) {
     return await this.mappingCommitService.commit(payload);
   }
