@@ -17,6 +17,7 @@ import { MaterialPackagingUnitRule } from '../src/material-packaging-unit-rules/
 import { BrandPriceRule } from '../src/brand-price-rules/entities/brand-price-rule.entity';
 import { BrandPrefixRule } from '../src/brand-prefix-rules/entities/brand-prefix-rule.entity';
 import { MidoPriceItem } from '../src/mido-price-table/entities/mido-price-item.entity';
+import { Item } from '../src/items/entities/item.entity';
 
 // PR-185: 발주 ↔ 스타일 선택적 연결(두 트랙) + 소요량 기반 수량(콘/롤 환산 포함) +
 // 단가표(USD) 참고단가 + INVOICE 연계 + lines/quantity 단독 변경 가드.
@@ -76,7 +77,12 @@ describe('발주 스타일 연결·소요량·단가표 참고단가 (PR-185)', 
     const found = await auth(request(http()).get('/items').query({ keyword: opts.itemName })).expect(200);
     const itemId = found.body.data.items.find((i: any) => i.name === opts.itemName).id;
     if (opts.unit) {
-      await auth(request(http()).patch(`/items/${itemId}`)).send({ unit: opts.unit }).expect(200);
+      // PR-239: 이 fixture는 "실/테이프 품목에 단위가 이미 CONE 등으로 들어있는 기존
+      // 데이터"를 흉내 낸다(이 테스트의 목적 자체가 "소요량 계산이 Item.unit과 무관하게
+      // 동작하는지" 확인하는 것) — PATCH /items/:id는 이제 이런 변경 자체를 막으므로
+      // (사람이 실수로 단위를 콘으로 바꾸는 사고 방지), 기존 데이터를 재현하는 이
+      // 준비 단계는 API를 거치지 않고 DB에 직접 써서 가드와 무관하게 둔다.
+      await dataSource.getRepository(Item).update({ id: itemId }, { unit: opts.unit });
     }
     return { supplierId, itemId };
   };

@@ -14,7 +14,13 @@ import { GetItemsFilterDto } from './dto/get-items-filter.dto';
 import { MaterialCategory } from '../material-categories/entities/material-category.entity';
 import { MaterialPackagingUnitRule } from '../material-packaging-unit-rules/entities/material-packaging-unit-rule.entity';
 import { looksLikeThreadOrTape, buildThreadTapeSuggestion } from '../common/utils/packaging-subtype.util';
+import { classifyQuantityUnit } from '../work-orders/utils/material-requirements.util';
 import * as XLSX from 'xlsx';
+
+// PR-239: 단위는 요척의 길이 단위(M/Y 등)여야 포장 환산(N콘/N롤)의 전제가 성립한다 —
+// ItemsManager.tsx의 같은 이름 상수(utils/bomQtyReason.ts)와 문구를 맞춘다.
+export const BLOCKED_PACKAGING_UNIT_MESSAGE =
+  '단위는 요척의 길이 단위(M/Y 등)여야 합니다. 콘·롤은 "실/테이프 종류 지정"의 포장 규칙으로 처리됩니다. 권장 단위: M';
 
 export interface ThreadTapeClassificationAssignment {
   itemId: number;
@@ -218,6 +224,20 @@ export class ItemsService {
       const effectiveType = (dto.type as ItemType) || item.type;
       if (effectiveType !== ItemType.FINISHED_GOOD) {
         throw new BadRequestException('styleNo는 FINISHED_GOOD 타입 품목에만 지정할 수 있습니다.');
+      }
+    }
+
+    // PR-239: 길이 기반 요척(실/테이프) 또는 포장 규칙이 지정된 품목은 단위를 콘/롤/EA
+    // 등 길이가 아닌 값으로 바꾸는 것을 막는다 — 프런트 가드(ItemsManager.tsx)를
+    // 우회해 API를 직접 호출해도 같은 사고(단위를 CONE으로 바꿔 포장 환산 전제가
+    // 깨지는 것)가 나지 않게 서버에서도 거부한다.
+    if (dto.unit && dto.unit.trim() !== (item.unit ?? '').trim() && classifyQuantityUnit(dto.unit) !== 'length') {
+      const effectiveSubType = dto.materialSubType !== undefined ? dto.materialSubType : item.materialSubType;
+      const rules = await this.dataSource.getRepository(MaterialPackagingUnitRule).find();
+      const hasPackagingRule = !!effectiveSubType && rules.some((r) => r.materialSubType === effectiveSubType);
+      const looksLikeThreadTape = !item.materialSubType && !item.packagingReviewedAt && looksLikeThreadOrTape(item.name, rules);
+      if (hasPackagingRule || looksLikeThreadTape) {
+        throw new BadRequestException(BLOCKED_PACKAGING_UNIT_MESSAGE);
       }
     }
 

@@ -210,6 +210,78 @@ describe('ItemsService', () => {
     });
   });
 
+  // PR-239: 사용자 보고 사고 재현 — 포장 규칙이 지정된(또는 이름이 실/테이프로 보이는)
+  // 품목의 단위를 콘/롤/EA 등 길이가 아닌 값으로 바꾸려 하면(프런트 가드를 우회해 API를
+  // 직접 호출해도) 서버가 거부한다. 길이 기반이 아닌 일반 개수 자재는 그대로 허용한다.
+  describe('update - 단위 가드(PR-239, 길이 기반 요척은 길이 단위만 허용)', () => {
+    const CONE_RULE = { materialSubType: 'COA_SA', displayName: '코아사', packagingUnitLabel: '콘', unitLengthM: 2500 };
+
+    it('포장 규칙이 지정된 품목의 단위를 CONE으로 바꾸면 400이고 저장되지 않는다', async () => {
+      const existing = { id: 20, code: 'THREAD_1', name: '코아사 45S', type: ItemType.RAW_MATERIAL, unit: 'M', materialSubType: 'COA_SA', packagingReviewedAt: null };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockRuleRepository.find.mockResolvedValue([CONE_RULE]);
+
+      await expect(service.update(20, { unit: 'CONE' })).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockItemRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('한글 단위("콘")로 바꾸려는 것도 같이 막는다', async () => {
+      const existing = { id: 21, code: 'THREAD_2', name: '코아사 50S', type: ItemType.RAW_MATERIAL, unit: 'M', materialSubType: 'COA_SA', packagingReviewedAt: null };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockRuleRepository.find.mockResolvedValue([CONE_RULE]);
+
+      await expect(service.update(21, { unit: '콘' })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('포장 규칙이 지정된 품목이라도 길이 단위(M/Y 등)로 바꾸는 것은 허용한다', async () => {
+      const existing = { id: 22, code: 'THREAD_3', name: '코아사 60S', type: ItemType.RAW_MATERIAL, unit: 'EA', materialSubType: 'COA_SA', packagingReviewedAt: null };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.save.mockImplementation((item: any) => Promise.resolve(item));
+      mockRuleRepository.find.mockResolvedValue([CONE_RULE]);
+
+      const result = await service.update(22, { unit: 'Y' });
+      expect(result.unit).toBe('Y');
+    });
+
+    it('종류가 아직 미지정이라도 이름이 실/테이프로 보이면 같은 가드가 적용된다', async () => {
+      const existing = { id: 23, code: 'THREAD_4', name: '코아사 70S', type: ItemType.RAW_MATERIAL, unit: 'M', materialSubType: null, packagingReviewedAt: null };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockRuleRepository.find.mockResolvedValue([CONE_RULE]);
+
+      await expect(service.update(23, { unit: 'EA' })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('"실/테이프 아님"으로 검토 확정(packagingReviewedAt 있음)된 품목은 이름이 비슷해도 가드를 적용하지 않는다', async () => {
+      const existing = { id: 24, code: 'THREAD_5', name: '코아사 모양 단추', type: ItemType.RAW_MATERIAL, unit: 'M', materialSubType: null, packagingReviewedAt: new Date() };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.save.mockImplementation((item: any) => Promise.resolve(item));
+      mockRuleRepository.find.mockResolvedValue([CONE_RULE]);
+
+      const result = await service.update(24, { unit: 'EA' });
+      expect(result.unit).toBe('EA');
+    });
+
+    it('길이 기반이 아닌 일반 개수 자재(단추 등)는 단위를 EA/CONE 등 자유롭게 바꿀 수 있다', async () => {
+      const existing = { id: 25, code: 'BTN_1', name: '똑딱이 단추', type: ItemType.RAW_MATERIAL, unit: 'EA', materialSubType: null, packagingReviewedAt: null };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.save.mockImplementation((item: any) => Promise.resolve(item));
+      mockRuleRepository.find.mockResolvedValue([CONE_RULE]);
+
+      const result = await service.update(25, { unit: 'SET' });
+      expect(result.unit).toBe('SET');
+    });
+
+    it('단위를 바꾸지 않으면(같은 값) 가드가 동작하지 않는다 — 다른 필드만 바꿔도 통과', async () => {
+      const existing = { id: 26, code: 'THREAD_6', name: '코아사 80S', type: ItemType.RAW_MATERIAL, unit: 'CONE', materialSubType: 'COA_SA', packagingReviewedAt: null };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.save.mockImplementation((item: any) => Promise.resolve(item));
+      mockRuleRepository.find.mockResolvedValue([CONE_RULE]);
+
+      const result = await service.update(26, { unit: 'CONE', spec: '수정됨' });
+      expect(result.spec).toBe('수정됨');
+    });
+  });
+
   // PR-186 D: 실/테이프 후보 조회 — looksLikeThreadOrTape로 보수적으로 추려, 정확히 1개
   // 규칙과 매칭될 때만 추천값을 함께 준다(자동 확정 아님).
   describe('getThreadTapeCandidates (PR-186 D)', () => {
