@@ -34,6 +34,8 @@ interface ItemsManagerProps {
   // PR-230: 이 화면은 항상 특정 스타일의 BOM을 보여주는 중이라, 발주 화면으로
   // 넘어갈 때 그 스타일도 같이 넘긴다(연결 해제는 발주 화면에서 사용자가 선택).
   onOrderItem?: (itemId: number, styleNo?: string) => void;
+  // PR-238: 표에서 체크한 BOM 행 id 목록으로 "선택 자재 일괄 발주"를 연다(새 탭).
+  onBulkOrderItems?: (styleNo: string, bomItemIds: number[]) => void;
   // 오더관리(수주 등록/오더 목록)에서 "자재명세 보기"를 누르면 넘어오는 styleNo —
   // App.tsx의 poPrefillItemId/StylesManager의 initialStyleNo와 동일한 cross-tab 패턴.
   // 이 값이 오면 검색 없이 바로 그 스타일의 BOM을 연다.
@@ -48,7 +50,10 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   FINISHED_GOOD: '완제품',
 };
 
-export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initialStyleNo, onInitialStyleNoConsumed }) => {
+export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkOrderItems, initialStyleNo, onInitialStyleNoConsumed }) => {
+  // PR-238: 체크한 BOM 행 id — 필터가 바뀌어도 선택은 유지한다(지시사항). 스타일을
+  // 바꾸면(다른 BOM을 불러오면) 비운다(아래 useEffect).
+  const [selectedBomItemIds, setSelectedBomItemIds] = useState<Set<number>>(new Set());
   // 스타일별 자재명세(BOM) 조회
   const [searchStyleNo, setSearchStyleNo] = useState('');
   const [searchRddFrom, setSearchRddFrom] = useState('');
@@ -75,6 +80,11 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
   useEffect(() => {
     if (bom) loadPendingOrders();
   }, [bom, loadPendingOrders]);
+  // PR-238: 다른 스타일의 BOM을 불러오면 이전 스타일에서 체크했던 선택이 섞이지
+  // 않게 비운다.
+  useEffect(() => {
+    setSelectedBomItemIds(new Set());
+  }, [selectedStyleNo]);
   const [bomError, setBomError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
   // PR-224: 발주 화면(PurchaseOrdersManager.tsx)의 "스타일 연결" 콤보와 같은
@@ -962,6 +972,19 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                   <span className="text-xs text-gray-500" data-testid="bom-filter-count">
                     자재 {bom.items.length}건 중 {filteredBomItems.length}건
                   </span>
+                  {onBulkOrderItems && (
+                    <button
+                      type="button"
+                      className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50 disabled:bg-gray-400"
+                      disabled={selectedBomItemIds.size === 0}
+                      onClick={() => {
+                        if (!selectedStyleNo || selectedBomItemIds.size === 0) return;
+                        onBulkOrderItems(selectedStyleNo, [...selectedBomItemIds]);
+                      }}
+                    >
+                      선택 자재 일괄 발주 ({selectedBomItemIds.size})
+                    </button>
+                  )}
                 </div>
                 {filteredBomItems.length === 0 ? (
                   <p className="p-4 text-center text-gray-500 bg-white border border-gray-200 rounded-lg">
@@ -972,6 +995,23 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
               <table>
                 <thead className="bg-gray-100 text-gray-700">
                   <tr>
+                    {onBulkOrderItems && (
+                      <th className="px-4 py-2 text-left">
+                        <input
+                          type="checkbox"
+                          aria-label="보이는 자재 전체 선택"
+                          checked={filteredBomItems.length > 0 && filteredBomItems.every((r) => selectedBomItemIds.has(r.id))}
+                          onChange={(e) => {
+                            setSelectedBomItemIds((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) filteredBomItems.forEach((r) => next.add(r.id));
+                              else filteredBomItems.forEach((r) => next.delete(r.id));
+                              return next;
+                            });
+                          }}
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-2 text-left">자재코드</th>
                     <th className="px-4 py-2 text-left">자재명</th>
                     <th className="px-4 py-2 text-left">카테고리</th>
@@ -995,6 +1035,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                   {filteredBomItems.map((it) =>
                     swappingBomItemId === it.id ? (
                       <tr key={it.id} className="bg-indigo-50">
+                        {onBulkOrderItems && <td className="px-4 py-2" />}
                         <td className="px-4 py-2 font-mono">{it.material?.code}</td>
                         <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
                         <td colSpan={13} className="px-4 py-2">
@@ -1020,6 +1061,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                       </tr>
                     ) : editingBomItemId === it.id ? (
                       <tr key={it.id} className="bg-yellow-50">
+                        {onBulkOrderItems && <td className="px-4 py-2" />}
                         <td className="px-4 py-2 font-mono">{it.material?.code}</td>
                         <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
                         <td className="px-4 py-2">
@@ -1152,8 +1194,32 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, initial
                       </tr>
                     ) : (
                       <tr key={it.id} className="hover:bg-gray-50">
+                        {onBulkOrderItems && (
+                          <td className="px-4 py-2">
+                            <input
+                              type="checkbox"
+                              aria-label={`${it.material?.name ?? ''} 발주 대상으로 선택`}
+                              checked={selectedBomItemIds.has(it.id)}
+                              onChange={(e) => {
+                                setSelectedBomItemIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(it.id); else next.delete(it.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                          </td>
+                        )}
                         <td className="px-4 py-2 font-mono">{it.material?.code}</td>
-                        <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
+                        <td className="px-4 py-2 whitespace-pre-line">
+                          {it.material?.name}
+                          {/* PR-238: 이미 미입고 발주가 있는 자재는 배지로 표시(기본 체크는 하지 않음 — 위 체크박스는 항상 수동). */}
+                          {it.material?.id && buildEditableOrderByItem(pendingOrders).get(it.material.id) && (
+                            <span className="block text-xs text-amber-700">
+                              발주 {buildEditableOrderByItem(pendingOrders).get(it.material.id)!.pendingCount}건
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-2 whitespace-pre-line">{it.category}</td>
                         <td className="px-4 py-2">{it.colorCode}</td>
                         <td className="px-4 py-2">{it.spec}</td>
