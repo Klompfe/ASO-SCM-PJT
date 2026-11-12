@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
+import { buildSingleOrderUrl, buildBulkOrderUrl, parseOrderPrefillFromSearch } from './utils/bomBulkOrderNav';
 import { Dashboard } from './components/Dashboard';
 import { ItemsManager } from './components/ItemsManager';
 import { WorkOrdersManager } from './components/WorkOrdersManager';
@@ -10,6 +12,7 @@ import { SuppliersManager } from './components/SuppliersManager';
 import { BuyersManager } from './components/BuyersManager';
 import { UsersManager } from './components/UsersManager';
 import { PurchaseOrdersManager } from './components/PurchaseOrdersManager';
+import { BomBulkOrderPanel } from './components/BomBulkOrderPanel';
 import { MultiStyleBulkOrder } from './components/MultiStyleBulkOrder';
 import { ProductionContractsManager } from './components/ProductionContractsManager';
 import { PurchaseOrderLedgerReport } from './components/PurchaseOrderLedgerReport';
@@ -63,8 +66,13 @@ function App() {
     }
   });
   
+  // PR-238: 자재명세(자재·BOM 조회)의 "발주하기"/"선택 자재 일괄 발주"는 새 브라우저
+  // 탭으로 연다 — 그 새 탭이 바로 이 App이 다시 처음부터 마운트되는 것이므로, 쿼리를
+  // 여기서 한 번만 읽어 초기 탭/프리필 상태를 정한다(쿼리가 없으면 기존 흐름 그대로).
+  const initialOrderPrefill = parseOrderPrefillFromSearch(window.location.search);
+
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [activeTab, setActiveTab] = useState<TabId>(() => (initialOrderPrefill ? 'purchaseOrders' : 'dashboard'));
 
   // PR-070: "사용자 관리" 탭은 MANAGER/ADMIN에게만 보여야 한다 — GET /auth/me(PR-066)로
   // 현재 사용자의 role을 조회해 탭 자체를 목록에서 숨긴다(USER는 존재를 알 필요도 없음).
@@ -114,11 +122,42 @@ function App() {
   // 조건은 같지만 별도 탭을 가리키는 이름이라 헷갈리지 않게 따로 둔다.
   const isManagerOrAdmin = canManageUsers;
   // Items(자재명세) 화면에서 "발주하기"를 누르면 이 값을 채우고 Purchase Orders 탭으로 이동한다.
-  const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(null);
+  // PR-238: 이제 그 이동이 새 탭 열기라, 초기값도 (같은 탭이 새로 마운트될 때) URL
+  // 쿼리에서 바로 채워진다.
+  const [poPrefillItemId, setPoPrefillItemId] = useState<number | null>(() =>
+    initialOrderPrefill?.kind === 'single' ? initialOrderPrefill.itemId : null,
+  );
   // PR-230: 자재·BOM 조회는 항상 특정 스타일을 보는 중이라, 품목과 함께 그 스타일도
   // 넘겨 [B] 발주 입력 칸에 스타일이 기본으로 연결되게 한다(poPrefillItemId와 같은
   // consume-once 패턴, onPrefillConsumed에서 같이 지운다).
-  const [poPrefillItemStyleNo, setPoPrefillItemStyleNo] = useState<string | null>(null);
+  const [poPrefillItemStyleNo, setPoPrefillItemStyleNo] = useState<string | null>(() =>
+    initialOrderPrefill?.kind === 'single' ? initialOrderPrefill.styleNo : null,
+  );
+  // PR-238: 자재명세에서 "선택 자재 일괄 발주"로 넘어온 경우 — 스타일 + 고른 BOM 행
+  // id만 들고 온다(업무 데이터는 URL에 없음, 새 탭이 서버에서 다시 조회).
+  const [bomBulkOrderPrefill, setBomBulkOrderPrefill] = useState<{ styleNo: string; bomItemIds: number[] } | null>(() =>
+    initialOrderPrefill?.kind === 'bulk' ? { styleNo: initialOrderPrefill.styleNo, bomItemIds: initialOrderPrefill.bomItemIds } : null,
+  );
+
+  // PR-238: 프리필을 한 번 반영했으면 주소창 쿼리를 지운다(새로고침해도 같은 값을
+  // 다시 쓰지 않도록) — 값 자체는 이미 위 useState 초기값으로 복사해 뒀다.
+  useEffect(() => {
+    if (initialOrderPrefill) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // PR-238: 자재명세의 "발주하기"(단일)/"선택 자재 일괄 발주"는 같은 탭을 바꾸지 않고
+  // 새 탭을 연다(자재명세 탭의 필터·선택 상태가 그대로 유지됨) — 로그인 세션은
+  // localStorage 기반이라 같은 출처의 새 탭에서도 그대로 쓰인다. 팝업이 차단되면
+  // window.open이 null을 돌려준다(사용자 클릭에서 바로 호출하면 보통 차단되지 않음).
+  const openOrderTab = (url: string) => {
+    const win = window.open(url, '_blank', 'noopener');
+    if (!win) {
+      toast.error('팝업이 차단되었습니다. 브라우저에서 팝업을 허용한 뒤 다시 눌러 주세요.');
+    }
+  };
   // PR-196: 발주·입고·출고 현황에서 "발주하기"/"발주 보기"를 누르면 그 스타일번호를
   // 채우고 발주관리 탭으로 이동한다(poPrefillItemId와 동일한 패턴).
   const [poPrefillStyleNo, setPoPrefillStyleNo] = useState<string | null>(null);
@@ -172,10 +211,15 @@ function App() {
   const [shipmentsSubTab, setShipmentsSubTab] = useState<'export' | 'import' | 'exportPerformance'>('export');
   const [purchaseOrdersSubTab, setPurchaseOrdersSubTab] = useState<'list' | 'productionContracts' | 'ledger' | 'packing' | 'multiStyleBulkOrder' | 'unlinked'>('list');
 
+  // PR-238: 같은 탭에서 바꾸던 것을 새 탭 열기로 바꿨다 — 자재명세 탭은 그대로 남는다.
   const handleOrderItem = (itemId: number, styleNo?: string) => {
-    setPoPrefillItemId(itemId);
-    setPoPrefillItemStyleNo(styleNo ?? null);
-    setActiveTab('purchaseOrders');
+    openOrderTab(buildSingleOrderUrl(window.location.pathname, itemId, styleNo));
+  };
+
+  // PR-238: 자재명세에서 "선택 자재 일괄 발주"를 누르면 새 탭에서 공급사별 일괄 발주
+  // 화면이 뜬다(스타일 + 고른 BOM 행 id만 전달).
+  const handleBulkOrderBomItems = (styleNo: string, bomItemIds: number[]) => {
+    openOrderTab(buildBulkOrderUrl(window.location.pathname, styleNo, bomItemIds));
   };
 
   useEffect(() => {
@@ -242,6 +286,7 @@ function App() {
             {itemsSubTab === 'items' ? (
               <ItemsManager
                 onOrderItem={handleOrderItem}
+                onBulkOrderItems={handleBulkOrderBomItems}
                 initialStyleNo={bomStyleNoToOpen}
                 onInitialStyleNoConsumed={() => setBomStyleNoToOpen(null)}
               />
@@ -346,7 +391,13 @@ function App() {
                 onClick={() => setPurchaseOrdersSubTab('unlinked')}
               >미연결 발주 정리</button>
             </div>
-            {purchaseOrdersSubTab === 'list' ? (
+            {purchaseOrdersSubTab === 'list' && bomBulkOrderPrefill ? (
+              <BomBulkOrderPanel
+                styleNo={bomBulkOrderPrefill.styleNo}
+                bomItemIds={bomBulkOrderPrefill.bomItemIds}
+                onClose={() => setBomBulkOrderPrefill(null)}
+              />
+            ) : purchaseOrdersSubTab === 'list' ? (
               <PurchaseOrdersManager
                 prefillItemId={poPrefillItemId}
                 prefillItemStyleNo={poPrefillItemStyleNo}
