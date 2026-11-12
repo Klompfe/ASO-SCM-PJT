@@ -60,6 +60,31 @@ export function isUnitChanged(originalUnit: string | null | undefined, newUnit: 
   return newUnit.trim() !== (originalUnit ?? '').trim();
 }
 
+// PR-239: 사용자가 "필요수량 직접 지정"에 포장 수(46콘)를 넣으려다 단위 칸을 CONE으로
+// 바꾸려 했던 사고 — 단위는 자재 마스터 값(위 UNIT_CHANGE_CONFIRM_TEXT)이고, 길이 기반
+// 요척(실/테이프)이거나 포장 규칙이 지정된 행은 항상 길이 단위(M/Y 등)여야 포장 환산
+// (formatBomItemQty의 PACKAGED 분기, material-requirements.util.ts)이 성립한다. 콘/롤/EA
+// 등 길이가 아닌 단위로 바꾸면 그 환산 전제가 깨진다 — 저장 자체를 막는다. 길이 기반이
+// 아닌 일반 개수 자재(단추 등 EA/SET)는 이 가드와 무관하게 자유롭게 단위를 바꿀 수 있다.
+export interface UnitGuardContext {
+  // 이 행의 실/테이프 종류(threadType/tapeType 또는 Item.materialSubType)에 포장 규칙이 있음.
+  hasPackagingRule: boolean;
+  // 종류가 아직 미지정이라도 자재명이 실/테이프로 보임(looksLikeThreadOrTape).
+  looksLikeThreadOrTapeByName: boolean;
+}
+
+export const BLOCKED_PACKAGING_UNIT_MESSAGE =
+  '단위는 요척의 길이 단위(M/Y 등)여야 합니다. 콘·롤은 "실/테이프 종류 지정"의 포장 규칙으로 처리됩니다. 권장 단위: M';
+
+const GUARD_LENGTH_UNIT_TOKENS = new Set(['M', 'YD', 'Y', 'MM', 'CM', 'KM', 'MT']);
+
+export function isBlockedUnitForLengthBasedMaterial(newUnit: string, ctx: UnitGuardContext): boolean {
+  if (!ctx.hasPackagingRule && !ctx.looksLikeThreadOrTapeByName) return false;
+  const u = newUnit.trim().toUpperCase();
+  if (!u) return false;
+  return !GUARD_LENGTH_UNIT_TOKENS.has(u);
+}
+
 // PR-229: 자재·BOM 조회 표의 "소요수량" 주 값을 저장 스냅샷이 아니라 지금 규칙으로
 // 계산한 값(appliedQuantity.ts의 resolveAppliedQuantity)으로 바꾼다 — 계산 자체가 안
 // 되는 두 경우에만(색상 수량표에도 작지 값에도 근거가 없음 / 스타일 총수량 미입력)

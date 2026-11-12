@@ -7,6 +7,8 @@ import {
   resolveLiveQtyReason,
   describeLiveQtyReason,
   describeSnapshotNote,
+  isBlockedUnitForLengthBasedMaterial,
+  BLOCKED_PACKAGING_UNIT_MESSAGE,
 } from './bomQtyReason';
 import { resolveAppliedQuantity, buildColorQtyMap } from './appliedQuantity';
 import { formatBomItemQty, type PackagingRuleLike } from './materialRequirementDisplay';
@@ -62,6 +64,41 @@ describe('isUnitChanged / UNIT_CHANGE_CONFIRM_TEXT (PR-227)', () => {
   it('확인 문구는 "자재(품목) 마스터 값"이며 모든 스타일에 적용된다는 점을 알린다', () => {
     expect(UNIT_CHANGE_CONFIRM_TEXT).toContain('마스터');
     expect(UNIT_CHANGE_CONFIRM_TEXT).toContain('모든 스타일');
+  });
+});
+
+describe('isBlockedUnitForLengthBasedMaterial (PR-239)', () => {
+  const PACKAGING_ROW = { hasPackagingRule: true, looksLikeThreadOrTapeByName: false };
+  const THREAD_LOOKING_ROW = { hasPackagingRule: false, looksLikeThreadOrTapeByName: true };
+  const ORDINARY_ROW = { hasPackagingRule: false, looksLikeThreadOrTapeByName: false };
+
+  it('포장 규칙이 지정된 행은 콘·롤·EA 등 길이가 아닌 단위로 바꾸는 것을 막는다', () => {
+    expect(isBlockedUnitForLengthBasedMaterial('CONE', PACKAGING_ROW)).toBe(true);
+    expect(isBlockedUnitForLengthBasedMaterial('콘', PACKAGING_ROW)).toBe(true);
+    expect(isBlockedUnitForLengthBasedMaterial('ROLL', PACKAGING_ROW)).toBe(true);
+    expect(isBlockedUnitForLengthBasedMaterial('EA', PACKAGING_ROW)).toBe(true);
+  });
+
+  it('포장 규칙이 지정된 행은 길이 단위(M/Y 등)로 바꾸는 것은 막지 않는다', () => {
+    expect(isBlockedUnitForLengthBasedMaterial('M', PACKAGING_ROW)).toBe(false);
+    expect(isBlockedUnitForLengthBasedMaterial('Y', PACKAGING_ROW)).toBe(false);
+    expect(isBlockedUnitForLengthBasedMaterial('yd', PACKAGING_ROW)).toBe(false);
+  });
+
+  it('종류가 미지정이라도 자재명이 실/테이프로 보이면 같은 가드가 적용된다', () => {
+    expect(isBlockedUnitForLengthBasedMaterial('CONE', THREAD_LOOKING_ROW)).toBe(true);
+    expect(isBlockedUnitForLengthBasedMaterial('M', THREAD_LOOKING_ROW)).toBe(false);
+  });
+
+  it('길이 기반이 아닌 일반 개수 자재(단추 등)는 EA/SET/콘 등 어떤 단위로 바꿔도 막지 않는다', () => {
+    expect(isBlockedUnitForLengthBasedMaterial('EA', ORDINARY_ROW)).toBe(false);
+    expect(isBlockedUnitForLengthBasedMaterial('SET', ORDINARY_ROW)).toBe(false);
+    expect(isBlockedUnitForLengthBasedMaterial('CONE', ORDINARY_ROW)).toBe(false);
+  });
+
+  it('안내 문구는 길이 단위여야 한다는 것과 포장 규칙으로 처리된다는 것을 모두 알린다', () => {
+    expect(BLOCKED_PACKAGING_UNIT_MESSAGE).toContain('길이 단위');
+    expect(BLOCKED_PACKAGING_UNIT_MESSAGE).toContain('포장 규칙');
   });
 });
 
