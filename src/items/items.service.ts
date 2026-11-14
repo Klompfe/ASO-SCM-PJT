@@ -8,13 +8,16 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, In } from 'typeorm';
+import { Repository, DataSource, In, Not } from 'typeorm';
 import { Item, ItemType } from './entities/item.entity';
 import { GetItemsFilterDto } from './dto/get-items-filter.dto';
 import { MaterialCategory } from '../material-categories/entities/material-category.entity';
 import { MaterialPackagingUnitRule } from '../material-packaging-unit-rules/entities/material-packaging-unit-rule.entity';
 import { looksLikeThreadOrTape, buildThreadTapeSuggestion } from '../common/utils/packaging-subtype.util';
 import { classifyQuantityUnit } from '../work-orders/utils/material-requirements.util';
+import { normalizeForFuzzyMatch } from '../boms/utils/bom-name-normalize.util';
+import { BomItem } from '../boms/entities/bom-item.entity';
+import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
 import * as XLSX from 'xlsx';
 
 // PR-239: 단위는 요척의 길이 단위(M/Y 등)여야 포장 환산(N콘/N롤)의 전제가 성립한다 —
@@ -227,6 +230,24 @@ export class ItemsService {
       }
     }
 
+    // PR-241: 자재마스터 이름 변경(모든 스타일 적용) — 빈 이름은 거부하고, 같은
+    // 정규화 이름(normalizeForFuzzyMatch, BOM 자재명 매칭과 같은 규칙)의 다른 Item이
+    // 이미 있으면 거부한다(그 Item의 코드만 안내 — 두 Item을 합치는 것은 이번 범위가
+    // 아니다). PR-239 단위 가드와는 별개로 적용된다(서로 다른 필드 검증).
+    if (dto.name !== undefined) {
+      if (!dto.name.trim()) {
+        throw new BadRequestException('품목명을 입력해 주세요.');
+      }
+      if (dto.name.trim() !== item.name.trim()) {
+        const normalizedNewName = normalizeForFuzzyMatch(dto.name);
+        const allItems = await this.itemRepository.find();
+        const duplicate = allItems.find((it) => it.id !== id && normalizeForFuzzyMatch(it.name) === normalizedNewName);
+        if (duplicate) {
+          throw new ConflictException(`이미 사용 중인 자재명입니다: ${duplicate.code}`);
+        }
+      }
+    }
+
     // PR-239: 길이 기반 요척(실/테이프) 또는 포장 규칙이 지정된 품목은 단위를 콘/롤/EA
     // 등 길이가 아닌 값으로 바꾸는 것을 막는다 — 프런트 가드(ItemsManager.tsx)를
     // 우회해 API를 직접 호출해도 같은 사고(단위를 CONE으로 바꿔 포장 환산 전제가
@@ -267,6 +288,31 @@ export class ItemsService {
       this.logger.error(`Failed to update item ID ${id}: ${error.message}`, error.stack);
       throw new InternalServerErrorException('품목 정보 수정 중 오류가 발생했습니다.');
     }
+  }
+
+  // PR-241: 자재마스터 이름 변경(모든 스타일 적용) 전에 영향 범위를 보여준다(읽기
+  // 전용, N+1 없이 집계 쿼리 3개로 끝낸다). "선적"은 PurchaseOrder → PackingReceipt →
+  // ExportShipmentLine을 거쳐 연결되는데, 그 경로를 집계하려면 ItemsModule에
+  // export-shipments 모듈을 새로 끌어와야 해서(순환 의존 위험) 이번 범위에서는 발주·
+  // 입고(PurchaseOrder 상태 전이)까지만 센다 — 화면 문구/보고서에 그대로 밝힌다.
+  async getUsage(id: number): Promise<{ styleCount: number; bomItemCount: number; orderCount: number }> {
+    await this.findOne(id);
+
+    const bomItemRepo = this.dataSource.getRepository(BomItem);
+    const purchaseOrderRepo = this.dataSource.getRepository(PurchaseOrder);
+
+    const bomItemCount = await bomItemRepo.count({ where: { material: { id } } });
+    const styleCountRow = await bomItemRepo
+      .createQueryBuilder('bi')
+      .innerJoin('bi.bom', 'bom')
+      .innerJoin('bom.style', 'style')
+      .where('bi.materialId = :id', { id })
+      .select('COUNT(DISTINCT style.styleNo)', 'count')
+      .getRawOne<{ count: string }>();
+    const styleCount = Number(styleCountRow?.count ?? 0);
+    const orderCount = await purchaseOrderRepo.count({ where: { itemId: id, status: Not(PurchaseOrderStatus.CANCELLED) } });
+
+    return { styleCount, bomItemCount, orderCount };
   }
 
   async remove(id: number): Promise<{ success: boolean; message: string }> {

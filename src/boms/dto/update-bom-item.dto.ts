@@ -76,4 +76,21 @@ export class UpdateBomItemDto {
   @IsString()
   @MaxLength(200)
   manualRequiredQtyNote?: string | null;
+
+  // PR-241: 이 행(이 스타일의 이 자재)만의 공급업체/단가 — 자재마스터·다른 스타일에는
+  // 영향 없다(기존 BomItem.supplier/unitPrice 컬럼, PR-098/PR-240이 이미 읽던 값).
+  // 화면은 공급업체 마스터에서 고르게 하지만(자유 입력 금지), 서버는 문자열 그대로
+  // 받는다 — BomItem.supplier가 FK가 아니라 자유 텍스트 컬럼이기 때문(기존 설계,
+  // 이번 PR에서 스키마를 바꾸지 않는다). null/빈 문자열을 보내면 "미정"으로 해제한다.
+  @ApiPropertyOptional({ example: '합성공급사A', nullable: true, description: '이 행의 공급업체(이름) — null/빈 문자열이면 미정으로 해제' })
+  @IsOptional()
+  @IsString()
+  supplier?: string | null;
+
+  // PR-241: 0 또는 생략 = 없음(PR-240 규칙과 동일). 음수·NaN은 거부한다.
+  @ApiPropertyOptional({ example: 1000, description: '이 행의 단가(통화 미지정, 0 이상)' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  unitPrice?: number;
 }

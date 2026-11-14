@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { BomsService } from './boms.service';
 import { UpdateBomItemDto } from './dto/update-bom-item.dto';
 import { SwapBomItemMaterialDto } from './dto/swap-bom-item-material.dto';
+import { RenameBomItemMaterialDto } from './dto/rename-bom-item-material.dto';
 import { SetActiveBomDto } from './dto/set-active-bom.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -67,6 +68,17 @@ export class BomsController {
     @Body() dto: SwapBomItemMaterialDto,
   ) {
     return await this.bomsService.swapMaterial(id, dto);
+  }
+
+  // PR-241: "이 행만" 자재명 변경 — 자재 교체와 달리 새 이름을 받아 서버가 기존
+  // 자재에 연결하거나 새로 만든다(안전장치는 서비스 쪽에서 강제).
+  @Patch('items/:id/material-name')
+  @ApiOperation({ summary: '자재명세 항목(이 행만)의 자재명 변경 — 기존 자재에 연결되거나 새 자재가 생성됨' })
+  async renameMaterial(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RenameBomItemMaterialDto,
+  ) {
+    return await this.bomsService.renameMaterial(id, dto);
   }
 
   // PR-099: "라벨류 기본 세트 추가" — 이미 있는 항목은 건너뛰고 없는 것만 추가한다.

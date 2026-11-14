@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ItemsService } from './items.service';
 import { Item, ItemType } from './entities/item.entity';
+import { BomItem } from '../boms/entities/bom-item.entity';
+import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 
 describe('ItemsService', () => {
   let service: ItemsService;
@@ -368,6 +370,92 @@ describe('ItemsService', () => {
 
     it('빈 배열이면 BadRequestException', async () => {
       await expect(service.classifyThreadTape([])).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // PR-241: 자재마스터 이름 변경(모든 스타일 적용) — 빈 이름/중복 이름을 거부한다.
+  // 합성 데이터만 사용.
+  describe('update - 자재명 변경 검증 (PR-241)', () => {
+    it('이름을 빈 문자열(공백만)로 바꾸려 하면 거부한다', async () => {
+      const existing = { id: 1, code: 'M1', name: '합성자재-구이름', unit: 'M' };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      await expect(service.update(1, { name: '   ' })).rejects.toThrow(BadRequestException);
+      expect(mockItemRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('같은 정규화 이름의 다른 Item이 이미 있으면 거부하고 그 Item의 코드를 안내한다', async () => {
+      const existing = { id: 1, code: 'M1', name: '합성자재-구이름', unit: 'M' };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.find.mockResolvedValue([
+        existing,
+        { id: 2, code: 'M2', name: '합성자재-중복이름' },
+      ]);
+
+      await expect(service.update(1, { name: '합성자재 - 중복이름' })).rejects.toThrow(ConflictException);
+      await expect(service.update(1, { name: '합성자재 - 중복이름' })).rejects.toThrow(/M2/);
+      expect(mockItemRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('이름이 실제로 바뀌지 않으면(표기만 같음) 중복 검사를 하지 않는다', async () => {
+      const existing = { id: 1, code: 'M1', name: '합성자재-이름', unit: 'M' };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.save.mockImplementation((v: any) => Promise.resolve(v));
+
+      const result = await service.update(1, { name: '합성자재-이름' });
+      expect(result.name).toBe('합성자재-이름');
+      expect(mockItemRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('중복이 없으면 이름이 정상적으로 바뀐다', async () => {
+      const existing = { id: 1, code: 'M1', name: '합성자재-구이름', unit: 'M' };
+      mockItemRepository.findOne.mockResolvedValue(existing);
+      mockItemRepository.find.mockResolvedValue([existing]);
+      mockItemRepository.save.mockImplementation((v: any) => Promise.resolve(v));
+
+      const result = await service.update(1, { name: '합성자재-새이름' });
+      expect(result.name).toBe('합성자재-새이름');
+    });
+  });
+
+  // PR-241: 자재마스터 이름 변경 전 영향 범위(스타일 수·BOM 행 수·발주 연결 건수) 조회.
+  describe('getUsage (PR-241)', () => {
+    const mockQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn(),
+    };
+    const mockBomItemRepo = { count: jest.fn(), createQueryBuilder: jest.fn(() => mockQueryBuilder) };
+    const mockPurchaseOrderRepo = { count: jest.fn() };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockItemRepository.findOne.mockResolvedValue({ id: 1, code: 'M1', name: '합성자재' });
+      mockBomItemRepo.count.mockResolvedValue(3);
+      mockQueryBuilder.getRawOne.mockResolvedValue({ count: '2' });
+      mockPurchaseOrderRepo.count.mockResolvedValue(5);
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === BomItem ? mockBomItemRepo : entity === PurchaseOrder ? mockPurchaseOrderRepo : mockRuleRepository,
+      );
+    });
+
+    it('스타일 수·BOM 행 수·발주 연결 건수(취소 제외)를 집계해 돌려준다', async () => {
+      const result = await service.getUsage(1);
+      expect(result).toEqual({ styleCount: 2, bomItemCount: 3, orderCount: 5 });
+      expect(mockPurchaseOrderRepo.count).toHaveBeenCalledWith({ where: { itemId: 1, status: expect.anything() } });
+    });
+
+    it('존재하지 않는 품목이면 404', async () => {
+      mockItemRepository.findOne.mockResolvedValue(null);
+      await expect(service.getUsage(999)).rejects.toThrow();
+    });
+
+    it('사용 중인 곳이 전혀 없으면 전부 0', async () => {
+      mockBomItemRepo.count.mockResolvedValue(0);
+      mockQueryBuilder.getRawOne.mockResolvedValue({ count: '0' });
+      mockPurchaseOrderRepo.count.mockResolvedValue(0);
+      const result = await service.getUsage(1);
+      expect(result).toEqual({ styleCount: 0, bomItemCount: 0, orderCount: 0 });
     });
   });
 });

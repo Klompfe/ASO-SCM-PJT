@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { BomsService } from './boms.service';
 import { Bom } from './entities/bom.entity';
 import { BomItem } from './entities/bom-item.entity';
@@ -28,6 +28,7 @@ describe('BomsService.addLabelSet (PR-099)', () => {
         { provide: getRepositoryToken(BomItem), useValue: { findOne: jest.fn(), save: jest.fn((v) => Promise.resolve({ id: 1, ...v })) } },
         { provide: getRepositoryToken(Item), useValue: { findOne: jest.fn(), save: jest.fn((v) => Promise.resolve({ id: 1, ...v })) } },
         { provide: getRepositoryToken(PurchaseOrder), useValue: { count: jest.fn() } },
+        { provide: DataSource, useValue: { transaction: jest.fn((cb: any) => cb({ save: jest.fn((_e: any, v: any) => Promise.resolve({ id: 1, ...v })) })) } },
       ],
     }).compile();
 
@@ -113,6 +114,7 @@ describe('BomsService.findActiveByStyleNo (PR-123)', () => {
         { provide: getRepositoryToken(BomItem), useValue: { findOne: jest.fn(), save: jest.fn((v) => Promise.resolve({ id: 1, ...v })) } },
         { provide: getRepositoryToken(Item), useValue: { findOne: jest.fn().mockResolvedValue(null), save: jest.fn((v) => Promise.resolve({ id: 1, ...v })) } },
         { provide: getRepositoryToken(PurchaseOrder), useValue: { count: jest.fn() } },
+        { provide: DataSource, useValue: { transaction: jest.fn((cb: any) => cb({ save: jest.fn((_e: any, v: any) => Promise.resolve({ id: 1, ...v })) })) } },
       ],
     }).compile();
     service = module.get(BomsService);
@@ -171,15 +173,18 @@ describe('BomsService.updateItem/deleteItem/swapMaterial (PR-197)', () => {
   let bomItemRepository: Repository<BomItem>;
   let itemRepository: Repository<Item>;
   let purchaseOrderRepository: Repository<PurchaseOrder>;
+  let mockManagerSave: jest.Mock;
 
   beforeEach(async () => {
+    mockManagerSave = jest.fn((_entity: any, v: any) => Promise.resolve({ id: v.id ?? 1, ...v }));
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BomsService,
         { provide: getRepositoryToken(Bom), useValue: { find: jest.fn() } },
         { provide: getRepositoryToken(BomItem), useValue: { findOne: jest.fn(), save: jest.fn((v) => Promise.resolve(v)), delete: jest.fn() } },
-        { provide: getRepositoryToken(Item), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(Item), useValue: { findOne: jest.fn(), find: jest.fn().mockResolvedValue([]) } },
         { provide: getRepositoryToken(PurchaseOrder), useValue: { count: jest.fn() } },
+        { provide: DataSource, useValue: { transaction: jest.fn((cb: any) => cb({ save: mockManagerSave })) } },
       ],
     }).compile();
     service = module.get(BomsService);
@@ -280,6 +285,27 @@ describe('BomsService.updateItem/deleteItem/swapMaterial (PR-197)', () => {
       expect(result.manualRequiredQtyNote).toBe('메모');
       expect(result.manualRequiredQtyAt).toBe(at);
     });
+
+    // PR-241: 이 행만의 공급업체/단가 — 자재마스터·다른 스타일 영향 없음(C).
+    it('supplier/unitPrice를 보내면 이 행에 저장된다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(buildBomItem());
+      const result = await service.updateItem(10, { supplier: '합성공급사A', unitPrice: 1234 });
+      expect(result.supplier).toBe('합성공급사A');
+      expect(Number(result.unitPrice)).toBe(1234);
+    });
+
+    it('supplier를 빈 문자열로 보내면 미정(null)으로 해제된다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(buildBomItem({ supplier: '합성공급사A' } as any));
+      const result = await service.updateItem(10, { supplier: '' });
+      expect(result.supplier).toBeNull();
+    });
+
+    it('supplier/unitPrice를 보내지 않으면 그대로 유지된다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(buildBomItem({ supplier: '합성공급사B', unitPrice: 500 } as any));
+      const result = await service.updateItem(10, { spec: '55"' });
+      expect(result.supplier).toBe('합성공급사B');
+      expect(Number(result.unitPrice)).toBe(500);
+    });
   });
 
   describe('deleteItem', () => {
@@ -356,6 +382,109 @@ describe('BomsService.updateItem/deleteItem/swapMaterial (PR-197)', () => {
       expect(result.manualRequiredQty).toBeNull();
       expect(result.manualRequiredQtyNote).toBeNull();
       expect(result.manualRequiredQtyAt).toBeNull();
+    });
+  });
+
+  // PR-241: "이 행만" 자재명 변경 — 자재 교체(기존 자재 중 선택)와 달리 이름을 직접
+  // 받아, 정규화 이름(normalizeForFuzzyMatch)으로 기존 Item을 찾아 연결하거나 없으면
+  // 현재 Item 속성을 복사해 새 Item을 만든다. 합성 데이터만 사용.
+  describe('renameMaterial (PR-241)', () => {
+    const buildRow = (overrides: Partial<BomItem> = {}): BomItem =>
+      ({
+        id: 10,
+        colorCode: 'BK',
+        category: '부자재',
+        manualRequiredQty: 499,
+        manualRequiredQtyNote: '현장 실측',
+        manualRequiredQtyAt: new Date('2026-01-01'),
+        supplier: '합성공급사A',
+        unitPrice: 1000,
+        material: { id: 1, name: '합성자재-구이름', unit: 'M', type: 'RAW_MATERIAL', spec: '53"', categoryId: 5, materialSubType: null, englishName: 'OLD', vendor: '구공급사' },
+        bom: { id: 1, style: { styleNo: 'SYN-STYLE-001' }, items: [] },
+        ...overrides,
+      }) as unknown as BomItem;
+
+    it('정규화 이름이 같은 기존 Item이 있으면 그 Item에 연결되고(새 Item 생성 없음) 이 행의 다른 값은 그대로 유지된다', async () => {
+      const row = buildRow();
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(row);
+      (itemRepository.find as jest.Mock).mockResolvedValue([
+        { id: 1, name: '합성자재-구이름', unit: 'M' },
+        { id: 7, name: '합성자재-새이름', unit: 'M' },
+      ]);
+
+      const result = await service.renameMaterial(10, { name: '합성자재-새이름' });
+
+      expect(result.resultKind).toBe('linkedExisting');
+      expect(result.materialId).toBe(7);
+      expect(mockManagerSave).toHaveBeenCalledTimes(1); // Item 생성 없이 BomItem만 save
+      expect(result.bomItem.manualRequiredQty).toBe(499); // 교체가 아니므로 유지
+      expect(result.bomItem.supplier).toBe('합성공급사A');
+      expect(Number(result.bomItem.unitPrice)).toBe(1000);
+    });
+
+    it('일치하는 Item이 없으면 새 Item을 만들어 연결한다 — 단위·규격·품목군·세부종류는 복사하고 영문명·공급사 마스터는 복사하지 않는다', async () => {
+      const row = buildRow();
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(row);
+      (itemRepository.find as jest.Mock).mockResolvedValue([{ id: 1, name: '합성자재-구이름', unit: 'M' }]);
+
+      const result = await service.renameMaterial(10, { name: '합성자재-완전새이름' });
+
+      expect(result.resultKind).toBe('createdNew');
+      const createdCall = mockManagerSave.mock.calls.find(([entity]: any) => entity && entity.name !== 'BomItem')
+        ?? mockManagerSave.mock.calls[0];
+      expect(createdCall[1]).toMatchObject({ name: '합성자재-완전새이름', unit: 'M', spec: '53"', categoryId: 5, materialSubType: null });
+      expect(createdCall[1].englishName).toBeUndefined();
+      expect(createdCall[1].vendor).toBeUndefined();
+    });
+
+    it('정규화 결과가 지금 자재 하나뿐이면(표기만 다름) 새로 만들지 않는다', async () => {
+      const row = buildRow();
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(row);
+      (itemRepository.find as jest.Mock).mockResolvedValue([{ id: 1, name: '합성자재-구이름', unit: 'M' }]);
+
+      const result = await service.renameMaterial(10, { name: '합성자재 - 구이름' }); // 공백/하이픈만 다름
+
+      expect(result.resultKind).toBe('linkedExisting');
+      expect(result.materialId).toBe(1);
+    });
+
+    it('빈 이름(공백만)은 거부한다', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(buildRow());
+      await expect(service.renameMaterial(10, { name: '   ' })).rejects.toThrow(BadRequestException);
+    });
+
+    it('단위가 다른 기존 자재와 일치하면 거부하고 자재 교체를 안내한다', async () => {
+      const row = buildRow();
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(row);
+      (itemRepository.find as jest.Mock).mockResolvedValue([
+        { id: 1, name: '합성자재-구이름', unit: 'M' },
+        { id: 7, name: '합성자재-새이름', unit: 'EA' }, // 단위 다름
+      ]);
+      await expect(service.renameMaterial(10, { name: '합성자재-새이름' })).rejects.toThrow(/자재 교체/);
+    });
+
+    it('이 자재로 이 스타일에 연결된(취소 제외) 발주가 있으면 "이 행만 변경"을 거부한다', async () => {
+      const row = buildRow();
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(row);
+      (purchaseOrderRepository.count as jest.Mock).mockResolvedValue(1);
+      await expect(service.renameMaterial(10, { name: '합성자재-새이름' })).rejects.toThrow(/자재마스터 이름 변경/);
+      expect(itemRepository.find).not.toHaveBeenCalled(); // 발주 연결 확인에서 먼저 막힘
+    });
+
+    it('같은 스타일에 이미 같은 자재가 같은 색상·구분으로 있으면 거부한다(중복 행 방지)', async () => {
+      const duplicateRow = { id: 99, material: { id: 7 }, colorCode: 'BK', category: '부자재' } as unknown as BomItem;
+      const row = buildRow({ bom: { id: 1, style: { styleNo: 'SYN-STYLE-001' }, items: [duplicateRow] } } as any);
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(row);
+      (itemRepository.find as jest.Mock).mockResolvedValue([
+        { id: 1, name: '합성자재-구이름', unit: 'M' },
+        { id: 7, name: '합성자재-새이름', unit: 'M' },
+      ]);
+      await expect(service.renameMaterial(10, { name: '합성자재-새이름' })).rejects.toThrow(/이미 같은 자재/);
+    });
+
+    it('존재하지 않는 BomItem id면 404', async () => {
+      (bomItemRepository.findOne as jest.Mock).mockResolvedValue(null);
+      await expect(service.renameMaterial(999, { name: 'x' })).rejects.toThrow(NotFoundException);
     });
   });
 });

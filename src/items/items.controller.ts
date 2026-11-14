@@ -108,6 +108,13 @@ export class ItemsController {
     return await this.itemsService.findOne(id);
   }
 
+  // PR-241: 자재마스터 이름 변경 전 영향 범위(스타일·BOM 행·발주 수) 확인용.
+  @ApiOperation({ summary: '품목 사용 현황(스타일 수·BOM 행 수·발주 연결 건수) 조회 — 읽기 전용' })
+  @Get(':id/usage')
+  async getUsage(@Param('id', ParseIntPipe) id: number) {
+    return await this.itemsService.getUsage(id);
+  }
+
   @ApiOperation({ summary: '품목 정보 수정' })
   @ApiResponse({ status: 200, description: '수정 성공' })
   @ApiResponse({ status: 404, description: '품목을 찾을 수 없음' })

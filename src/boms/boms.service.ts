@@ -1,14 +1,16 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { DataSource, In, Not, Repository } from 'typeorm';
 import { Bom } from './entities/bom.entity';
 import { BomItem } from './entities/bom-item.entity';
 import { UpdateBomItemDto } from './dto/update-bom-item.dto';
 import { SwapBomItemMaterialDto } from './dto/swap-bom-item-material.dto';
+import { RenameBomItemMaterialDto } from './dto/rename-bom-item-material.dto';
 import { Item, ItemType } from '../items/entities/item.entity';
 import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/purchase-order.entity';
 import { LABEL_SET } from './label-set.constants';
 import { areBomContentsIdentical, normalizeMaterialName, pickActiveBom } from './utils/active-bom.util';
+import { normalizeForFuzzyMatch } from './utils/bom-name-normalize.util';
 
 // PR-197: updateItem()이 돌려주는 변경 전 값 스냅샷 — 화면이 "요척 2.7 → 2.9" 같은
 // 변경 전/후 확인 문구를 만들 수 있게 한다(감사 테이블은 만들지 않음, 서버 로그만 남김).
@@ -78,6 +80,7 @@ export class BomsService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(PurchaseOrder)
     private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
+    private readonly dataSource: DataSource,
   ) {}
 
   // 같은 style에 Bom이 여러 개 생성될 수 있는 알려진 이슈가 있어(CHARTER.md 5.2절), 화면/재고 차감/소요명세서가
@@ -136,6 +139,10 @@ export class BomsService {
         bomItem.requiredQty = Math.round(dto.consumption * totalQty * 10000) / 10000;
       }
     }
+    // PR-241: 이 행만의 공급업체/단가 — 자재마스터·다른 스타일에는 영향 없다. 빈
+    // 문자열/null은 "미정"으로 해제(기존 mapping-commit.service.ts의 null 관례와 동일).
+    if (dto.supplier !== undefined) bomItem.supplier = dto.supplier || null;
+    if (dto.unitPrice !== undefined) bomItem.unitPrice = dto.unitPrice;
 
     // PR-231: 필요수량 직접 지정 — null을 보내면 세 컬럼 모두 해제(계산값으로 복귀).
     // 값을 보내면 그 값 + (같이 왔으면) 사유를 저장하고 지정 시각을 지금으로 기록한다.
@@ -232,6 +239,100 @@ export class BomsService {
     const saved = await this.bomItemRepository.save(bomItem);
     this.logger.log(`BomItem #${id} material: ${beforeMaterialId} → ${newMaterial.id}(${newMaterial.name})`);
     return saved;
+  }
+
+  // PR-241: "이 행만" 자재명 변경 — '자재 교체'(기존 자재 중에서 고르는 것)와 달리
+  // 이름을 직접 입력받아, 정규화 이름(normalizeForFuzzyMatch, commit()과 같은 규칙)으로
+  // 기존 Item을 찾아 연결하거나(없으면) 현재 Item의 속성을 복사해 새 Item을 만든다.
+  // 이 행의 다른 값(색상·요척·비고·공급사·단가·수동 필요수량)은 그대로 유지한다
+  // (사용자 확정: "이름 변경은 교체가 아니다") — swapMaterial과 달리 manualRequiredQty를
+  // 지우지 않는다. 안전장치(단위 불일치/연결된 발주/중복 행)는 전부 서버가 강제한다.
+  async renameMaterial(id: number, dto: RenameBomItemMaterialDto): Promise<{
+    bomItem: BomItem;
+    resultKind: 'linkedExisting' | 'createdNew';
+    materialId: number;
+    materialName: string;
+  }> {
+    const trimmedName = dto.name.trim();
+    if (!trimmedName) {
+      throw new BadRequestException('자재명을 입력해 주세요.');
+    }
+
+    const bomItem = await this.bomItemRepository.findOne({
+      where: { id },
+      relations: ['material', 'bom', 'bom.items', 'bom.items.material', 'bom.style'],
+    });
+    if (!bomItem) {
+      throw new NotFoundException(`ID가 ${id}인 자재명세 항목을 찾을 수 없습니다.`);
+    }
+    const currentMaterial = bomItem.material;
+    if (!currentMaterial) {
+      throw new BadRequestException('이 행에 연결된 자재가 없어 이름을 바꿀 수 없습니다.');
+    }
+
+    // (c) 발주·입고(같은 PurchaseOrder의 상태 전이)·선적(발주를 거쳐 연결)이 있으면
+    // "이 행만 변경"은 거부한다 — deleteItem과 같은 기준(이 스타일 + 이 자재 + 취소 제외).
+    const styleNo = bomItem.bom?.style?.styleNo;
+    if (styleNo) {
+      const linkedCount = await this.purchaseOrderRepository.count({
+        where: { styleNo, itemId: currentMaterial.id, status: Not(PurchaseOrderStatus.CANCELLED) },
+      });
+      if (linkedCount > 0) {
+        throw new BadRequestException('발주/입고/선적이 연결된 행입니다. 자재마스터 이름 변경(모든 스타일 적용)을 사용하세요.');
+      }
+    }
+
+    // 정규화 이름이 같은 Item이 이미 여러 개면(과거 중복) id가 가장 작은(가장 오래된)
+    // 것을 결정적으로 재사용한다 — commit()(mapping-commit.service.ts)과 같은 규칙.
+    const normalizedNewName = normalizeForFuzzyMatch(trimmedName);
+    const allItems = await this.itemRepository.find();
+    const matched = allItems
+      .filter((it) => normalizeForFuzzyMatch(it.name) === normalizedNewName)
+      .sort((a, b) => a.id - b.id)[0] ?? null;
+
+    let resultKind: 'linkedExisting' | 'createdNew';
+    if (matched && matched.id !== currentMaterial.id) {
+      // (b) 단위가 다른 자재로는 이름 변경으로 연결할 수 없다(수동 필요수량·포장 규칙이
+      // 단위에 묶여 있어 뜻이 달라진다) — '자재 교체'를 쓰라고 안내한다.
+      if ((currentMaterial.unit ?? '').trim() !== (matched.unit ?? '').trim()) {
+        throw new BadRequestException("단위가 다른 자재로는 이름 변경으로 바꿀 수 없습니다. '자재 교체'를 사용하세요.");
+      }
+      // (d) 같은 스타일에 이미 같은 자재가 같은 색상·구분으로 있으면 거부(중복 행 방지).
+      const duplicateRow = (bomItem.bom?.items ?? []).find(
+        (bi) => bi.id !== bomItem.id && bi.material?.id === matched.id && bi.colorCode === bomItem.colorCode && bi.category === bomItem.category,
+      );
+      if (duplicateRow) {
+        throw new BadRequestException('같은 스타일에 이미 같은 자재가 같은 색상·구분으로 있습니다.');
+      }
+      resultKind = 'linkedExisting';
+    } else if (matched && matched.id === currentMaterial.id) {
+      // 정규화 결과가 지금 자재 하나뿐(표기만 다르거나 실질적으로 안 바뀜) — 새로 만들지 않는다.
+      resultKind = 'linkedExisting';
+    } else {
+      resultKind = 'createdNew';
+    }
+
+    // (e) 새 Item 생성 + 이 행 연결은 하나의 트랜잭션으로 묶는다(실패 시 전체 롤백).
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const targetMaterial =
+        resultKind === 'createdNew'
+          ? await manager.save(Item, {
+              code: `MAT-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+              name: trimmedName,
+              type: currentMaterial.type,
+              unit: currentMaterial.unit,
+              spec: currentMaterial.spec,
+              categoryId: currentMaterial.categoryId ?? null,
+              materialSubType: currentMaterial.materialSubType ?? null,
+              // 영문명(englishName)·공급사 마스터(vendor)는 복사하지 않는다(사용자 확정).
+            })
+          : (matched ?? currentMaterial);
+      bomItem.material = targetMaterial;
+      return manager.save(BomItem, bomItem);
+    });
+
+    this.logger.log(`BomItem #${id} 자재명 변경: material #${currentMaterial.id} → #${saved.material.id}(${resultKind})`);
+    return { bomItem: saved, resultKind, materialId: saved.material.id, materialName: saved.material.name };
   }
 
   // PR-099: "라벨류 기본 세트 추가" — MAIN+SIZE LABEL/CARE LABEL/PRICE TAG/SIZE
