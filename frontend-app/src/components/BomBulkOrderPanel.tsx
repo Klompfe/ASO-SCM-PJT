@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { getMasterStyles, getStyleColorSizeQuantities } from '../api/styles.service';
 import { getBomByStyleNo, type BomItemRow } from '../api/boms.service';
 import { getSuppliers } from '../api/suppliers.service';
+import { getItem } from '../api/items.service';
 import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
 import {
   getPurchaseOrders,
@@ -14,6 +15,14 @@ import { downloadBase64File } from '../utils/fileDownload';
 import { getErrorMessage } from '../utils/errorMessage';
 import { buildColorQtyMap, resolveAppliedQuantity } from '../utils/appliedQuantity';
 import { formatBomItemQty } from '../utils/materialRequirementDisplay';
+import { pickLatestOrderDefaults } from '../utils/purchaseOrderForm';
+import {
+  findExactSupplierMatch,
+  pickSupplierPrefill,
+  pickPricePrefill,
+  SUPPLIER_SOURCE_LABEL,
+  PRICE_SOURCE_LABEL,
+} from '../utils/orderPrefill';
 import {
   buildInitialDrafts,
   groupDraftsBySupplier,
@@ -89,17 +98,40 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
 
         // PR-194와 같은 패턴: 품목별 발주 이력에서 공급업체 후보(정확히 1곳일 때만)를
         // 뽑고, 같은 스타일의 취소되지 않은 발주 건수를 "이미 발주됨" 배지에 쓴다.
+        // PR-240: 이 "후보"는 공급업체 우선순위의 3순위(최근 발주)로 쓰고, 그 공급업체의
+        // 최근 발주 단가도 함께 뽑아 둔다(같은 자재+같은 공급사 조건).
         const itemIds = [...new Set(rows.map((r) => r.material?.id).filter((v): v is number => v != null))];
-        const histories = await Promise.all(itemIds.map((id) => getPurchaseOrders({ itemId: id }).catch(() => [])));
-        const candidateByItem = new Map<number, number | null>();
+        const [histories, vendorInfos] = await Promise.all([
+          Promise.all(itemIds.map((id) => getPurchaseOrders({ itemId: id }).catch(() => []))),
+          Promise.all(itemIds.map((id) => getItem(id).catch(() => null))),
+        ]);
         const alreadyOrderedByItem = new Map<number, number>();
+        const recentOrderSupplierByItem = new Map<number, { id: number; name: string } | null>();
+        const recentOrderPriceByItem = new Map<number, number | null>();
+        const vendorNameByItem = new Map<number, string | null>();
         itemIds.forEach((id, i) => {
           const list: any[] = Array.isArray(histories[i]) ? histories[i] : ((histories[i] as any)?.data ?? []);
           const supplierIds: number[] = [...new Set(list.filter((o: any) => o.supplier).map((o: any) => Number(o.supplier.id)))];
-          candidateByItem.set(id, supplierIds.length === 1 ? supplierIds[0] : null);
+          const candidateSupplierId = supplierIds.length === 1 ? supplierIds[0] : null;
           const sameStyleActive = list.filter((o: any) => o.styleNo === styleNo && o.status !== 'CANCELLED');
           alreadyOrderedByItem.set(id, sameStyleActive.length);
+          const latest = pickLatestOrderDefaults(list);
+          recentOrderSupplierByItem.set(id, candidateSupplierId != null ? (latest?.supplier ?? null) : null);
+          // "같은 자재+같은 공급사"만 믿는다 — 최근 발주가 다른 공급사 건이면 단가를 쓰지 않는다.
+          recentOrderPriceByItem.set(id, latest && candidateSupplierId != null && latest.supplier.id === candidateSupplierId ? latest.unitPrice : null);
+          vendorNameByItem.set(id, vendorInfos[i]?.vendor ?? null);
         });
+
+        // BOM 행 공급사/품목 마스터 vendor 이름을 실제 공급업체와 매칭한다(정확히 일치할
+        // 때만, 추측 매칭 금지) — 이미 불러온 공급업체 목록(suppliers 검색 결과)으로 끝낸다.
+        const bomSupplierMatchByBomItemId = new Map<number, { id: number; name: string } | null>();
+        const vendorMatchByItemId = new Map<number, { id: number; name: string } | null>();
+        for (const it of rows) {
+          bomSupplierMatchByBomItemId.set(it.id, findExactSupplierMatch(it.supplier, supplierList));
+        }
+        for (const id of itemIds) {
+          vendorMatchByItemId.set(id, findExactSupplierMatch(vendorNameByItem.get(id), supplierList));
+        }
 
         const meta = new Map<number, { threadType?: string | null; tapeType?: string | null; itemUnit: string | null }>();
         const inputs: BulkOrderRowInput[] = rows.map((it) => {
@@ -118,16 +150,33 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
           // 근거 없음(unknown)이거나 극단 불일치면 수량을 비워 둔다 — 사람이 직접
           // 입력해야 생성 가능(기존 포장단위/경고 규칙 그대로, 새 계산 없음).
           const suggestedQuantity = applied.basis === 'unknown' || applied.extremeConsumptionMismatch ? null : applied.qty;
+          const itemId = it.material?.id ?? 0;
+          // PR-240: 포장 규칙이 있는 행(N콘/N롤)은 BOM 확정 단가(길이 기준)를 그대로 쓰면
+          // 금액이 틀릴 수 있어(자동 환산 금지) 최근 발주 단가만 후보로 쓴다.
+          const packagingApplies = !!(it.threadType || it.tapeType);
+          const supplierPick = pickSupplierPrefill({
+            bom: bomSupplierMatchByBomItemId.get(it.id) ?? null,
+            vendor: vendorMatchByItemId.get(itemId) ?? null,
+            recentOrder: recentOrderSupplierByItem.get(itemId) ?? null,
+          });
+          const pricePick = pickPricePrefill({
+            bomUnitPrice: it.unitPrice,
+            recentOrderUnitPrice: recentOrderPriceByItem.get(itemId) ?? null,
+            packagingApplies,
+          });
           return {
             bomItemId: it.id,
-            itemId: it.material?.id ?? 0,
+            itemId,
             itemName: it.material?.name ?? '',
             category: it.category,
             colorCode: it.colorCode,
             unit: it.material?.unit ?? null,
-            candidateSupplierId: it.material?.id != null ? (candidateByItem.get(it.material.id) ?? null) : null,
-            alreadyOrderedCount: it.material?.id != null ? (alreadyOrderedByItem.get(it.material.id) ?? 0) : 0,
+            candidateSupplierId: supplierPick?.supplier.id ?? null,
+            candidateSupplierSource: supplierPick?.source ?? null,
+            alreadyOrderedCount: itemId ? (alreadyOrderedByItem.get(itemId) ?? 0) : 0,
             suggestedQuantity,
+            suggestedUnitPrice: pricePick?.unitPrice ?? null,
+            priceSource: pricePick?.source ?? null,
           };
         });
 
@@ -236,7 +285,7 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
                       className="border rounded px-2 py-1 w-44"
                       aria-label={`${d.itemName} 공급업체 선택`}
                       value=""
-                      onChange={(e) => updateDraft(d.bomItemId, { supplierId: e.target.value ? Number(e.target.value) : null })}
+                      onChange={(e) => updateDraft(d.bomItemId, { supplierId: e.target.value ? Number(e.target.value) : null, supplierSource: null })}
                     >
                       <option value="">공급업체 선택</option>
                       {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -271,6 +320,11 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
                 <tr key={d.bomItemId} className="border-t">
                   <td className="p-2">
                     {d.itemName}
+                    {d.supplierSource && (
+                      <span className="block text-xs text-gray-400" data-testid="bulk-supplier-source">
+                        {SUPPLIER_SOURCE_LABEL[d.supplierSource]}
+                      </span>
+                    )}
                     {d.alreadyOrderedCount > 0 && (
                       <div className="text-xs text-amber-700">
                         <label className="flex items-center gap-1">
@@ -320,8 +374,13 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
                       aria-label={`${d.itemName} 단가`}
                       placeholder={d.orderType === 'PROVISIONAL' ? '선택 입력' : '필수'}
                       value={d.unitPrice ?? ''}
-                      onChange={(e) => updateDraft(d.bomItemId, { unitPrice: e.target.value === '' ? null : Number(e.target.value) })}
+                      onChange={(e) => updateDraft(d.bomItemId, { unitPrice: e.target.value === '' ? null : Number(e.target.value), priceSource: null })}
                     />
+                    {d.unitPrice != null && (
+                      <span className="block text-xs text-gray-400" data-testid="bulk-price-source">
+                        {d.priceSource ? PRICE_SOURCE_LABEL[d.priceSource] : '직접 입력'}
+                      </span>
+                    )}
                   </td>
                   <td className="p-2">
                     <input

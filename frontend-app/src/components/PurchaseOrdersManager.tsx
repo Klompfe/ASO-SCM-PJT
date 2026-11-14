@@ -37,12 +37,36 @@ import { ShipmentsManager } from './ShipmentsManager';
 import { SupplierQuickCreateModal } from './SupplierQuickCreateModal';
 import { categoryFilterState, supplierSearchCategoryId } from '../utils/materialCategories';
 import { PriceReferenceBlock, type PriceReferenceValue } from './PriceReferenceBlock';
+import { getBomByStyleNo, type BomItemRow } from '../api/boms.service';
+import {
+  findExactSupplierMatch,
+  pickSupplierPrefill,
+  pickPricePrefill,
+  SUPPLIER_SOURCE_LABEL,
+  PRICE_SOURCE_LABEL,
+  type SupplierPrefillSource,
+  type PricePrefillSource,
+} from '../utils/orderPrefill';
 
 interface ItemRef { id: number; name: string; code: string; categoryId?: number | null; unit?: string | null }
 interface StyleOption { styleNo: string; overview?: { styleName?: string | null } | null }
 
 const emptyForm: CreatePurchaseOrder = { supplierId: 0, itemId: 0, unitPrice: 0 };
 const emptyPriceRef: PriceReferenceValue = { usd: null, source: null, note: null };
+
+// PR-240: BOM 행 공급사/품목 마스터 vendor는 자유 텍스트라 실제 공급업체인지 이름으로
+// 확인해야 한다 — 새 조회를 만들지 않고 기존 공급업체 검색(getSuppliers keyword)을
+// 재사용한다. 정확히 일치할 때만 매칭한다(findExactSupplierMatch, 추측 매칭 금지).
+async function resolveSupplierByName(name: string | null | undefined): Promise<SupplierRef | null> {
+  if (!name || !name.trim() || name.trim() === 'N/A' || name.trim() === '미정') return null;
+  try {
+    const res = await getSuppliers({ keyword: name.trim() });
+    const list: SupplierRef[] = Array.isArray(res) ? res : (res?.data ?? []);
+    return findExactSupplierMatch(name, list);
+  } catch {
+    return null;
+  }
+}
 
 interface PurchaseOrdersManagerProps {
   prefillItemId?: number | null;
@@ -91,6 +115,11 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // 공급업체/단가가 최근 발주 이력으로 자동 채워진 상태인지(다른 품목으로 바꿀 때 이전 자동값을 남기지 않기 위함)
   const [autofilled, setAutofilled] = useState(false);
   const [autofillNote, setAutofillNote] = useState<string | null>(null);
+  // PR-240: 공급업체/단가를 미리 채운 출처 — BOM 공급사/확정 단가 > 자재 마스터 > 최근
+  // 발주. 사람이 직접 고치면 null로 돌아가 "직접 입력"으로 보인다(값은 있는데 출처가
+  // 없으면 직접 입력이라는 뜻 — 별도 boolean을 두지 않는다).
+  const [supplierSource, setSupplierSource] = useState<SupplierPrefillSource | null>(null);
+  const [priceSource, setPriceSource] = useState<PricePrefillSource | null>(null);
   // PR-180: 발주 구분 — 품목을 고르면 스타일 계약방식 제안을 미리 채우되, 사람이 바꾸거나 직접 고른다.
   const [orderType, setOrderType] = useState<PurchaseOrderType | null>(null);
   const [orderTypeHint, setOrderTypeHint] = useState<string | null>(null);
@@ -228,8 +257,15 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null));
   }, []);
 
-  // 품목을 고르면 그 품목의 가장 최근 발주 이력으로 공급업체/단가를 미리 채운다(수정 가능). 이력이 없으면 공란.
-  const selectItem = useCallback(async (picked: ItemRef | null, opts?: { quantityInput?: string; styleNo?: string }) => {
+  // 품목을 고르면 공급업체/단가를 미리 채운다(수정 가능) — PR-240: ① BOM 행 공급사/확정
+  // 단가 → ② 품목 마스터(vendor) → ③ 같은 자재의 최근 발주 공급사/단가 → ④ 없으면 공란.
+  // opts로 BOM/vendor 후보를 받으면 그 우선순위를 적용하고, 없으면(검색으로 직접 고른
+  // 경우 등) 기존처럼 최근 발주 이력만으로 채운다(회귀 없음).
+  const selectItem = useCallback(async (picked: ItemRef | null, opts?: {
+    quantityInput?: string; styleNo?: string;
+    bomSupplierName?: string | null; itemVendorName?: string | null;
+    bomUnitPrice?: number | null; packagingApplies?: boolean;
+  }) => {
     setItem(picked);
     setAutofillNote(null);
     setItemProductionType(null);
@@ -237,6 +273,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     setPriceRefPackagingUnitLabel(null);
     setItemSubtypeInfo(null);
     setTempSubtype(null);
+    setSupplierSource(null);
+    setPriceSource(null);
     if (opts?.quantityInput !== undefined) setQuantityInput(opts.quantityInput);
     if (!picked) {
       setOrderType(null);
@@ -254,13 +292,43 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       setOrderTypeHint(sugg?.reason ?? null);
       const orders = Array.isArray(res) ? res : (res?.data ?? []);
       const latest = pickLatestOrderDefaults(orders);
-      // 어떤 값이 자동 채움이고 어떤 값이 사용자가 넣은 값인지는 resolveAutofill(테스트된 순수 함수)이 정한다.
-      const cur = formValuesRef.current;
-      const next = resolveAutofill({ supplier: cur.supplier, unitPrice: cur.unitPrice, autofilled: cur.autofilled }, latest);
-      setSupplier(next.supplier);
-      setNewPo((prev) => ({ ...prev, unitPrice: next.unitPrice }));
-      setAutofilled(next.autofilled);
-      setAutofillNote(latest ? `최근 발주 #${latest.orderId}의 공급업체(${latest.supplier.name})/단가(${latest.unitPrice})를 채웠습니다. 필요하면 수정하세요.` : '이 품목의 발주 이력이 없어 공급업체/단가는 직접 선택해 주세요.');
+      const hasPriorityCandidates = opts?.bomSupplierName !== undefined || opts?.itemVendorName !== undefined || opts?.bomUnitPrice !== undefined;
+      if (hasPriorityCandidates) {
+        // PR-240: BOM/품목 마스터 공급사 이름은 자유 텍스트라 실제 공급업체인지 이름으로
+        // 확인한다(정확히 일치할 때만 — 추측 매칭 금지). getSuppliers 키워드 검색을
+        // 재사용해 새 조회 없이 끝낸다.
+        const [bomMatch, vendorMatch] = await Promise.all([
+          resolveSupplierByName(opts?.bomSupplierName),
+          resolveSupplierByName(opts?.itemVendorName),
+        ]);
+        if (seq !== itemRequestSeq.current) return;
+        const supplierPick = pickSupplierPrefill({ bom: bomMatch, vendor: vendorMatch, recentOrder: latest?.supplier ?? null });
+        const pricePick = pickPricePrefill({
+          bomUnitPrice: opts?.bomUnitPrice ?? null,
+          recentOrderUnitPrice: latest?.unitPrice ?? null,
+          packagingApplies: !!opts?.packagingApplies,
+        });
+        setSupplier(supplierPick?.supplier ?? null);
+        setSupplierSource(supplierPick?.source ?? null);
+        setNewPo((prev) => ({ ...prev, unitPrice: pricePick?.unitPrice ?? 0 }));
+        setPriceSource(pricePick?.source ?? null);
+        setAutofilled(!!supplierPick || !!pricePick);
+        setAutofillNote(
+          supplierPick || pricePick
+            ? `공급업체/단가를 기존 정보로 미리 채웠습니다(${[supplierPick && SUPPLIER_SOURCE_LABEL[supplierPick.source], pricePick && PRICE_SOURCE_LABEL[pricePick.source]].filter(Boolean).join(', ')}). 필요하면 수정하세요.`
+            : '이 품목으로 채울 수 있는 공급업체/단가 정보가 없어 직접 선택해 주세요.',
+        );
+      } else {
+        // 어떤 값이 자동 채움이고 어떤 값이 사용자가 넣은 값인지는 resolveAutofill(테스트된 순수 함수)이 정한다.
+        const cur = formValuesRef.current;
+        const next = resolveAutofill({ supplier: cur.supplier, unitPrice: cur.unitPrice, autofilled: cur.autofilled }, latest);
+        setSupplier(next.supplier);
+        setNewPo((prev) => ({ ...prev, unitPrice: next.unitPrice }));
+        setAutofilled(next.autofilled);
+        setSupplierSource(latest ? 'recentOrder' : null);
+        setPriceSource(latest ? 'recentOrder' : null);
+        setAutofillNote(latest ? `최근 발주 #${latest.orderId}의 공급업체(${latest.supplier.name})/단가(${latest.unitPrice})를 채웠습니다. 필요하면 수정하세요.` : '이 품목의 발주 이력이 없어 공급업체/단가는 직접 선택해 주세요.');
+      }
     } catch {
       // 이력 조회 실패는 발주 자체를 막지 않는다 — 자동 채움만 건너뛴다.
     }
@@ -288,10 +356,17 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // PR-187 C: rowOverride를 받을 수 있게 한다 — handlePickMaterial이 setStyleMaterialRows
   // 직후 바로 호출하면 styleMaterialRows state는 다음 렌더까지 갱신되지 않아(React의
   // 비동기 state 업데이트), 방금 고른 row를 못 찾고 수량이 비워지지 않는 버그가 있었다.
-  const selectStyleMaterial = (picked: ItemRef | null, rowOverride?: MaterialRequirementRow, styleNoOverride?: string) => {
+  const selectStyleMaterial = (
+    picked: ItemRef | null,
+    rowOverride?: MaterialRequirementRow,
+    styleNoOverride?: string,
+    // PR-240: 자재명세의 "발주하기"로 넘어온 경우(단일/PR-238 일괄) 그 BOM 행 공급사/
+    // 확정 단가·품목 마스터 vendor를 함께 넘긴다 — 최근 발주 이력보다 우선 적용된다.
+    bomPrefillOpts?: { bomSupplierName?: string | null; itemVendorName?: string | null; bomUnitPrice?: number | null },
+  ) => {
     if (!picked) { void selectItem(null); return; }
     const row = rowOverride ?? styleMaterialRows.find((r) => r.itemId === picked.id);
-    if (!row) { void selectItem(picked); return; }
+    if (!row) { void selectItem(picked, bomPrefillOpts ? { ...bomPrefillOpts, packagingApplies: false } : undefined); return; }
     const sugg = suggestStyleLinkedQuantity(row);
     // PR-220b: needsColorQty 행은 conversionWarning이 이미 이 문구로 채워져 있어
     // suggestStyleLinkedQuantity가 quantity: null을 돌려준다(수량 칸 비움) — [B]에도
@@ -301,7 +376,11 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     // 비동기 state), handlePickMaterial처럼 styleNo를 아는 호출부는 명시적으로 넘긴다.
     void selectItem(
       { ...picked, unit: sugg.unitLabel ?? undefined },
-      { quantityInput: sugg.quantity != null ? String(sugg.quantity) : '', styleNo: styleNoOverride ?? styleSearch?.styleNo ?? undefined },
+      {
+        quantityInput: sugg.quantity != null ? String(sugg.quantity) : '',
+        styleNo: styleNoOverride ?? styleSearch?.styleNo ?? undefined,
+        ...(bomPrefillOpts ? { ...bomPrefillOpts, packagingApplies: !!row.packaging } : {}),
+      },
     );
   };
 
@@ -354,6 +433,10 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // Items(자재명세) 화면에서 "발주하기"로 넘어온 경우, 해당 품목을 폼에 미리 선택해 둔다.
   // PR-230: 그 화면은 항상 특정 스타일의 BOM을 보는 중이므로, 같이 넘어온 styleNo가
   // 있으면 [B]의 스타일 연결도 그 스타일로 자동 설정한다(명시적 해제 전까지 유지).
+  // PR-240: 수량/공급업체/단가도 이미 있는 정보로 채운다 — 그 스타일의 소요량
+  // (getStyleRequirements, selectStyleMaterial과 같은 규칙)과 이 자재의 BOM 행(공급사·
+  // 확정 단가)을 함께 조회해 넘긴다. PR-187 C와 같은 이유로 styleMaterialRows state가
+  // 갱신되기 전에 바로 쓸 수 있게 조회 결과를 직접 selectStyleMaterial에 넘긴다.
   useEffect(() => {
     if (prefillItemId) {
       const styleNo = prefillItemStyleNo || undefined;
@@ -361,9 +444,38 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         setStyleSearch({ styleNo });
         setStyleLinkExplicitlyCleared(false);
       }
-      getItem(prefillItemId)
-        .then((it) => selectItem({ id: it.id, name: it.name, code: it.code }, styleNo ? { styleNo } : undefined))
-        .catch((err) => setError(getErrorMessage(err, '품목 정보를 불러오지 못했습니다.')));
+      (async () => {
+        try {
+          const it = await getItem(prefillItemId);
+          const picked = { id: it.id, name: it.name, code: it.code };
+          let row: MaterialRequirementRow | undefined;
+          let bomRow: BomItemRow | undefined;
+          if (styleNo) {
+            const [reqRes, bomRes] = await Promise.all([
+              getStyleRequirements(styleNo).catch(() => null),
+              getBomByStyleNo(styleNo).catch(() => null),
+            ]);
+            if (reqRes) {
+              setStyleMaterialRows(reqRes.rows);
+              row = reqRes.rows.find((r) => r.itemId === it.id);
+            }
+            if (bomRes?.items) {
+              // 같은 자재가 색상별로 여러 BOM 행에 걸쳐 있으면, 공급사/확정 단가가
+              // 채워진 첫 행을 쓴다(값이 있는 행이 사람이 실제로 지정한 행일 가능성이 큼).
+              bomRow = bomRes.items.find((b: BomItemRow) => b.material?.id === it.id && (b.supplier || b.unitPrice > 0))
+                ?? bomRes.items.find((b: BomItemRow) => b.material?.id === it.id);
+            }
+          }
+          const bomPrefillOpts = { bomSupplierName: bomRow?.supplier ?? null, itemVendorName: it.vendor ?? null, bomUnitPrice: bomRow?.unitPrice ?? null };
+          if (row) {
+            selectStyleMaterial(picked, row, styleNo, bomPrefillOpts);
+          } else {
+            await selectItem(picked, { styleNo, ...bomPrefillOpts, packagingApplies: false });
+          }
+        } catch (err) {
+          setError(getErrorMessage(err, '품목 정보를 불러오지 못했습니다.'));
+        }
+      })();
       onPrefillConsumed?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -627,7 +739,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             <div className="flex items-stretch gap-1">
               <SearchSelectField<SupplierRef>
                 value={supplier}
-                onChange={(picked) => { setSupplier(picked); setAutofilled(false); }}
+                onChange={(picked) => { setSupplier(picked); setAutofilled(false); setSupplierSource(null); }}
                 search={searchFormSuppliers}
                 getKey={(x) => x.id}
                 getLabel={(x) => `${x.name} (${x.code})`}
@@ -645,6 +757,13 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 + 새 공급업체 등록
               </button>
             </div>
+            {/* PR-240: 미리 채운 값이면 출처, 사람이 고쳤으면(supplierSource===null인데
+                값은 있음) "직접 입력"을 보여준다 — 값이 전혀 없으면 아무것도 보이지 않는다. */}
+            {supplier && (
+              <span className="text-xs text-gray-400 mt-0.5" data-testid="supplier-source">
+                {supplierSource ? SUPPLIER_SOURCE_LABEL[supplierSource] : '직접 입력'}
+              </span>
+            )}
             {categoryFilter.visible && (
               <label className="flex items-center gap-1 text-xs text-gray-600 mt-1">
                 <input
@@ -690,9 +809,14 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               step="any"
               className={`border rounded px-3 py-2 w-32 ${fieldErrors.unitPrice ? 'border-red-500' : 'border-gray-300'}`}
               value={newPo.unitPrice}
-              onChange={(e) => { setNewPo({ ...newPo, unitPrice: Number(e.target.value) }); setAutofilled(false); setFieldErrors((f) => ({ ...f, unitPrice: false })); }}
+              onChange={(e) => { setNewPo({ ...newPo, unitPrice: Number(e.target.value) }); setAutofilled(false); setPriceSource(null); setFieldErrors((f) => ({ ...f, unitPrice: false })); }}
               aria-label="단가"
             />
+            {!!newPo.unitPrice && newPo.unitPrice > 0 && (
+              <span className="text-xs text-gray-400 mt-0.5" data-testid="price-source">
+                {priceSource ? PRICE_SOURCE_LABEL[priceSource] : '직접 입력'}
+              </span>
+            )}
             {fieldErrors.unitPrice && <p className="text-xs text-red-600 mt-1" data-testid="unit-price-inline-hint">단가를 입력해 주세요</p>}
           </div>
           <div className="flex flex-col">

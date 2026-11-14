@@ -18,6 +18,9 @@ export interface Item {
   // PR-186: 실/테이프 종류(material_packaging_unit_rules.materialSubType 값). null이면 미지정.
   materialSubType?: string | null;
   packagingReviewedAt?: string | null;
+  // PR-240: 품목 마스터에 저장된 공급처(자유 텍스트, 기존 컬럼 — 엑셀 품목 일괄등록
+  // 경로에서만 채워지던 값). "발주하기" 공급업체 미리 채우기의 2순위 후보로 쓴다.
+  vendor?: string | null;
 }
 
 export interface GetItemsFilter {

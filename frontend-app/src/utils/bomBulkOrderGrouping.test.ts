@@ -61,6 +61,20 @@ describe('bomBulkOrderGrouping (PR-238)', () => {
     expect(groups[0].supplierId).toBe(9);
   });
 
+  // PR-240: BOM 공급사/확정 단가가 미리 채워져 들어오면(호출하는 쪽의 orderPrefill
+  // 계산 결과) 그 출처까지 draft에 그대로 전달된다.
+  it('PR-240: candidateSupplierId/suggestedUnitPrice와 그 출처가 draft에 그대로 전달된다', () => {
+    const drafts = buildInitialDrafts([
+      row({ candidateSupplierId: 7, candidateSupplierSource: 'bom', suggestedUnitPrice: 1000, priceSource: 'bom' }),
+    ]);
+    expect(drafts[0]).toMatchObject({ supplierId: 7, supplierSource: 'bom', unitPrice: 1000, priceSource: 'bom' });
+  });
+
+  it('PR-240: 공급업체/단가가 없으면(null) 출처도 null이다(값 없는데 출처만 있는 상태를 만들지 않음)', () => {
+    const drafts = buildInitialDrafts([row({ candidateSupplierId: null, candidateSupplierSource: 'bom', suggestedUnitPrice: null, priceSource: 'bom' })]);
+    expect(drafts[0]).toMatchObject({ supplierId: null, supplierSource: null, unitPrice: null, priceSource: null });
+  });
+
   const ready = (overrides: Partial<BulkOrderRowDraft> = {}): BulkOrderRowDraft => ({
     bomItemId: 1,
     itemId: 100,
@@ -69,8 +83,10 @@ describe('bomBulkOrderGrouping (PR-238)', () => {
     colorCode: 'BK',
     unit: 'Y',
     supplierId: 7,
+    supplierSource: null,
     quantity: 50,
     unitPrice: 10,
+    priceSource: null,
     orderType: 'FIRM',
     excluded: false,
     alreadyOrderedCount: 0,

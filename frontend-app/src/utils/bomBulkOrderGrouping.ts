@@ -3,6 +3,7 @@
 // 트랜잭션으로 보내면 한 업체 실패가 다른 업체까지 롤백시킨다 — 그래서 "업체별 발주서"는
 // 새 백엔드가 아니라, 기존 createPurchaseOrdersBulk를 업체별로 나눠 여러 번 호출하는
 // 것으로 구현한다(업체마다 독립된 트랜잭션 1개, 그 안에서는 전체 성공 또는 전체 롤백).
+import type { SupplierPrefillSource, PricePrefillSource } from './orderPrefill';
 
 export type BulkOrderType = 'FIRM' | 'PROVISIONAL';
 
@@ -13,14 +14,18 @@ export interface BulkOrderRowInput {
   category: string;
   colorCode: string;
   unit: string | null;
-  // 발주 이력상 후보 공급업체가 정확히 1곳일 때만 채워진다(여러 곳/0곳이면 null —
-  // MultiStyleBulkOrder.tsx와 같은 원칙, 추측해서 하나로 좁히지 않음).
+  // PR-240: BOM 행 공급사/품목 마스터/최근 발주 우선순위로 이미 미리 채운 결과(호출하는
+  // 쪽에서 orderPrefill.ts의 pickSupplierPrefill로 계산해 넘긴다) — null이면 공급사 미지정.
   candidateSupplierId: number | null;
+  candidateSupplierSource?: SupplierPrefillSource | null;
   // 이 스타일에서 이 자재의 미입고(PENDING) 발주 건수.
   alreadyOrderedCount: number;
   // 필요수량(적용) 계산 결과 — null이면 근거 없음/극단 불일치 등으로 사람이 직접
   // 수량을 입력해야 생성 가능하다(기존 규칙, PR-226/231 그대로 재사용).
   suggestedQuantity: number | null;
+  // PR-240: BOM 확정 단가/최근 발주 단가 우선순위로 이미 미리 채운 단가(pickPricePrefill).
+  suggestedUnitPrice?: number | null;
+  priceSource?: PricePrefillSource | null;
 }
 
 export interface BulkOrderRowDraft {
@@ -31,8 +36,10 @@ export interface BulkOrderRowDraft {
   colorCode: string;
   unit: string | null;
   supplierId: number | null;
+  supplierSource: SupplierPrefillSource | null;
   quantity: number | null;
   unitPrice: number | null;
+  priceSource: PricePrefillSource | null;
   orderType: BulkOrderType | null;
   excluded: boolean;
   alreadyOrderedCount: number;
@@ -48,8 +55,10 @@ export function buildInitialDrafts(rows: BulkOrderRowInput[]): BulkOrderRowDraft
     colorCode: r.colorCode,
     unit: r.unit,
     supplierId: r.candidateSupplierId,
+    supplierSource: r.candidateSupplierId != null ? (r.candidateSupplierSource ?? null) : null,
     quantity: r.suggestedQuantity,
-    unitPrice: null,
+    unitPrice: r.suggestedUnitPrice ?? null,
+    priceSource: r.suggestedUnitPrice != null ? (r.priceSource ?? null) : null,
     orderType: null,
     excluded: false,
     alreadyOrderedCount: r.alreadyOrderedCount,
