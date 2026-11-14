@@ -14,7 +14,7 @@ import { activeCategories } from '../utils/materialCategories';
 import { ItemCatalogReport } from './ItemCatalogReport';
 import { Pagination } from './Pagination';
 import { selectBulkApproveTargets, selectFailedOnlyTargets } from '../utils/mappingApproval';
-import { describeApprovalFailure, buildFailureCopyText, applyApprovalOutcomes, type ApprovalFailureReason } from '../utils/uploadReviewStatus';
+import { describeApprovalFailure, buildFailureCopyText, applyApprovalOutcomes, buildClearListConfirmMessage, type ApprovalFailureReason } from '../utils/uploadReviewStatus';
 import { saveUploadReview, loadUploadReview, clearUploadReview } from '../utils/uploadReviewStorage';
 import { extractNotices, type StyleCommitResult } from '../utils/commitNotices';
 import { BulkApproveResult } from './CommitResultPanel';
@@ -920,6 +920,10 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
   // PR-237: "목록 비우기" — 복원 안내를 치우고 저장된 목록도 함께 지운다(사용자가 더는
   // 필요 없다고 판단한 경우).
   const handleClearUploadList = () => {
+    // PR-237 보충: 승인되지 않은 건이 남아 있으면 확인을 받는다(실수로 눌러도 되돌릴
+    // 수 없이 지워지는 것을 막는다) — 남은 게 없으면 바로 비운다.
+    const confirmMessage = buildClearListConfirmMessage(parsedStyles.length);
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
     setParsedStyles([]);
     setExistsMap({});
     setFailuresBySheet({});

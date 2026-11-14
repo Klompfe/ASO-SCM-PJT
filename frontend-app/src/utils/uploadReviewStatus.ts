@@ -105,3 +105,12 @@ export function applyApprovalOutcomes<T extends { sheetName: string }>(
   }
   return { styles: nextStyles, failuresBySheet: nextFailures };
 }
+
+// PR-237 보충: "목록 비우기"는 승인되지 않은 건(목록에 남아 있는 모든 스타일 — 성공한
+// 건은 이미 applyApprovalOutcomes가 지워 남아 있지 않음)이 있으면 확인을 받는다.
+// 남은 게 없으면(0건) null을 돌려줘 확인 없이 바로 비울 수 있게 한다 — 호출하는 쪽
+// (ItemsManager)이 null이 아니면 window.confirm에 그대로 띄운다.
+export function buildClearListConfirmMessage(pendingCount: number): string | null {
+  if (pendingCount <= 0) return null;
+  return `승인되지 않은 ${pendingCount}건이 목록에서 사라집니다. 비우시겠습니까?`;
+}

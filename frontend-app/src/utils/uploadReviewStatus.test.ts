@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeApprovalFailure, resolveUploadReviewStatus, buildFailureCopyText, applyApprovalOutcomes } from './uploadReviewStatus';
+import { describeApprovalFailure, resolveUploadReviewStatus, buildFailureCopyText, applyApprovalOutcomes, buildClearListConfirmMessage } from './uploadReviewStatus';
 
 describe('describeApprovalFailure (PR-237)', () => {
   it('서버 응답이 전혀 없으면(네트워크/서버 문제) network로 분류하고 "잠시 후 다시 시도"를 안내한다', () => {
@@ -100,5 +100,19 @@ describe('applyApprovalOutcomes (PR-237)', () => {
     const result = applyApprovalOutcomes(styles, { S1: failReason }, []);
     expect(result.styles).toEqual(styles);
     expect(result.failuresBySheet).toEqual({ S1: failReason });
+  });
+});
+
+// PR-237 보충: "목록 비우기"는 승인되지 않은 건이 남아 있으면 확인을 받아야 한다
+// (실수로 눌러도 되돌릴 수 없이 지워지는 것을 막는다).
+describe('buildClearListConfirmMessage (PR-237 보충)', () => {
+  it('남은 건이 있으면 건수를 담은 확인 문구를 돌려준다', () => {
+    expect(buildClearListConfirmMessage(3)).toBe('승인되지 않은 3건이 목록에서 사라집니다. 비우시겠습니까?');
+    expect(buildClearListConfirmMessage(1)).toBe('승인되지 않은 1건이 목록에서 사라집니다. 비우시겠습니까?');
+  });
+
+  it('남은 건이 없으면(0건 이하) null — 확인 없이 바로 비울 수 있다', () => {
+    expect(buildClearListConfirmMessage(0)).toBeNull();
+    expect(buildClearListConfirmMessage(-1)).toBeNull();
   });
 });
