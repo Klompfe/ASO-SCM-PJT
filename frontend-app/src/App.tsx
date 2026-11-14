@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { buildSingleOrderUrl, buildBulkOrderUrl, parseOrderPrefillFromSearch } from './utils/bomBulkOrderNav';
+import { clearUploadReview, hasPendingUploadReviewWork } from './utils/uploadReviewStorage';
 import { Dashboard } from './components/Dashboard';
 import { ItemsManager } from './components/ItemsManager';
 import { WorkOrdersManager } from './components/WorkOrdersManager';
@@ -238,8 +239,27 @@ function App() {
   const handleLogout = () => {
     localStorage?.removeItem?.('access_token');
     localStorage?.removeItem?.('token');
+    // PR-237: 업로드 승인 대기/실패 목록에는 파싱된 시트 내용이 들어 있어 로그아웃 시
+    // 지운다(다음 로그인 사용자가 이전 사용자의 업로드를 보지 않게).
+    clearUploadReview();
     setIsAuthenticated(false);
   };
+
+  // PR-237: 자재명세 업로드 승인 대기/실패 스타일이 남아 있는 상태에서 탭을 닫거나
+  // 새로고침할 때만 브라우저 기본 확인창을 띄운다(남은 게 없으면 띄우지 않음). 이
+  // 컴포넌트는 앱이 켜져 있는 동안 항상 마운트돼 있어, ItemsManager가 다른 탭으로
+  // 바뀌어 unmount돼 있어도(sessionStorage에는 남아 있으므로) 여전히 경고할 수 있다 —
+  // 메뉴 내부 이동(이 핸들러와 무관)에는 뜨지 않는다(실제 브라우저 unload 이벤트만).
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasPendingUploadReviewWork()) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   // Fallback UI for catastrophic initialization failure
   const FallbackUI = ({ message }: { message: string }) => (

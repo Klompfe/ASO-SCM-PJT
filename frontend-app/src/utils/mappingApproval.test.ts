@@ -4,10 +4,12 @@ import {
   BADGE_ALREADY_REGISTERED,
   BADGE_PARSE_FAILED,
   BADGE_PENDING,
+  BADGE_APPROVAL_FAILED,
   REAPPROVE_LABEL,
   REAPPROVE_NOTICE_POINTS,
   REAPPROVE_NOTICE_TITLE,
   selectBulkApproveTargets,
+  selectFailedOnlyTargets,
 } from './mappingApproval';
 
 describe('재승인 안내 문구 (PR-130)', () => {
@@ -51,6 +53,33 @@ describe('버튼/배지 문구 (PR-130)', () => {
     expect(BADGE_PENDING).toBe('확인 대기');
     expect(BADGE_ALREADY_REGISTERED).toBe('이미 등록됨');
     expect(BADGE_PARSE_FAILED).toBe('파싱 실패');
+    expect(BADGE_APPROVAL_FAILED).toBe('승인 실패');
+  });
+});
+
+// PR-237: "실패한 스타일만 다시 일괄 승인" — 실패로 기록된 것만 골라 기존 일괄승인
+// 자격(selectBulkApproveTargets)으로 다시 거른다.
+describe('selectFailedOnlyTargets (PR-237)', () => {
+  const styles = [
+    { sheetName: 'S1', styleNo: 'FAIL-1' },
+    { sheetName: 'S2', styleNo: 'OK-1' },
+    { sheetName: 'S3', styleNo: 'FAIL-2' },
+    { sheetName: 'S4', styleNo: 'FAIL-EXIST' },
+  ];
+  const failuresBySheet = { S1: { kind: 'unknown', message: 'x' }, S3: { kind: 'network', message: 'y' }, S4: { kind: 'unknown', message: 'z' } };
+
+  it('실패로 기록된 스타일만 고른다(성공했던 S2는 제외)', () => {
+    const targets = selectFailedOnlyTargets(styles, {}, failuresBySheet);
+    expect(targets.map((s) => s.styleNo).sort()).toEqual(['FAIL-1', 'FAIL-2', 'FAIL-EXIST']);
+  });
+
+  it('그 사이 다른 경로로 이미 등록된 스타일은 제외된다(개별 재승인 대상)', () => {
+    const targets = selectFailedOnlyTargets(styles, { 'FAIL-EXIST': true }, failuresBySheet);
+    expect(targets.map((s) => s.styleNo).sort()).toEqual(['FAIL-1', 'FAIL-2']);
+  });
+
+  it('실패가 하나도 없으면 빈 배열', () => {
+    expect(selectFailedOnlyTargets(styles, {}, {})).toEqual([]);
   });
 });
 

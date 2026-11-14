@@ -13,7 +13,9 @@ import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '.
 import { activeCategories } from '../utils/materialCategories';
 import { ItemCatalogReport } from './ItemCatalogReport';
 import { Pagination } from './Pagination';
-import { selectBulkApproveTargets } from '../utils/mappingApproval';
+import { selectBulkApproveTargets, selectFailedOnlyTargets } from '../utils/mappingApproval';
+import { describeApprovalFailure, buildFailureCopyText, applyApprovalOutcomes, type ApprovalFailureReason } from '../utils/uploadReviewStatus';
+import { saveUploadReview, loadUploadReview, clearUploadReview } from '../utils/uploadReviewStorage';
 import { extractNotices, type StyleCommitResult } from '../utils/commitNotices';
 import { BulkApproveResult } from './CommitResultPanel';
 import { fetchItemPage } from '../utils/listQueries';
@@ -164,6 +166,40 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
   const [bulkProgress, setBulkProgress] = useState(0);
   // PR-132: 일괄승인 결과(스타일별 알림) 요약 — 확인이 필요한 차이가 있는 스타일을 놓치지 않게 화면에 남긴다.
   const [bulkResults, setBulkResults] = useState<{ results: StyleCommitResult[]; skipped: number } | null>(null);
+  // PR-237: 승인(일괄/개별)이 실패한 스타일 — 목록에서 사라지지 않고 이유와 함께 남는다.
+  // 키는 sheetName(styleNo가 없는 행도 가리킬 수 있는 유일 식별자).
+  const [failuresBySheet, setFailuresBySheet] = useState<Record<string, ApprovalFailureReason>>({});
+  const [retryingSheet, setRetryingSheet] = useState<string | null>(null);
+  // 새로고침/메뉴 이동으로 이 컴포넌트가 다시 마운트됐을 때 이전 업로드가 남아 있었으면
+  // 몇 건이 복원됐는지 한 번 안내한다(null이면 이번 마운트에서 복원한 적 없음).
+  const [restoredCount, setRestoredCount] = useState<number | null>(null);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
+
+  // PR-237: 마운트 시 이전 업로드(확인 대기/실패)가 sessionStorage에 남아 있으면 복원한다
+  // — 메뉴를 이동했다 돌아오거나 새로고침해도 사라지지 않게 하는 것이 이 PR의 핵심이다.
+  useEffect(() => {
+    const stored = loadUploadReview();
+    if (stored && stored.styles.length > 0) {
+      setParsedStyles(stored.styles);
+      setExistsMap(stored.existsMap);
+      setFailuresBySheet(stored.failuresBySheet);
+      setRestoredCount(stored.styles.length);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 목록(대기/실패 포함)이 바뀔 때마다 보관한다 — 비어 있으면 보관소도 비운다(로그아웃 시
+  // 삭제는 App.tsx의 로그아웃 처리에서 clearUploadReview를 직접 호출한다).
+  useEffect(() => {
+    if (parsedStyles.length === 0) {
+      clearUploadReview();
+      setStorageWarning(null);
+      return;
+    }
+    const result = saveUploadReview({ styles: parsedStyles, existsMap, failuresBySheet });
+    setStorageWarning(result.saved ? null : (result.reason ?? null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsedStyles, existsMap, failuresBySheet]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -704,6 +740,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
     setParsedStyles([]);
     setExistsMap({});
     setBulkResults(null);
+    setFailuresBySheet({});
+    setRestoredCount(null);
     try {
       const styles = await parseMappingFile(selectedFile);
       setParsedStyles(styles);
@@ -734,25 +772,15 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
     setModalOpen(true);
   };
 
-  // 파싱 실패했거나 이미 등록된(existsMap[styleNo]===true) 스타일은 제외한다. 재승인은 자재를 중복으로 쌓지 않는 "병합"이지만
-  // (mapping-commit.service.ts, PR-098), 여러 스타일을 개별 확인 없이 한 번에 승인하면 이미 등록된 스타일의 스타일 정보가 잘못된
-  // 파일의 값으로 갱신될 수 있다. 그래서 이미 등록된 스타일은 일괄승인 대상이 아니고, 한 줄씩 열어 확인한 뒤 개별로 재승인한다.
-  const handleBulkApprove = async () => {
-    const targets = selectBulkApproveTargets(parsedStyles, existsMap);
-    if (targets.length === 0) {
-      toast.error('일괄 승인할 대상이 없습니다(파싱 실패했거나 이미 등록된 스타일은 제외됩니다).');
-      return;
-    }
-    const skippedCount = parsedStyles.length - targets.length;
-    if (!window.confirm(`${targets.length}개 스타일을 일괄 승인합니다${skippedCount > 0 ? ` (${skippedCount}개는 파싱 실패/이미 등록되어 제외)` : ''}. 계속할까요?`)) {
-      return;
-    }
-
+  // PR-237: 일괄/개별 승인이 공통으로 쓰는 실행기 — 성공한 스타일은 목록에서 즉시
+  // 지우고(요구사항: "승인 완료된 스타일은 즉시 삭제"), 실패한 스타일은 이유와 함께
+  // failuresBySheet에 남긴다(목록 자체에서는 지우지 않음 — 사라졌던 문제의 핵심 수정).
+  const runApprove = async (targets: (ParsedStyleResult & { styleNo: string })[], skippedCount: number) => {
     setBulkApproving(true);
     setBulkProgress(0);
     let successCount = 0;
     const successResults: StyleCommitResult[] = [];
-    const failures: { styleNo: string; reason: string }[] = [];
+    const failures: { sheetName: string; styleNo: string; reason: ApprovalFailureReason }[] = [];
 
     // 병렬로 돌리면 mapping-commit.service.ts의 "동일 이름 자재 없으면 새로 생성" 로직이
     // 서로 다른 시트에서 같은 자재명을 참조할 때 경합해 중복 생성될 수 있어 순차 실행한다.
@@ -766,33 +794,38 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
         successResults.push({ styleNo: style.styleNo, notices: extractNotices(res) });
         successCount++;
       } catch (err) {
-        const reason = getErrorMessage(err, '알 수 없는 오류');
-        // 원본 에러(응답 본문 전체)는 콘솔에 남겨 서버 로그와 대조 진단할 수 있게 한다 —
-        // 토스트는 길이 제한상 요약만 보여준다.
+        const reason = describeApprovalFailure(err);
+        // 원본 에러(응답 본문 전체)는 콘솔에 남겨 서버 로그와 대조 진단할 수 있게 한다.
         console.error(`[일괄 승인 실패] ${style.styleNo}:`, err);
-        failures.push({ styleNo: style.styleNo, reason });
+        failures.push({ sheetName: style.sheetName, styleNo: style.styleNo, reason });
       }
       setBulkProgress((p) => p + 1);
     }
 
     setBulkApproving(false);
     // 성공한 스타일은 (실패가 함께 있어도) 스타일별 차이 요약을 화면에 남긴다. 성공만 있을 때는 이 요약이 완료 안내를 대신한다.
-    if (successResults.length > 0) setBulkResults({ results: successResults, skipped: skippedCount });
+    if (successResults.length > 0) setBulkResults((prev) => ({ results: [...(prev?.results ?? []), ...successResults], skipped: (prev?.skipped ?? 0) + skippedCount }));
+    const outcomes = targets.map((t) => {
+      const failure = failures.find((f) => f.sheetName === t.sheetName);
+      return { sheetName: t.sheetName, outcome: failure ? ({ success: false, reason: failure.reason } as const) : ({ success: true } as const) };
+    });
+    setParsedStyles((prev) => applyApprovalOutcomes(prev, {}, outcomes).styles);
+    setFailuresBySheet((prev) => applyApprovalOutcomes([], prev, outcomes).failuresBySheet);
     if (failures.length > 0) {
       // 실패 사유별로 묶어서 "사유: 해당 styleNo 개수"로 간추린다 — 실패가 많을 때
       // (예: 동일 원인으로 수십 건) 토스트가 읽을 수 없는 텍스트 벽이 되는 것을 막는다.
-      // 스타일별 전체 사유는 console.error로 남겨 정확한 대상을 추적할 수 있게 한다.
+      // 스타일별 전체 사유·원문은 console.error와 목록 화면(StyleReviewList)에 남아 있다.
       const reasonGroups = new Map<string, string[]>();
       for (const f of failures) {
-        const list = reasonGroups.get(f.reason) ?? [];
+        const list = reasonGroups.get(f.reason.message) ?? [];
         list.push(f.styleNo);
-        reasonGroups.set(f.reason, list);
+        reasonGroups.set(f.reason.message, list);
       }
       const summary = Array.from(reasonGroups.entries())
         .map(([reason, styleNos]) => `- ${reason} (${styleNos.length}건: ${styleNos.slice(0, 3).join(', ')}${styleNos.length > 3 ? ' 외' : ''})`)
         .join('\n');
       toast.error(
-        `일괄 승인 완료: ${successCount}개 성공, ${failures.length}개 실패\n${summary}\n(전체 목록은 브라우저 콘솔 참고)`,
+        `일괄 승인 완료: ${successCount}개 성공, ${failures.length}개 실패\n${summary}\n(실패한 스타일은 목록에 남아 있습니다 — 아래에서 이유를 확인하고 다시 승인할 수 있습니다)`,
         { duration: 20000 },
       );
       console.error('[일괄 승인 실패 목록]', failures);
@@ -811,6 +844,90 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
     setExistsMap((prev) => ({ ...prev, ...Object.fromEntries(results) }));
   };
 
+  // 파싱 실패했거나 이미 등록된(existsMap[styleNo]===true) 스타일은 제외한다. 재승인은 자재를 중복으로 쌓지 않는 "병합"이지만
+  // (mapping-commit.service.ts, PR-098), 여러 스타일을 개별 확인 없이 한 번에 승인하면 이미 등록된 스타일의 스타일 정보가 잘못된
+  // 파일의 값으로 갱신될 수 있다. 그래서 이미 등록된 스타일은 일괄승인 대상이 아니고, 한 줄씩 열어 확인한 뒤 개별로 재승인한다.
+  const handleBulkApprove = async () => {
+    const targets = selectBulkApproveTargets(parsedStyles, existsMap);
+    if (targets.length === 0) {
+      toast.error('일괄 승인할 대상이 없습니다(파싱 실패했거나 이미 등록된 스타일은 제외됩니다).');
+      return;
+    }
+    const skippedCount = parsedStyles.length - targets.length;
+    if (!window.confirm(`${targets.length}개 스타일을 일괄 승인합니다${skippedCount > 0 ? ` (${skippedCount}개는 파싱 실패/이미 등록되어 제외)` : ''}. 계속할까요?`)) {
+      return;
+    }
+    await runApprove(targets, skippedCount);
+  };
+
+  // PR-237: "실패한 스타일만 다시 일괄 승인" — failuresBySheet에 기록된 것만 골라
+  // 재시도한다(그 사이 다른 경로로 이미 등록됐으면 자동 제외, 개별 재승인 대상).
+  const handleRetryFailedOnly = async () => {
+    const targets = selectFailedOnlyTargets(parsedStyles, existsMap, failuresBySheet);
+    if (targets.length === 0) {
+      toast.error('다시 승인할 실패 스타일이 없습니다.');
+      return;
+    }
+    if (!window.confirm(`실패한 스타일 ${targets.length}개를 다시 일괄 승인합니다. 계속할까요?`)) return;
+    await runApprove(targets, 0);
+  };
+
+  // PR-237: 한 스타일만 "다시 승인"(목록의 실패 행 버튼) — 일괄 승인과 같은 commitMapping
+  // 호출을 재사용하되, 확인창 없이 즉시 그 한 건만 재시도한다.
+  const handleRetryOne = async (style: ParsedStyleResult) => {
+    if (!style.styleNo) return;
+    setRetryingSheet(style.sheetName);
+    try {
+      const res = await commitMapping({ styleNo: style.styleNo, overviewData: style.overview, bomItems: style.bomItems || [] });
+      setBulkResults((prev) => ({ results: [...(prev?.results ?? []), { styleNo: style.styleNo as string, notices: extractNotices(res) }], skipped: prev?.skipped ?? 0 }));
+      const outcomes = [{ sheetName: style.sheetName, outcome: { success: true } as const }];
+      setParsedStyles((prev) => applyApprovalOutcomes(prev, {}, outcomes).styles);
+      setFailuresBySheet((prev) => applyApprovalOutcomes([], prev, outcomes).failuresBySheet);
+      toast.success(`${style.styleNo} 승인 완료`);
+      try {
+        const { exists } = await checkStyleExists(style.styleNo);
+        setExistsMap((prev) => ({ ...prev, [style.styleNo as string]: exists }));
+      } catch { /* 배지 갱신만 못할 뿐이므로 무시 */ }
+    } catch (err) {
+      const reason = describeApprovalFailure(err);
+      const outcomes = [{ sheetName: style.sheetName, outcome: { success: false, reason } as const }];
+      setFailuresBySheet((prev) => applyApprovalOutcomes([], prev, outcomes).failuresBySheet);
+      toast.error(`${style.styleNo} 승인 실패: ${reason.message}`);
+    } finally {
+      setRetryingSheet(null);
+    }
+  };
+
+  // PR-237: "실패 내용 복사" — 스타일번호·이유만 클립보드에 담는다(자재명·수량 등 업무
+  // 데이터는 포함하지 않음).
+  const handleCopyFailures = async () => {
+    const entries = parsedStyles
+      .filter((s) => failuresBySheet[s.sheetName])
+      .map((s) => ({ styleNo: s.styleNo || s.sheetName, reason: failuresBySheet[s.sheetName].message }));
+    if (entries.length === 0) {
+      toast.error('복사할 실패 내용이 없습니다.');
+      return;
+    }
+    const text = buildFailureCopyText(entries);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('실패 내용을 복사했습니다.');
+    } catch {
+      toast.error('클립보드 복사에 실패했습니다.');
+    }
+  };
+
+  // PR-237: "목록 비우기" — 복원 안내를 치우고 저장된 목록도 함께 지운다(사용자가 더는
+  // 필요 없다고 판단한 경우).
+  const handleClearUploadList = () => {
+    setParsedStyles([]);
+    setExistsMap({});
+    setFailuresBySheet({});
+    setBulkResults(null);
+    setRestoredCount(null);
+    clearUploadReview();
+  };
+
   const handleModalRefresh = async () => {
     if (selectedStyle?.styleNo) {
       try {
@@ -821,6 +938,17 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
       }
     }
   };
+
+  // PR-237: 모달(개별 승인)도 같은 방식으로 처리한다 — 성공하면 목록에서 그 스타일을
+  // 지우고, 실패하면 이유와 함께 남긴다(사라지지 않음).
+  const handleModalApprovalOutcome = (outcome: { success: true } | { success: false; reason: ApprovalFailureReason }) => {
+    if (!selectedStyle) return;
+    const outcomes = [{ sheetName: selectedStyle.sheetName, outcome }];
+    setParsedStyles((prev) => applyApprovalOutcomes(prev, {}, outcomes).styles);
+    setFailuresBySheet((prev) => applyApprovalOutcomes([], prev, outcomes).failuresBySheet);
+  };
+
+  const failedCount = parsedStyles.filter((s) => failuresBySheet[s.sheetName]).length;
 
   return (
     <div className="space-y-6">
@@ -840,22 +968,65 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
         data={selectedStyle}
         alreadyExists={!!selectedStyle?.styleNo && existsMap[selectedStyle.styleNo]}
         onRefresh={handleModalRefresh}
+        onApprovalOutcome={handleModalApprovalOutcome}
       />
 
       {parsedStyles.length > 0 && (
         <div className="space-y-2">
-          <div className="flex justify-between items-center gap-4">
+          {restoredCount != null && (
+            <div className="flex items-center justify-between gap-4 p-2 bg-blue-50 text-blue-800 text-sm rounded">
+              <span>이전 업로드에서 남은 스타일 {restoredCount}건입니다.</span>
+              <button type="button" className="underline whitespace-nowrap" onClick={handleClearUploadList}>목록 비우기</button>
+            </div>
+          )}
+          {storageWarning && (
+            <div className="p-2 bg-amber-50 text-amber-800 text-xs rounded">{storageWarning}</div>
+          )}
+          <div className="flex justify-between items-center gap-4 flex-wrap">
             <h3 className="text-lg font-semibold text-gray-800">업로드된 스타일 목록 ({parsedStyles.length}개) — 한 줄을 클릭해 상세를 확인하고 개별 승인하거나, 아래 버튼으로 일괄 승인하세요</h3>
-            <button
-              onClick={handleBulkApprove}
-              disabled={bulkApproving}
-              className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
-            >
-              {bulkApproving ? `일괄 승인 중... (${bulkProgress}/${parsedStyles.length})` : '일괄 승인'}
-            </button>
+            <div className="flex gap-2 flex-wrap">
+              {failedCount > 0 && (
+                <>
+                  <button
+                    onClick={handleRetryFailedOnly}
+                    disabled={bulkApproving}
+                    className="bg-red-600 text-white px-3 py-2 rounded font-medium hover:bg-red-700 disabled:opacity-50 whitespace-nowrap text-sm"
+                  >
+                    실패한 스타일만 다시 일괄 승인 ({failedCount})
+                  </button>
+                  <button
+                    onClick={handleCopyFailures}
+                    className="border border-gray-300 px-3 py-2 rounded font-medium hover:bg-gray-50 whitespace-nowrap text-sm"
+                  >
+                    실패 내용 복사
+                  </button>
+                </>
+              )}
+              <button
+                onClick={handleBulkApprove}
+                disabled={bulkApproving}
+                className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+              >
+                {bulkApproving ? `일괄 승인 중... (${bulkProgress}/${parsedStyles.length})` : '일괄 승인'}
+              </button>
+              <button
+                onClick={handleClearUploadList}
+                disabled={bulkApproving}
+                className="border border-gray-300 px-3 py-2 rounded font-medium hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap text-sm"
+              >
+                목록 비우기
+              </button>
+            </div>
           </div>
           {bulkResults && <BulkApproveResult results={bulkResults.results} skipped={bulkResults.skipped} onDismiss={() => setBulkResults(null)} />}
-          <StyleReviewList styles={parsedStyles} existsMap={existsMap} onSelect={handleSelectStyle} />
+          <StyleReviewList
+            styles={parsedStyles}
+            existsMap={existsMap}
+            onSelect={handleSelectStyle}
+            failuresBySheet={failuresBySheet}
+            onRetry={handleRetryOne}
+            retryingSheet={retryingSheet}
+          />
         </div>
       )}
 

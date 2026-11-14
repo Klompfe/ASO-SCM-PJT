@@ -4,6 +4,7 @@ import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '.
 import { APPROVE_LABEL, BADGE_ALREADY_REGISTERED, REAPPROVE_LABEL, REAPPROVE_NOTICE_POINTS, REAPPROVE_NOTICE_TITLE } from '../utils/mappingApproval';
 import { extractNotices, type CommitNotice } from '../utils/commitNotices';
 import { getErrorMessage } from '../utils/errorMessage';
+import { describeApprovalFailure, type ApprovalFailureReason } from '../utils/uploadReviewStatus';
 import { computeRawRowPackaging, ceilToInt } from '../utils/materialRequirementDisplay';
 import { buildColorSizeQuantityTable } from '../utils/styleColorSizeQuantities';
 import { CommitResultPanel } from './CommitResultPanel';
@@ -23,6 +24,9 @@ interface MappingPreviewModalProps {
   data: any;
   alreadyExists?: boolean;
   onRefresh: () => void;
+  // PR-237: 개별 승인(이 모달)도 실패하면 부모 목록(StyleReviewList)에 남겨 이유를 보여준다
+  // — 성공 시에는 목록에서 그 스타일을 지우고, 실패 시에는 이유와 함께 남긴다.
+  onApprovalOutcome?: (outcome: { success: true } | { success: false; reason: ApprovalFailureReason }) => void;
 }
 
 export interface CommitOutcome {
@@ -352,6 +356,7 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
   data,
   alreadyExists,
   onRefresh,
+  onApprovalOutcome,
 }) => {
   const [bomItems, setBomItems] = useState<any[]>([]);
   const [styleOverview, setStyleOverview] = useState<any>(data?.overview || {});
@@ -405,8 +410,10 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
       setResult({ styleNo, notices: extractNotices(res) });
       // 목록 뒤의 "이미 등록됨" 배지 등은 바로 갱신한다(모달은 사용자가 확인을 누를 때까지 그대로 둔다).
       onRefresh();
+      onApprovalOutcome?.({ success: true });
     } catch (e) {
       setError(getErrorMessage(e, '저장에 실패했습니다. 잠시 후 다시 시도해 주세요.'));
+      onApprovalOutcome?.({ success: false, reason: describeApprovalFailure(e) });
     } finally {
       setSaving(false);
     }
@@ -428,6 +435,7 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
       setDiffMode(true);
     } catch (e) {
       setError(getErrorMessage(e, '비교에 실패했습니다. 잠시 후 다시 시도해 주세요.'));
+      onApprovalOutcome?.({ success: false, reason: describeApprovalFailure(e) });
     } finally {
       setSaving(false);
     }
@@ -444,8 +452,10 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
       const res = await reconcileBom({ styleNo, actions });
       setApplied(res);
       onRefresh();
+      onApprovalOutcome?.({ success: true });
     } catch (e) {
       setError(getErrorMessage(e, '적용에 실패했습니다. 잠시 후 다시 시도해 주세요.'));
+      onApprovalOutcome?.({ success: false, reason: describeApprovalFailure(e) });
     } finally {
       setApplying(false);
     }

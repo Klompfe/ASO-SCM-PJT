@@ -17,6 +17,9 @@ export const REAPPROVE_NOTICE_POINTS: readonly string[] = [
 export const BADGE_PENDING = '확인 대기';
 export const BADGE_ALREADY_REGISTERED = '이미 등록됨';
 export const BADGE_PARSE_FAILED = '파싱 실패';
+// PR-237: 승인(일괄/개별)이 실패한 스타일은 목록에서 사라지지 않고 이 배지 + 이유를
+// 보여준다(사라져서 원본을 다시 올려야 했던 문제를 막는다).
+export const BADGE_APPROVAL_FAILED = '승인 실패';
 
 interface StyleLike {
   styleNo?: string | null;
@@ -29,4 +32,20 @@ interface StyleLike {
 // 목록에서 한 줄씩 열어 내용을 확인한 뒤 개별로 재승인하게 한다.
 export function selectBulkApproveTargets<T extends StyleLike>(styles: T[], existsMap: Record<string, boolean>): (T & { styleNo: string })[] {
   return styles.filter((s): s is T & { styleNo: string } => !!s.styleNo && !s.parseError && !existsMap[s.styleNo]);
+}
+
+interface StyleLikeWithSheet extends StyleLike {
+  sheetName: string;
+}
+
+// PR-237: "실패한 스타일만 다시 일괄 승인" — 이전에 승인 실패로 기록된(failuresBySheet에
+// 있는) 스타일만 골라, 기존 일괄승인 자격(selectBulkApproveTargets)으로 다시 거른다 —
+// 그 사이 다른 경로로 이미 등록된 스타일은 자동으로 제외된다(재승인은 개별로).
+export function selectFailedOnlyTargets<T extends StyleLikeWithSheet>(
+  styles: T[],
+  existsMap: Record<string, boolean>,
+  failuresBySheet: Record<string, unknown>,
+): (T & { styleNo: string })[] {
+  const failedOnly = styles.filter((s) => !!failuresBySheet[s.sheetName]);
+  return selectBulkApproveTargets(failedOnly, existsMap);
 }
