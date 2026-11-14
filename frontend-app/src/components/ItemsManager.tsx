@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { getAllItems, getItems, createItem, updateItem, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
+import { getAllItems, getItems, createItem, updateItem, getItemUsage, type GetItemsFilter, type CreateItem, type Item } from '../api/items.service';
 import { getMasterStyles, getStyleColorSizeQuantities, type MasterStyle } from '../api/styles.service';
-import { getBomByStyleNo, updateBomItem, deleteBomItem, swapBomItemMaterial, addBomLabelSet, type BomDetail, type BomItemRow, type ThreadType, type TapeType } from '../api/boms.service';
+import { getBomByStyleNo, updateBomItem, deleteBomItem, swapBomItemMaterial, renameBomItemMaterial, addBomLabelSet, type BomDetail, type BomItemRow, type ThreadType, type TapeType } from '../api/boms.service';
+import { getSuppliers } from '../api/suppliers.service';
+import { buildMasterRenameConfirmMessage, isNameChanged } from '../utils/materialRename';
 import { SearchSelectField } from './SearchSelectField';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
@@ -127,6 +129,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
   // PR-186: 실/테이프 종류(선택) — 규칙 테이블(material_packaging_unit_rules)에 없는 값은
   // 저장할 수 없으므로(백엔드 400) 드롭다운 선택지도 같은 테이블에서 가져온다.
   const [packagingRules, setPackagingRules] = useState<MaterialPackagingUnitRule[]>([]);
+  // PR-241: BOM 행 공급업체 입력을 자유 입력이 아니라 공급업체 마스터에서 고르게 한다.
+  const [suppliers, setSuppliers] = useState<{ id: number; name: string }[]>([]);
   const [editMaterialSubType, setEditMaterialSubType] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   // PR-117: 카탈로그 보고서 — 열려 있는 동안 현재 검색조건(filter.type/keyword)에 맞는 전체 품목을 불러온다.
@@ -148,7 +152,12 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
   // PR-239: manualRequiredQtyMode — 포장 규칙이 있는 행은 이 입력을 "길이(M 등)"로 볼지
   // "포장 수(콘/롤)"로 볼지 사람이 고른다(기본은 포장 규칙이 있으면 포장 수). 사용자가
   // 46(콘 의도)을 그냥 길이로 저장해 1콘이 되어 버리던 사고(배경 참고)를 막는다.
-  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string; unit: string; manualRequiredQty: string; manualRequiredQtyNote: string; manualRequiredQtyMode: ManualQtyInputMode }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '', manualRequiredQtyMode: 'length' });
+  // PR-241: materialName(이 행만 자재명 변경)·supplier/unitPrice(이 행만 공급업체/단가)도
+  // 같은 수정 모드에 둔다. materialName은 저장 시 바뀌어 있으면 별도 API(renameBomItemMaterial)
+  // 를 먼저 호출한다(일반 필드 PATCH와는 다른 안전장치가 있는 요청이라 분리).
+  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string; unit: string; manualRequiredQty: string; manualRequiredQtyNote: string; manualRequiredQtyMode: ManualQtyInputMode; materialName: string; supplier: string; unitPrice: string }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '', manualRequiredQtyMode: 'length', materialName: '', supplier: '', unitPrice: '' });
+  // PR-241: 자재마스터 이름 변경(모든 스타일 적용) 처리 중 — 중복 클릭 방지.
+  const [renamingMasterId, setRenamingMasterId] = useState<number | null>(null);
   // PR-099: "라벨류 기본 세트 추가" 버튼 처리 중 표시.
   const [addingLabelSet, setAddingLabelSet] = useState(false);
   // PR-197: BOM 행 삭제/자재 교체 — 사람이 버튼을 눌러야만 동작(자동 정리 없음).
@@ -315,6 +324,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
   useEffect(() => {
     getMaterialCategories().then((res) => setMaterialCategories(Array.isArray(res) ? res : (res?.data ?? []))).catch(() => setMaterialCategories([]));
     getMaterialPackagingUnitRules().then((res) => setPackagingRules(Array.isArray(res) ? res : (res?.data ?? []))).catch(() => setPackagingRules([]));
+    getSuppliers().then((res) => setSuppliers(Array.isArray(res) ? res : (res?.data ?? []))).catch(() => setSuppliers([]));
     loadItems();
   }, [loadItems]);
 
@@ -388,7 +398,26 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
     setEditMaterialSubType('');
   };
 
+  // PR-241: "품목 마스터 관리" 화면의 수정도 BOM 행의 "자재마스터 이름 변경"과 같은
+  // 안전장치(사용 현황 확인)를 쓴다(사용자 보고: 품목으로 들어와도 자재명 수정이 안 된
+  // 것처럼 보였던 문제 — 실제로는 이름 자체는 저장됐지만 영향 범위 안내가 전혀 없었다).
   const handleUpdateItem = async (id: number) => {
+    const original = items.find((i) => i.id === id);
+    const nameChanged = original != null && isNameChanged(original.name, editItemForm.name);
+    if (nameChanged) {
+      if (!editItemForm.name.trim()) {
+        toast.error('품목명을 입력해 주세요.');
+        return;
+      }
+      try {
+        const usage = await getItemUsage(id);
+        const ok = window.confirm(buildMasterRenameConfirmMessage(usage));
+        if (!ok) return;
+      } catch (err: any) {
+        toast.error(getErrorMessage(err, '사용 현황 조회에 실패했습니다.'));
+        return;
+      }
+    }
     try {
       await updateItem(id, {
         name: editItemForm.name,
@@ -435,6 +464,9 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
       manualRequiredQty: manualDisplay,
       manualRequiredQtyNote: row.manualRequiredQtyNote || '',
       manualRequiredQtyMode: mode,
+      materialName: row.material?.name || '',
+      supplier: row.supplier || '',
+      unitPrice: row.unitPrice ? String(row.unitPrice) : '',
     });
   };
 
@@ -535,7 +567,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
 
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
-    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '', manualRequiredQtyMode: 'length' });
+    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '', manualRequiredQtyMode: 'length', materialName: '', supplier: '', unitPrice: '' });
   };
 
   const handleUpdateBomItem = async (id: number) => {
@@ -600,7 +632,32 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
         }
       }
     }
+    // PR-241: 단가는 0 이상의 숫자(또는 비움=없음) — PR-240 규칙과 동일.
+    const unitPriceInput = editBomItemForm.unitPrice.trim();
+    const newUnitPrice = unitPriceInput === '' ? 0 : Number(unitPriceInput);
+    if (unitPriceInput !== '' && (!Number.isFinite(newUnitPrice) || newUnitPrice < 0)) {
+      toast.error('단가는 0 이상의 숫자여야 합니다.');
+      return;
+    }
+    // PR-241: "이 행만" 자재명 변경 — 이름이 실제로 바뀌었을 때만 별도 API를 먼저
+    // 호출한다(일반 필드 PATCH와 달리 서버가 기존/신규 자재 연결을 판단하고, 단위
+    // 불일치·연결된 발주·중복 행을 거부할 수 있다). 이름이 바뀌면 단위는 더 이상
+    // "이 행이 가리키던 자재"의 단위가 아니므로, 같은 저장에서 단위 변경은 건너뛴다.
+    const newMaterialName = editBomItemForm.materialName.trim();
+    const nameChanged = original?.material != null && isNameChanged(original.material.name, newMaterialName);
+    if (nameChanged && !newMaterialName) {
+      toast.error('자재명을 입력해 주세요.');
+      return;
+    }
     try {
+      if (nameChanged) {
+        const renameRes = await renameBomItemMaterial(id, newMaterialName);
+        toast.success(
+          renameRes.resultKind === 'linkedExisting'
+            ? `기존 자재 '${renameRes.materialName}'에 연결됨`
+            : `새 자재로 등록됨('${renameRes.materialName}')`,
+        );
+      }
       await updateBomItem(id, {
         composition: editBomItemForm.composition,
         hsCode: editBomItemForm.hsCode,
@@ -611,8 +668,11 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
         category: editBomItemForm.category,
         manualRequiredQty: manualQty,
         manualRequiredQtyNote: manualNote,
+        // PR-241: 이 행만의 공급업체/단가 — 빈 값은 "미정"으로 해제.
+        supplier: editBomItemForm.supplier || null,
+        unitPrice: newUnitPrice,
       });
-      if (unitChanged && original?.material) {
+      if (unitChanged && !nameChanged && original?.material) {
         await updateItem(original.material.id, { unit: newUnit });
       }
       toast.success('자재명세 항목이 수정되었습니다.');
@@ -620,12 +680,48 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
       if (selectedStyleNo) {
         // PR-227: 단위가 바뀌면 포장단위 환산 경고("단위 확인 필요")·N롤/N콘 표시가
         // material.unit을 다시 읽어야 갱신된다 — BOM을 다시 불러오면 자동으로 반영된다
-        // (PurchaseOrdersManager의 styleMaterialRows 캐시 갱신과 같은 패턴).
+        // (PurchaseOrdersManager의 styleMaterialRows 캐시 갱신과 같은 패턴). PR-241:
+        // 자재명/공급업체/단가도 같은 재조회로 새로고침 없이 반영된다(새 캐시 계층이
+        // 없으므로 무효화할 대상도 없음).
         const res = await getBomByStyleNo(selectedStyleNo);
         setBom(res);
       }
     } catch (err: any) {
       toast.error(getErrorMessage(err, '자재명세 항목 수정에 실패했습니다.'));
+    }
+  };
+
+  // PR-241: 자재마스터 이름 변경(모든 스타일 적용) — GET /items/:id/usage로 영향
+  // 범위를 먼저 보여주고 확인받는다(사용자 결정: "이 이름이 바뀌면 스타일 N개·BOM
+  // 행 M개에 적용됩니다..."). 취소하면 아무것도 바뀌지 않는다. "품목 마스터 관리"
+  // 화면의 수정에서도 이 함수를 그대로 쓴다(사용자 보고: 품목으로 들어와도 자재명
+  // 수정이 안 됐던 문제 — 같은 경로로 통일).
+  const handleRenameMasterMaterial = async (materialId: number, currentName: string, newNameRaw: string, onDone?: () => void) => {
+    const trimmed = newNameRaw.trim();
+    if (!trimmed) {
+      toast.error('자재명을 입력해 주세요.');
+      return;
+    }
+    if (!isNameChanged(currentName, trimmed)) {
+      onDone?.();
+      return;
+    }
+    setRenamingMasterId(materialId);
+    try {
+      const usage = await getItemUsage(materialId);
+      const ok = window.confirm(buildMasterRenameConfirmMessage(usage));
+      if (!ok) return;
+      await updateItem(materialId, { name: trimmed });
+      toast.success('자재마스터 이름이 변경되었습니다(모든 스타일에 적용).');
+      if (selectedStyleNo) {
+        const res = await getBomByStyleNo(selectedStyleNo);
+        setBom(res);
+      }
+      onDone?.();
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, '자재마스터 이름 변경에 실패했습니다.'));
+    } finally {
+      setRenamingMasterId(null);
     }
   };
 
@@ -1287,7 +1383,28 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
                       <tr key={it.id} className="bg-yellow-50">
                         {onBulkOrderItems && <td className="px-4 py-2" />}
                         <td className="px-4 py-2 font-mono">{it.material?.code}</td>
-                        <td className="px-4 py-2 whitespace-pre-line">{it.material?.name}</td>
+                        <td className="px-4 py-2">
+                          {/* PR-241: A. "이 행만" 자재명 변경 — "저장"을 누르면 바뀐 이름으로
+                              renameBomItemMaterial이 기존 자재에 연결하거나 새 자재를 만든다.
+                              B. "자재마스터 이름 변경" 버튼은 같은 입력값을 모든 스타일에 적용한다
+                              (사용 현황 확인 후). */}
+                          <input
+                            className="border rounded px-2 py-1 w-32"
+                            aria-label="자재명(이 행만 변경)"
+                            value={editBomItemForm.materialName}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, materialName: e.target.value })}
+                          />
+                          {it.material && (
+                            <button
+                              type="button"
+                              className="block text-xs text-indigo-600 underline mt-0.5 disabled:opacity-50"
+                              disabled={renamingMasterId === it.material.id}
+                              onClick={() => handleRenameMasterMaterial(it.material!.id, it.material!.name, editBomItemForm.materialName)}
+                            >
+                              {renamingMasterId === it.material.id ? '변경 중...' : '자재마스터 이름 변경(모든 스타일 적용)'}
+                            </button>
+                          )}
+                        </td>
                         <td className="px-4 py-2">
                           <input
                             className="border rounded px-2 py-1 w-24"
@@ -1407,8 +1524,33 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
                             );
                           })()}
                         </td>
-                        <td className="px-4 py-2">{it.supplier}</td>
-                        <td className="px-4 py-2 text-right">{it.unitPrice}</td>
+                        {/* PR-241: C. 이 행만의 공급업체(마스터에서 선택, 자유 입력 금지)·단가. */}
+                        <td className="px-4 py-2">
+                          <select
+                            className="border rounded px-2 py-1 w-28"
+                            aria-label="공급업체(이 행만)"
+                            value={editBomItemForm.supplier}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, supplier: e.target.value })}
+                          >
+                            <option value="">미정</option>
+                            {suppliers.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                            {/* 기존에 마스터에 없는 값(과거 엑셀에서 들어온 자유 텍스트)은 읽기 표시만. */}
+                            {editBomItemForm.supplier && !suppliers.some((s) => s.name === editBomItemForm.supplier) && (
+                              <option value={editBomItemForm.supplier}>{editBomItemForm.supplier}(마스터에 없음)</option>
+                            )}
+                          </select>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            className="border rounded px-2 py-1 w-24 text-right"
+                            aria-label="단가(이 행만)"
+                            value={editBomItemForm.unitPrice}
+                            onChange={(e) => setEditBomItemForm({ ...editBomItemForm, unitPrice: e.target.value })}
+                          />
+                        </td>
                         <td className="px-4 py-2">{it.remarks}</td>
                         <td className="px-4 py-2">
                           <input

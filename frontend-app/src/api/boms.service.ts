@@ -60,6 +60,10 @@ export interface UpdateBomItem {
   // PR-231: 필요수량 직접 지정 — null을 보내면 수동 지정을 해제한다(계산값 사용).
   manualRequiredQty?: number | null;
   manualRequiredQtyNote?: string | null;
+  // PR-241: 이 행만의 공급업체/단가 — 자재마스터·다른 스타일에는 영향 없다.
+  // 빈 문자열/null은 "미정"으로 해제.
+  supplier?: string | null;
+  unitPrice?: number;
 }
 
 // PR-197: updateBomItem() 응답에 변경 전 값(before)이 함께 온다 — "요척 2.7 → 2.9" 같은
@@ -96,6 +100,16 @@ export const deleteBomItem = (id: number): Promise<DeleteBomItemResult> =>
 // PR-197: 이 BOM 행이 가리키는 자재를 이미 등록된 다른 자재로 교체(이름 오인식 교정용).
 export const swapBomItemMaterial = (id: number, materialId: number): Promise<BomItemRow> =>
   apiClient.patch(`/boms/items/${id}/material`, { materialId });
+
+// PR-241: "이 행만" 자재명 변경 — 서버가 기존 자재에 연결하거나 새 자재를 만든다.
+export interface RenameBomItemMaterialResult {
+  bomItem: BomItemRow;
+  resultKind: 'linkedExisting' | 'createdNew';
+  materialId: number;
+  materialName: string;
+}
+export const renameBomItemMaterial = (id: number, name: string): Promise<RenameBomItemMaterialResult> =>
+  apiClient.patch(`/boms/items/${id}/material-name`, { name });
 
 export interface AddLabelSetResult {
   bom: BomDetail;

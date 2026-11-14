@@ -77,3 +77,23 @@ describe('pickPricePrefill (PR-240)', () => {
     expect(pickPricePrefill({ bomUnitPrice: 1000, recentOrderUnitPrice: null, packagingApplies: true })).toBeNull();
   });
 });
+
+// PR-241 C: BOM 행 수정에서 공급업체/단가를 저장하면, 이 PR이 전혀 건드리지 않은 PR-240
+// 미리 채움(발주하기/일괄 발주)이 그 "수정된 값"을 그대로 1순위로 읽는지 확인한다 —
+// PurchaseOrdersManager.tsx/BomBulkOrderPanel.tsx는 매번 getBomByStyleNo로 새로 받아온
+// BOM 행을 그대로 pickSupplierPrefill/pickPricePrefill에 넘기므로, 새 캐시 계층이 없어
+// "저장한 값이 곧 다음 조회의 BOM 공급사/확정 단가"가 된다(새로고침 없이 반영).
+describe('PR-241 C 저장값을 PR-240 미리 채움이 그대로 읽는다', () => {
+  it('BOM 행 수정에서 방금 저장한 공급업체가 최근 발주 이력보다 우선 적용된다', () => {
+    const justEditedBomSupplier = findExactSupplierMatch('합성공급사A', [SUP_A, SUP_B]);
+    const recentOrderSupplier = SUP_B; // 이력상으로는 B가 최근이었더라도
+    const result = pickSupplierPrefill({ bom: justEditedBomSupplier, vendor: null, recentOrder: recentOrderSupplier });
+    expect(result).toEqual({ supplier: SUP_A, source: 'bom' });
+  });
+
+  it('BOM 행 수정에서 방금 저장한 단가(포장 환산 없는 일반 행)가 최근 발주 단가보다 우선 적용된다', () => {
+    const justEditedBomUnitPrice = 9999;
+    const result = pickPricePrefill({ bomUnitPrice: justEditedBomUnitPrice, recentOrderUnitPrice: 1, packagingApplies: false });
+    expect(result).toEqual({ unitPrice: 9999, source: 'bom' });
+  });
+});

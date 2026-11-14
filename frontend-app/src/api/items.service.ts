@@ -60,6 +60,14 @@ export const getAllItems = async (filter: { type?: string; keyword?: string }): 
   return all;
 };
 export const getItem = (id: number): Promise<Item> => apiClient.get(`/items/${id}`);
+
+// PR-241: 자재마스터 이름 변경 전 영향 범위(스타일 수·BOM 행 수·발주 연결 건수) 확인용.
+export interface ItemUsage {
+  styleCount: number;
+  bomItemCount: number;
+  orderCount: number;
+}
+export const getItemUsage = (id: number): Promise<ItemUsage> => apiClient.get(`/items/${id}/usage`);
 export const createItem = (data: CreateItem): Promise<any> => apiClient.post('/items', data);
 export const updateItem = (id: number, data: UpdateItem): Promise<any> => apiClient.patch(`/items/${id}`, data);
 export const uploadPreview = (file: File): Promise<any> => {
