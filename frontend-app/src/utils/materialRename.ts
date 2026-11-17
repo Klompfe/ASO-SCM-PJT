@@ -9,7 +9,8 @@ export interface ItemUsage {
 export function buildMasterRenameConfirmMessage(usage: ItemUsage): string {
   return (
     `이 이름이 바뀌면 스타일 ${usage.styleCount}개·BOM 행 ${usage.bomItemCount}개에 적용됩니다. ` +
-    `발주/입고/선적 ${usage.orderCount}건이 연결돼 있습니다(품목 id로 연결돼 있어 이름이 따라 바뀝니다). ` +
+    `발주/입고 ${usage.orderCount}건이 연결돼 있습니다. 이름은 품목 id로 연결돼 있어 따라 바뀝니다. ` +
+    `이미 확정·내보낸 선적서류의 설명 문구는 바뀌지 않습니다. ` +
     `계속할까요?`
   );
 }

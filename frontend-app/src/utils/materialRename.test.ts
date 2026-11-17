@@ -6,14 +6,20 @@ describe('buildMasterRenameConfirmMessage (PR-241)', () => {
     const msg = buildMasterRenameConfirmMessage({ styleCount: 3, bomItemCount: 5, orderCount: 2 });
     expect(msg).toContain('스타일 3개');
     expect(msg).toContain('BOM 행 5개');
-    expect(msg).toContain('발주/입고/선적 2건');
-    expect(msg).toContain('품목 id로 연결돼 있어 이름이 따라 바뀝니다');
+    expect(msg).toContain('발주/입고 2건');
+    expect(msg).toContain('품목 id로 연결돼 있어 따라 바뀝니다');
   });
 
   it('연결된 것이 전혀 없으면(0건) 그 사실 그대로 보여준다', () => {
     const msg = buildMasterRenameConfirmMessage({ styleCount: 0, bomItemCount: 0, orderCount: 0 });
     expect(msg).toContain('스타일 0개');
-    expect(msg).toContain('발주/입고/선적 0건');
+    expect(msg).toContain('발주/입고 0건');
+  });
+
+  it('이미 확정·내보낸 선적서류의 설명 문구는 바뀌지 않는다는 점을 알려준다(선적을 센다고 오해하지 않도록)', () => {
+    const msg = buildMasterRenameConfirmMessage({ styleCount: 1, bomItemCount: 1, orderCount: 1 });
+    expect(msg).toContain('이미 확정·내보낸 선적서류의 설명 문구는 바뀌지 않습니다');
+    expect(msg).not.toContain('선적 1건');
   });
 });
 

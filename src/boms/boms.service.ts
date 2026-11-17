@@ -272,13 +272,20 @@ export class BomsService {
 
     // (c) 발주·입고(같은 PurchaseOrder의 상태 전이)·선적(발주를 거쳐 연결)이 있으면
     // "이 행만 변경"은 거부한다 — deleteItem과 같은 기준(이 스타일 + 이 자재 + 취소 제외).
+    // MERGE-45 Gate A ②: 이 쿼리는 PurchaseOrder만 직접 본다 — 입고는 같은 PurchaseOrder의
+    // 상태 전이(RECEIVED)라 그대로 포함되고, 선적 중 발주서를 거쳐 만들어진(GENERATED)
+    // 문서는 PackingReceipt→PurchaseOrder로 연결돼 있어 이 발주 건수에 간접 포함된다.
+    // 반면 기존 엑셀을 그대로 가져온(IMPORTED) 선적 문서는 품목 id 연결이 전혀 없는
+    // 자유 텍스트라(ExportShipmentLine, PR-080) 이 쿼리로도, 다른 어떤 id 기반 쿼리로도
+    // 검사할 수 없다 — 이름 변경으로 깨질 데이터가 없으므로(참조 자체가 없음) 범위
+    // 밖으로 둔다. 문구가 "선적도 직접 검사한다"로 읽히지 않게 발주 기준으로만 쓴다.
     const styleNo = bomItem.bom?.style?.styleNo;
     if (styleNo) {
       const linkedCount = await this.purchaseOrderRepository.count({
         where: { styleNo, itemId: currentMaterial.id, status: Not(PurchaseOrderStatus.CANCELLED) },
       });
       if (linkedCount > 0) {
-        throw new BadRequestException('발주/입고/선적이 연결된 행입니다. 자재마스터 이름 변경(모든 스타일 적용)을 사용하세요.');
+        throw new BadRequestException('이 자재로 만든 발주가 있는 행입니다(발주를 통해 입고·선적도 연결됩니다). 자재마스터 이름 변경(모든 스타일 적용)을 사용하세요.');
       }
     }
 
