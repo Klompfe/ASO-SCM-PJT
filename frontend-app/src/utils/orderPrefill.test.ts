@@ -4,6 +4,9 @@ import {
   findExactSupplierMatch,
   pickSupplierPrefill,
   pickPricePrefill,
+  describeBomSupplierMismatch,
+  bomSupplierMismatchShortLabel,
+  bomSupplierMismatchNotice,
   type SupplierRefLike,
 } from './orderPrefill';
 
@@ -95,5 +98,49 @@ describe('PR-241 C 저장값을 PR-240 미리 채움이 그대로 읽는다', ()
     const justEditedBomUnitPrice = 9999;
     const result = pickPricePrefill({ bomUnitPrice: justEditedBomUnitPrice, recentOrderUnitPrice: 1, packagingApplies: false });
     expect(result).toEqual({ unitPrice: 9999, source: 'bom' });
+  });
+});
+
+// PR-242: BOM 공급사가 마스터에 없을 때 조용히 비던 것 — 이유를 구분해서 보여준다(채움
+// 결과는 그대로, 이유만 추가). 매칭 자체는 findExactSupplierMatch(정확 일치 + 정규화)가
+// 이미 하므로, 여기서는 "왜 안 됐는지"만 합성 데이터로 검증한다.
+describe('describeBomSupplierMismatch (PR-242)', () => {
+  it('매칭된 경우(bomMatch 있음) 사유가 없다', () => {
+    expect(describeBomSupplierMismatch('합성공급사A', SUP_A)).toBeNull();
+  });
+
+  it('BOM 공급사가 비어 있으면 bomSupplierEmpty', () => {
+    expect(describeBomSupplierMismatch('', null)).toEqual({ reason: 'bomSupplierEmpty', rawName: null });
+    expect(describeBomSupplierMismatch(null, null)).toEqual({ reason: 'bomSupplierEmpty', rawName: null });
+    expect(describeBomSupplierMismatch('   ', null)).toEqual({ reason: 'bomSupplierEmpty', rawName: null });
+  });
+
+  it('"미정"/"N/A"면 bomSupplierPlaceholder', () => {
+    expect(describeBomSupplierMismatch('미정', null)).toEqual({ reason: 'bomSupplierPlaceholder', rawName: '미정' });
+    expect(describeBomSupplierMismatch('N/A', null)).toEqual({ reason: 'bomSupplierPlaceholder', rawName: 'N/A' });
+  });
+
+  it('실제 이름인데 매칭되지 않으면(마스터 미등록) bomSupplierNotInMaster — 원문 이름을 그대로 담는다', () => {
+    expect(describeBomSupplierMismatch('본사', null)).toEqual({ reason: 'bomSupplierNotInMaster', rawName: '본사' });
+  });
+
+  it('부분 일치(약어 등)로 실제로는 매칭되지 않은 경우도 호출하는 쪽이 넘긴 bomMatch=null을 그대로 따른다(여기서 추가 매칭을 하지 않음)', () => {
+    expect(describeBomSupplierMismatch('합성공급사', null)).toEqual({ reason: 'bomSupplierNotInMaster', rawName: '합성공급사' });
+  });
+});
+
+describe('bomSupplierMismatchShortLabel / bomSupplierMismatchNotice (PR-242)', () => {
+  it('마스터에 없는 경우 — 짧은 라벨과 전체 안내 문구 모두 원문 이름을 담는다', () => {
+    const m = { reason: 'bomSupplierNotInMaster' as const, rawName: '본사' };
+    expect(bomSupplierMismatchShortLabel(m)).toBe('마스터에 없음: 본사');
+    expect(bomSupplierMismatchNotice(m)).toContain("'본사'");
+    expect(bomSupplierMismatchNotice(m)).toContain('공급업체 마스터에 없습니다');
+  });
+
+  it('비어 있음/미정은 짧은 라벨만 있고, 전체 안내 문구는 없다(소음 방지 — 조치할 게 없음)', () => {
+    expect(bomSupplierMismatchShortLabel({ reason: 'bomSupplierEmpty', rawName: null })).toBe('BOM 공급사 비어 있음');
+    expect(bomSupplierMismatchShortLabel({ reason: 'bomSupplierPlaceholder', rawName: '미정' })).toBe('미정');
+    expect(bomSupplierMismatchNotice({ reason: 'bomSupplierEmpty', rawName: null })).toBeNull();
+    expect(bomSupplierMismatchNotice({ reason: 'bomSupplierPlaceholder', rawName: '미정' })).toBeNull();
   });
 });

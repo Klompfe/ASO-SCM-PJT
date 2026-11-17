@@ -38,14 +38,18 @@ import { SupplierQuickCreateModal } from './SupplierQuickCreateModal';
 import { categoryFilterState, supplierSearchCategoryId } from '../utils/materialCategories';
 import { PriceReferenceBlock, type PriceReferenceValue } from './PriceReferenceBlock';
 import { getBomByStyleNo, type BomItemRow } from '../api/boms.service';
+import { buildSuppliersMasterUrl } from '../utils/bomBulkOrderNav';
 import {
   findExactSupplierMatch,
   pickSupplierPrefill,
   pickPricePrefill,
+  describeBomSupplierMismatch,
+  bomSupplierMismatchNotice,
   SUPPLIER_SOURCE_LABEL,
   PRICE_SOURCE_LABEL,
   type SupplierPrefillSource,
   type PricePrefillSource,
+  type BomSupplierMismatch,
 } from '../utils/orderPrefill';
 
 interface ItemRef { id: number; name: string; code: string; categoryId?: number | null; unit?: string | null }
@@ -120,6 +124,11 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // 없으면 직접 입력이라는 뜻 — 별도 boolean을 두지 않는다).
   const [supplierSource, setSupplierSource] = useState<SupplierPrefillSource | null>(null);
   const [priceSource, setPriceSource] = useState<PricePrefillSource | null>(null);
+  // PR-242: BOM 공급사가 공급업체 마스터에 없는 이유(매칭됐으면 null) — 다른 후보(품목
+  // 마스터·최근 발주)로 채워진 경우에도 이유는 그대로 보여준다. "다시 확인"/탭 포커스
+  // 복귀로 재매칭할 때 쓸 원문도 함께 기억해 둔다.
+  const [bomSupplierMismatch, setBomSupplierMismatch] = useState<BomSupplierMismatch | null>(null);
+  const lastBomPrefillOptsRef = useRef<{ bomSupplierName?: string | null; itemVendorName?: string | null; bomUnitPrice?: number | null } | null>(null);
   // PR-180: 발주 구분 — 품목을 고르면 스타일 계약방식 제안을 미리 채우되, 사람이 바꾸거나 직접 고른다.
   const [orderType, setOrderType] = useState<PurchaseOrderType | null>(null);
   const [orderTypeHint, setOrderTypeHint] = useState<string | null>(null);
@@ -275,6 +284,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     setTempSubtype(null);
     setSupplierSource(null);
     setPriceSource(null);
+    setBomSupplierMismatch(null);
+    lastBomPrefillOptsRef.current = null;
     if (opts?.quantityInput !== undefined) setQuantityInput(opts.quantityInput);
     if (!picked) {
       setOrderType(null);
@@ -302,6 +313,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
           resolveSupplierByName(opts?.itemVendorName),
         ]);
         if (seq !== itemRequestSeq.current) return;
+        lastBomPrefillOptsRef.current = opts ?? null;
+        setBomSupplierMismatch(describeBomSupplierMismatch(opts?.bomSupplierName, bomMatch));
         const supplierPick = pickSupplierPrefill({ bom: bomMatch, vendor: vendorMatch, recentOrder: latest?.supplier ?? null });
         const pricePick = pickPricePrefill({
           bomUnitPrice: opts?.bomUnitPrice ?? null,
@@ -350,6 +363,28 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       // 조회 실패해도 발주 자체는 막지 않는다 — 추천 영역만 "직접 선택"으로 남는다.
     }
   }, []);
+
+  // PR-242: 공급업체를 마스터에 등록한 뒤 이 탭으로 돌아오면(포커스 복귀 또는 "다시
+  // 확인") BOM 공급사 이름을 다시 매칭한다 — 아직 아무 공급업체도 고르지 않은 경우에만
+  // 채운다(이미 뭐든 선택/입력돼 있으면 절대 덮어쓰지 않는다).
+  const recheckBomSupplier = useCallback(async () => {
+    const opts = lastBomPrefillOptsRef.current;
+    if (!opts || formValuesRef.current.supplier) return;
+    const bomMatch = await resolveSupplierByName(opts.bomSupplierName);
+    setBomSupplierMismatch(describeBomSupplierMismatch(opts.bomSupplierName, bomMatch));
+    if (!bomMatch) return;
+    const vendorMatch = await resolveSupplierByName(opts.itemVendorName);
+    const supplierPick = pickSupplierPrefill({ bom: bomMatch, vendor: vendorMatch, recentOrder: null });
+    if (formValuesRef.current.supplier) return; // 그 사이 사람이 직접 골랐으면 덮어쓰지 않는다
+    setSupplier(supplierPick?.supplier ?? null);
+    setSupplierSource(supplierPick?.source ?? null);
+  }, []);
+
+  useEffect(() => {
+    const onFocus = () => { void recheckBomSupplier(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [recheckBomSupplier]);
 
   // 스타일 연결 트랙에서 BOM 자재를 고르면: 품목 선택(기존 로직)에 더해 수량을
   // 부족분(콘/롤 환산 포함, suggestStyleLinkedQuantity)으로 미리 채운다.
@@ -739,7 +774,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             <div className="flex items-stretch gap-1">
               <SearchSelectField<SupplierRef>
                 value={supplier}
-                onChange={(picked) => { setSupplier(picked); setAutofilled(false); setSupplierSource(null); }}
+                onChange={(picked) => { setSupplier(picked); setAutofilled(false); setSupplierSource(null); setBomSupplierMismatch(null); }}
                 search={searchFormSuppliers}
                 getKey={(x) => x.id}
                 getLabel={(x) => `${x.name} (${x.code})`}
@@ -763,6 +798,24 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               <span className="text-xs text-gray-400 mt-0.5" data-testid="supplier-source">
                 {supplierSource ? SUPPLIER_SOURCE_LABEL[supplierSource] : '직접 입력'}
               </span>
+            )}
+            {/* PR-242: BOM 공급사가 있는데 왜 비었는지(또는 다른 후보로 채워졌는지) 조용히
+                넘어가지 않는다 — 마스터에 없는 경우에만 안내한다(비어 있음/미정은 조치할
+                게 없어 소음이라 안내하지 않음). */}
+            {bomSupplierMismatch && bomSupplierMismatchNotice(bomSupplierMismatch) && (
+              <p className="text-xs text-amber-700 mt-0.5" data-testid="bom-supplier-mismatch-notice">
+                {bomSupplierMismatchNotice(bomSupplierMismatch)}{' '}
+                <a
+                  href={buildSuppliersMasterUrl(window.location.pathname)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  공급업체 마스터 열기
+                </a>
+                {' · '}
+                <button type="button" className="underline" onClick={() => void recheckBomSupplier()}>다시 확인</button>
+              </p>
             )}
             {categoryFilter.visible && (
               <label className="flex items-center gap-1 text-xs text-gray-600 mt-1">
@@ -1131,6 +1184,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
             // 사람이 방금 등록/선택한 값이므로 false로 둔다(기존 수동 선택과 동일하게 취급).
             setSupplier({ id: created.id, code: created.code, name: created.name });
             setAutofilled(false);
+            setBomSupplierMismatch(null);
           }}
           onClose={() => setShowQuickCreateSupplier(false)}
         />

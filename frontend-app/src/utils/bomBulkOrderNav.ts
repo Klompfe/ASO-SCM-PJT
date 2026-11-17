@@ -22,6 +22,16 @@ export function buildBulkOrderUrl(pathname: string, styleNo: string, bomItemIds:
   return `${pathname}?${params.toString()}`;
 }
 
+// PR-242: "공급업체 마스터 열기" 링크 — BOM 공급사가 마스터에 없을 때 등록하러 가는
+// 길. 같은 view 파라미터 패턴을 재사용하되 값만 'suppliers'로 — 업무 데이터는 싣지 않는다.
+export const SUPPLIERS_MASTER_VIEW_VALUE = 'suppliers';
+
+export function buildSuppliersMasterUrl(pathname: string): string {
+  const params = new URLSearchParams();
+  params.set(BOM_ORDER_VIEW_PARAM, SUPPLIERS_MASTER_VIEW_VALUE);
+  return `${pathname}?${params.toString()}`;
+}
+
 export interface SingleOrderPrefill {
   kind: 'single';
   itemId: number;

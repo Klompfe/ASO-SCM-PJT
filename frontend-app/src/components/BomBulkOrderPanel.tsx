@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { getMasterStyles, getStyleColorSizeQuantities } from '../api/styles.service';
 import { getBomByStyleNo, type BomItemRow } from '../api/boms.service';
@@ -16,10 +16,13 @@ import { getErrorMessage } from '../utils/errorMessage';
 import { buildColorQtyMap, resolveAppliedQuantity } from '../utils/appliedQuantity';
 import { formatBomItemQty } from '../utils/materialRequirementDisplay';
 import { pickLatestOrderDefaults } from '../utils/purchaseOrderForm';
+import { buildSuppliersMasterUrl } from '../utils/bomBulkOrderNav';
 import {
   findExactSupplierMatch,
   pickSupplierPrefill,
   pickPricePrefill,
+  describeBomSupplierMismatch,
+  bomSupplierMismatchShortLabel,
   SUPPLIER_SOURCE_LABEL,
   PRICE_SOURCE_LABEL,
 } from '../utils/orderPrefill';
@@ -29,9 +32,12 @@ import {
   canCreateBulkOrders,
   summarizeBulkOrders,
   createOrdersBySupplier,
+  recheckSupplierMatches,
+  collectNotInMasterSupplierNames,
   type BulkOrderRowInput,
   type BulkOrderRowDraft,
   type BulkOrderType,
+  type SupplierRecheckUpdate,
 } from '../utils/bomBulkOrderGrouping';
 
 interface BomBulkOrderPanelProps {
@@ -63,6 +69,17 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState<SupplierResult[] | null>(null);
   const [documents, setDocuments] = useState<CombinedPurchaseOrderDocument[]>([]);
+  // PR-242: 사람이 "공급사 미지정" 표에서 직접 고른 행은 "다시 확인"/탭 포커스 복귀로
+  // 공급업체 목록을 재조회해도 절대 덮어쓰지 않는다(recheckSupplierMatches와 짝).
+  const [manuallyEditedSupplierIds, setManuallyEditedSupplierIds] = useState<Set<number>>(new Set());
+  // "다시 확인"에 필요한, 매번 다시 안 불러도 되는 값들(BOM 공급사 원문·품목 vendor·최근
+  // 발주 후보) — ref로 들고 있다가 공급업체 목록만 새로 받아 재매칭한다.
+  const recheckInputsRef = useRef<{
+    rows: BomItemRow[];
+    itemIdByBomItemId: Map<number, number>;
+    vendorNameByItem: Map<number, string | null>;
+    recentOrderSupplierByItem: Map<number, { id: number; name: string } | null>;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,6 +181,9 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
             recentOrderUnitPrice: recentOrderPriceByItem.get(itemId) ?? null,
             packagingApplies,
           });
+          // PR-242: BOM 공급사가 실제 공급업체와 매칭되지 않은 이유 — 다른 후보(품목
+          // 마스터·최근 발주)로 채워진 경우에도 "BOM 공급사는 마스터에 없다"는 사실은 그대로 남긴다.
+          const bomSupplierMismatch = describeBomSupplierMismatch(it.supplier, bomSupplierMatchByBomItemId.get(it.id) ?? null);
           return {
             bomItemId: it.id,
             itemId,
@@ -173,6 +193,7 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
             unit: it.material?.unit ?? null,
             candidateSupplierId: supplierPick?.supplier.id ?? null,
             candidateSupplierSource: supplierPick?.source ?? null,
+            bomSupplierMismatch,
             alreadyOrderedCount: itemId ? (alreadyOrderedByItem.get(itemId) ?? 0) : 0,
             suggestedQuantity,
             suggestedUnitPrice: pricePick?.unitPrice ?? null,
@@ -180,6 +201,8 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
           };
         });
 
+        const itemIdByBomItemId = new Map<number, number>(rows.map((it) => [it.id, it.material?.id ?? 0]));
+        recheckInputsRef.current = { rows, itemIdByBomItemId, vendorNameByItem, recentOrderSupplierByItem };
         setRowMeta(meta);
         setDrafts(buildInitialDrafts(inputs));
       } catch (err) {
@@ -197,9 +220,51 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
   const updateDraft = (bomItemId: number, patch: Partial<BulkOrderRowDraft>) =>
     setDrafts((prev) => prev.map((d) => (d.bomItemId === bomItemId ? { ...d, ...patch } : d)));
 
+  // PR-242: 공급업체를 마스터에 등록한 뒤 돌아왔을 때(탭 포커스 복귀 또는 "다시 확인")
+  // 공급업체 목록만 다시 받아 재매칭한다 — 사람이 이미 고른 값(manuallyEditedSupplierIds)은
+  // 절대 덮어쓰지 않는다(recheckSupplierMatches). 전체를 다시 조회하지 않으므로 수량/단가/
+  // 구분 등 이미 입력한 값은 그대로 남는다.
+  const recheckSuppliers = async () => {
+    const inputs = recheckInputsRef.current;
+    if (!inputs) return;
+    try {
+      const supplierRes = await getSuppliers();
+      const supplierList: { id: number; name: string }[] = Array.isArray(supplierRes) ? supplierRes : ((supplierRes as any)?.data ?? []);
+      setSuppliers(supplierList);
+      const updates: SupplierRecheckUpdate[] = inputs.rows.map((it) => {
+        const itemId = inputs.itemIdByBomItemId.get(it.id) ?? 0;
+        const bomMatch = findExactSupplierMatch(it.supplier, supplierList);
+        const vendorMatch = findExactSupplierMatch(inputs.vendorNameByItem.get(itemId), supplierList);
+        const supplierPick = pickSupplierPrefill({
+          bom: bomMatch,
+          vendor: vendorMatch,
+          recentOrder: inputs.recentOrderSupplierByItem.get(itemId) ?? null,
+        });
+        return {
+          bomItemId: it.id,
+          candidateSupplierId: supplierPick?.supplier.id ?? null,
+          candidateSupplierSource: supplierPick?.source ?? null,
+          bomSupplierMismatch: describeBomSupplierMismatch(it.supplier, bomMatch),
+        };
+      });
+      setDrafts((prev) => recheckSupplierMatches(prev, updates, manuallyEditedSupplierIds));
+    } catch {
+      toast.error('공급업체 목록을 다시 불러오지 못했습니다.');
+    }
+  };
+
+  useEffect(() => {
+    const onFocus = () => { void recheckSuppliers(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manuallyEditedSupplierIds]);
+
   const { groups, unassigned } = useMemo(() => groupDraftsBySupplier(drafts), [drafts]);
   const summary = summarizeBulkOrders(drafts);
   const canCreate = canCreateBulkOrders(drafts) && unassigned.length === 0;
+  // PR-242: 마스터에 없는 BOM 공급사 이름을 중복 없이 모아 상단에 요약한다(채워진 행도 포함).
+  const notInMasterNames = useMemo(() => collectNotInMasterSupplierNames(drafts), [drafts]);
 
   const supplierName = (id: number) => suppliers.find((s) => s.id === id)?.name ?? `업체 #${id}`;
 
@@ -272,6 +337,29 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
         </p>
       </div>
 
+      {/* PR-242: BOM 공급사가 마스터에 없을 때 조용히 비던 것 — 이름을 모아 요약하고
+          바로 등록하러 갈 수 있게 한다(다른 후보로 채워진 행도 포함). */}
+      {notInMasterNames.length > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 flex items-center justify-between gap-4 flex-wrap">
+          <p className="text-sm text-amber-800" data-testid="bulk-mismatch-summary">
+            공급업체 마스터에 없는 BOM 공급사 {notInMasterNames.length}종: {notInMasterNames.join(', ')}
+          </p>
+          <div className="flex items-center gap-3">
+            <a
+              href={buildSuppliersMasterUrl(window.location.pathname)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-amber-900 underline whitespace-nowrap"
+            >
+              공급업체 마스터 열기
+            </a>
+            <button type="button" className="text-sm text-amber-900 underline whitespace-nowrap" onClick={() => void recheckSuppliers()}>
+              다시 확인
+            </button>
+          </div>
+        </div>
+      )}
+
       {unassigned.length > 0 && (
         <div className="bg-white border border-amber-300 rounded-lg p-4 space-y-2">
           <h4 className="font-medium text-amber-800">공급사 미지정 ({unassigned.length}건) — 먼저 공급사를 골라야 생성할 수 있습니다</h4>
@@ -279,13 +367,24 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
             <tbody>
               {unassigned.map((d) => (
                 <tr key={d.bomItemId} className="border-t">
-                  <td className="p-2">{d.itemName} <span className="text-xs text-gray-400">{d.colorCode}</span></td>
+                  <td className="p-2">
+                    {d.itemName} <span className="text-xs text-gray-400">{d.colorCode}</span>
+                    {/* PR-242: 왜 비었는지 — 사용자가 알아서 눈치채게 두지 않는다. */}
+                    {d.bomSupplierMismatch && (
+                      <span className="block text-xs text-amber-700" data-testid="bulk-unassigned-reason">
+                        {bomSupplierMismatchShortLabel(d.bomSupplierMismatch)}
+                      </span>
+                    )}
+                  </td>
                   <td className="p-2">
                     <select
                       className="border rounded px-2 py-1 w-44"
                       aria-label={`${d.itemName} 공급업체 선택`}
                       value=""
-                      onChange={(e) => updateDraft(d.bomItemId, { supplierId: e.target.value ? Number(e.target.value) : null, supplierSource: null })}
+                      onChange={(e) => {
+                        updateDraft(d.bomItemId, { supplierId: e.target.value ? Number(e.target.value) : null, supplierSource: null });
+                        setManuallyEditedSupplierIds((prev) => new Set(prev).add(d.bomItemId));
+                      }}
                     >
                       <option value="">공급업체 선택</option>
                       {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -323,6 +422,13 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
                     {d.supplierSource && (
                       <span className="block text-xs text-gray-400" data-testid="bulk-supplier-source">
                         {SUPPLIER_SOURCE_LABEL[d.supplierSource]}
+                      </span>
+                    )}
+                    {/* PR-242: 다른 후보(품목 마스터·최근 발주)로 채워진 행도 BOM 공급사
+                        자체는 마스터에 없다는 사실을 함께 보여준다(채워진 값은 그대로 둔다). */}
+                    {d.bomSupplierMismatch?.reason === 'bomSupplierNotInMaster' && (
+                      <span className="block text-xs text-amber-600" data-testid="bulk-supplier-mismatch-note">
+                        BOM 공급사 '{d.bomSupplierMismatch.rawName}'는 마스터에 없음
                       </span>
                     )}
                     {d.alreadyOrderedCount > 0 && (

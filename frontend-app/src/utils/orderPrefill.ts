@@ -87,3 +87,47 @@ export function pickPricePrefill(input: PricePrefillInput): ResolvedPricePrefill
   }
   return null;
 }
+
+// PR-242: BOM에 적힌 공급사 원문이 "공급업체 마스터"와 왜 연결되지 않았는지(findExactSupplierMatch
+// 실패 사유) — 채움 결과(pickSupplierPrefill)는 그대로 두고, 이유만 화면에 보여주기 위한 것이다.
+// 매칭 규칙은 바꾸지 않는다(정확 일치 + 공백·대소문자·괄호 기호 정규화까지, 부분 일치/추측 금지).
+export type BomSupplierMismatchReason = 'bomSupplierNotInMaster' | 'bomSupplierEmpty' | 'bomSupplierPlaceholder';
+
+export interface BomSupplierMismatch {
+  reason: BomSupplierMismatchReason;
+  // 'bomSupplierNotInMaster'일 때만 의미 있는 원문 이름(다른 사유는 null).
+  rawName: string | null;
+}
+
+// bomMatch가 이미 있으면(정상 매칭) 사유가 없다(null). 없으면 원문이 비어 있었는지(empty),
+// "미정"/"N/A"였는지(placeholder), 아니면 실제 이름인데 마스터에 없는지(notInMaster)를 구분한다.
+export function describeBomSupplierMismatch(
+  bomSupplierRaw: string | null | undefined,
+  bomMatch: SupplierRefLike | null,
+): BomSupplierMismatch | null {
+  if (bomMatch) return null;
+  const raw = (bomSupplierRaw ?? '').trim();
+  if (!raw) return { reason: 'bomSupplierEmpty', rawName: null };
+  if (raw === 'N/A' || raw === '미정') return { reason: 'bomSupplierPlaceholder', rawName: raw };
+  return { reason: 'bomSupplierNotInMaster', rawName: raw };
+}
+
+// PR-238 일괄 발주 화면의 "공급사 미지정" 표/요약에 쓰는 짧은 라벨.
+export function bomSupplierMismatchShortLabel(m: BomSupplierMismatch): string {
+  switch (m.reason) {
+    case 'bomSupplierNotInMaster':
+      return `마스터에 없음: ${m.rawName}`;
+    case 'bomSupplierEmpty':
+      return 'BOM 공급사 비어 있음';
+    case 'bomSupplierPlaceholder':
+      return '미정';
+  }
+}
+
+// 행별 발주 입력 칸/BOM 행 수정 화면에 보여줄 전체 안내 문구 — "마스터에 없음"(실제 이름이
+// 있는데 등록이 안 된 경우)만 사람이 조치할 수 있는 상황이라 안내한다. 비어 있음/미정은
+// 애초에 BOM에 적힌 값이 없을 뿐이라 안내할 "이유"가 없다(소음 방지).
+export function bomSupplierMismatchNotice(m: BomSupplierMismatch): string | null {
+  if (m.reason !== 'bomSupplierNotInMaster') return null;
+  return `BOM 공급사 '${m.rawName}'는 공급업체 마스터에 없습니다. 마스터·설정 > 공급업체에서 등록하거나 직접 선택하세요.`;
+}

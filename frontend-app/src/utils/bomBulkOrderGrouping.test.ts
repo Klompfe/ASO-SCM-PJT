@@ -7,6 +7,8 @@ import {
   summarizeBulkOrders,
   buildBulkOrderCreatePayload,
   createOrdersBySupplier,
+  recheckSupplierMatches,
+  collectNotInMasterSupplierNames,
   type BulkOrderRowInput,
   type BulkOrderRowDraft,
   type SupplierGroup,
@@ -75,6 +77,22 @@ describe('bomBulkOrderGrouping (PR-238)', () => {
     expect(drafts[0]).toMatchObject({ supplierId: null, supplierSource: null, unitPrice: null, priceSource: null });
   });
 
+  // PR-242: BOM 공급사가 마스터에 없는 이유는 다른 후보(품목 마스터·최근 발주)로 채워진
+  // 경우에도 draft에 그대로 남는다(채움 결과와 사유 표시는 독립적).
+  it('PR-242: bomSupplierMismatch가 있으면 공급업체가 다른 후보로 채워져도 그대로 전달된다', () => {
+    const mismatch = { reason: 'bomSupplierNotInMaster' as const, rawName: '본사' };
+    const [draft] = buildInitialDrafts([
+      row({ candidateSupplierId: 9, candidateSupplierSource: 'vendor', bomSupplierMismatch: mismatch }),
+    ]);
+    expect(draft.supplierId).toBe(9);
+    expect(draft.bomSupplierMismatch).toEqual(mismatch);
+  });
+
+  it('PR-242: bomSupplierMismatch를 넘기지 않으면 null이다', () => {
+    const [draft] = buildInitialDrafts([row()]);
+    expect(draft.bomSupplierMismatch).toBeNull();
+  });
+
   const ready = (overrides: Partial<BulkOrderRowDraft> = {}): BulkOrderRowDraft => ({
     bomItemId: 1,
     itemId: 100,
@@ -84,6 +102,7 @@ describe('bomBulkOrderGrouping (PR-238)', () => {
     unit: 'Y',
     supplierId: 7,
     supplierSource: null,
+    bomSupplierMismatch: null,
     quantity: 50,
     unitPrice: 10,
     priceSource: null,
@@ -150,6 +169,73 @@ describe('bomBulkOrderGrouping (PR-238)', () => {
       { supplierId: 7, itemId: 100, quantity: 50, unitPrice: 10, orderType: 'FIRM', styleNo: 'MB00AAA000Z' },
       { supplierId: 7, itemId: 200, quantity: 50, unitPrice: undefined, orderType: 'PROVISIONAL', styleNo: 'MB00AAA000Z' },
     ]);
+  });
+
+  // PR-242: 공급업체를 마스터에 등록한 뒤 "다시 확인"하면, 아직 직접 고르지 않은 행만
+  // 새 매칭 결과로 갱신된다 — 사람이 이미 고른 값은 절대 덮어쓰지 않는다.
+  describe('recheckSupplierMatches (PR-242)', () => {
+    it('공급업체 마스터에 새로 등록된 뒤 재확인하면 미지정 행이 새 매칭으로 채워진다', () => {
+      const drafts = [ready({ bomItemId: 1, supplierId: null, bomSupplierMismatch: { reason: 'bomSupplierNotInMaster', rawName: '본사' } })];
+      const updated = recheckSupplierMatches(
+        drafts,
+        [{ bomItemId: 1, candidateSupplierId: 11, candidateSupplierSource: 'bom', bomSupplierMismatch: null }],
+        new Set(),
+      );
+      expect(updated[0]).toMatchObject({ supplierId: 11, supplierSource: 'bom', bomSupplierMismatch: null });
+    });
+
+    it('사람이 이미 직접 고른 행(manuallyEditedIds)은 재확인해도 덮어쓰지 않는다', () => {
+      const drafts = [ready({ bomItemId: 1, supplierId: 5, supplierSource: null })];
+      const updated = recheckSupplierMatches(
+        drafts,
+        [{ bomItemId: 1, candidateSupplierId: 11, candidateSupplierSource: 'bom', bomSupplierMismatch: null }],
+        new Set([1]),
+      );
+      expect(updated[0]).toMatchObject({ supplierId: 5, supplierSource: null });
+    });
+
+    it('여전히 마스터에 없으면(재확인 결과도 null) 값은 비워진 채로 사유만 갱신된다', () => {
+      const drafts = [ready({ bomItemId: 1, supplierId: null, bomSupplierMismatch: { reason: 'bomSupplierNotInMaster', rawName: '본사' } })];
+      const updated = recheckSupplierMatches(
+        drafts,
+        [{ bomItemId: 1, candidateSupplierId: null, candidateSupplierSource: null, bomSupplierMismatch: { reason: 'bomSupplierNotInMaster', rawName: '본사' } }],
+        new Set(),
+      );
+      expect(updated[0]).toMatchObject({ supplierId: null, bomSupplierMismatch: { reason: 'bomSupplierNotInMaster', rawName: '본사' } });
+    });
+
+    it('updates에 없는 행(id 불일치)은 그대로 둔다', () => {
+      const drafts = [ready({ bomItemId: 1, supplierId: null })];
+      const updated = recheckSupplierMatches(drafts, [], new Set());
+      expect(updated[0]).toEqual(drafts[0]);
+    });
+  });
+
+  // PR-242: 상단 요약에 쓰는 "마스터에 없는 BOM 공급사 이름" 중복 제거.
+  describe('collectNotInMasterSupplierNames (PR-242)', () => {
+    it('같은 이름이 여러 행에 반복돼도 한 번만 모은다', () => {
+      const names = collectNotInMasterSupplierNames([
+        ready({ bomItemId: 1, bomSupplierMismatch: { reason: 'bomSupplierNotInMaster', rawName: '본사' } }),
+        ready({ bomItemId: 2, bomSupplierMismatch: { reason: 'bomSupplierNotInMaster', rawName: '본사' } }),
+        ready({ bomItemId: 3, bomSupplierMismatch: { reason: 'bomSupplierNotInMaster', rawName: '별도업체' } }),
+      ]);
+      expect(names).toEqual(['본사', '별도업체']);
+    });
+
+    it('비어 있음/미정 사유는 이름이 없어 요약에 포함하지 않는다', () => {
+      const names = collectNotInMasterSupplierNames([
+        ready({ bomItemId: 1, bomSupplierMismatch: { reason: 'bomSupplierEmpty', rawName: null } }),
+        ready({ bomItemId: 2, bomSupplierMismatch: { reason: 'bomSupplierPlaceholder', rawName: '미정' } }),
+      ]);
+      expect(names).toEqual([]);
+    });
+
+    it('마스터에 없는 공급사가 다른 후보로 채워져 공급업체가 있는 행도 요약에 포함된다', () => {
+      const names = collectNotInMasterSupplierNames([
+        ready({ bomItemId: 1, supplierId: 9, bomSupplierMismatch: { reason: 'bomSupplierNotInMaster', rawName: '본사' } }),
+      ]);
+      expect(names).toEqual(['본사']);
+    });
   });
 
   describe('createOrdersBySupplier — 업체별 독립 생성/롤백(합성 createFn으로 서버 트랜잭션 분리 검증)', () => {

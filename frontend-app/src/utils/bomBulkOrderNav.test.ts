@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSingleOrderUrl, buildBulkOrderUrl, parseOrderPrefillFromSearch } from './bomBulkOrderNav';
+import { buildSingleOrderUrl, buildBulkOrderUrl, buildSuppliersMasterUrl, parseOrderPrefillFromSearch } from './bomBulkOrderNav';
 
 // PR-238: 새 탭 URL 생성/해석 — 업무 데이터(자재명 등)는 쿼리에 없고 식별자만 있다.
 describe('bomBulkOrderNav (PR-238)', () => {
@@ -55,5 +55,10 @@ describe('bomBulkOrderNav (PR-238)', () => {
   it('단일 발주 쿼리 — itemId가 숫자가 아니면 null', () => {
     const result = parseOrderPrefillFromSearch('?view=purchaseOrders&prefillItemId=abc');
     expect(result).toBeNull();
+  });
+
+  // PR-242: "공급업체 마스터 열기" — view=suppliers만 싣는다(업무 데이터 없음).
+  it('공급업체 마스터 URL은 view=suppliers만 담는다', () => {
+    expect(buildSuppliersMasterUrl('/')).toBe('/?view=suppliers');
   });
 });

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { buildSingleOrderUrl, buildBulkOrderUrl, parseOrderPrefillFromSearch } from './utils/bomBulkOrderNav';
+import { buildSingleOrderUrl, buildBulkOrderUrl, parseOrderPrefillFromSearch, SUPPLIERS_MASTER_VIEW_VALUE, BOM_ORDER_VIEW_PARAM } from './utils/bomBulkOrderNav';
 import { clearUploadReview, hasPendingUploadReviewWork } from './utils/uploadReviewStorage';
 import { Dashboard } from './components/Dashboard';
 import { ItemsManager } from './components/ItemsManager';
@@ -71,9 +71,14 @@ function App() {
   // 탭으로 연다 — 그 새 탭이 바로 이 App이 다시 처음부터 마운트되는 것이므로, 쿼리를
   // 여기서 한 번만 읽어 초기 탭/프리필 상태를 정한다(쿼리가 없으면 기존 흐름 그대로).
   const initialOrderPrefill = parseOrderPrefillFromSearch(window.location.search);
+  // PR-242: "공급업체 마스터 열기"(BOM 공급사가 마스터에 없을 때 등록하러 가는 링크)도
+  // 새 탭으로 연다 — view=purchaseOrders와 같은 패턴, 업무 데이터는 싣지 않는다.
+  const initialViewIsSuppliers = new URLSearchParams(window.location.search).get(BOM_ORDER_VIEW_PARAM) === SUPPLIERS_MASTER_VIEW_VALUE;
 
   // Explicit tab type handling with fallback
-  const [activeTab, setActiveTab] = useState<TabId>(() => (initialOrderPrefill ? 'purchaseOrders' : 'dashboard'));
+  const [activeTab, setActiveTab] = useState<TabId>(() =>
+    initialOrderPrefill ? 'purchaseOrders' : initialViewIsSuppliers ? 'suppliers' : 'dashboard',
+  );
 
   // PR-070: "사용자 관리" 탭은 MANAGER/ADMIN에게만 보여야 한다 — GET /auth/me(PR-066)로
   // 현재 사용자의 role을 조회해 탭 자체를 목록에서 숨긴다(USER는 존재를 알 필요도 없음).
@@ -143,7 +148,7 @@ function App() {
   // PR-238: 프리필을 한 번 반영했으면 주소창 쿼리를 지운다(새로고침해도 같은 값을
   // 다시 쓰지 않도록) — 값 자체는 이미 위 useState 초기값으로 복사해 뒀다.
   useEffect(() => {
-    if (initialOrderPrefill) {
+    if (initialOrderPrefill || initialViewIsSuppliers) {
       window.history.replaceState(null, '', window.location.pathname);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

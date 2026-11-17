@@ -5,6 +5,8 @@ import { getMasterStyles, getStyleColorSizeQuantities, type MasterStyle } from '
 import { getBomByStyleNo, updateBomItem, deleteBomItem, swapBomItemMaterial, renameBomItemMaterial, addBomLabelSet, type BomDetail, type BomItemRow, type ThreadType, type TapeType } from '../api/boms.service';
 import { getSuppliers } from '../api/suppliers.service';
 import { buildMasterRenameConfirmMessage, isNameChanged } from '../utils/materialRename';
+import { bomSupplierMismatchNotice } from '../utils/orderPrefill';
+import { buildSuppliersMasterUrl } from '../utils/bomBulkOrderNav';
 import { SearchSelectField } from './SearchSelectField';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
@@ -327,6 +329,17 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
     getSuppliers().then((res) => setSuppliers(Array.isArray(res) ? res : (res?.data ?? []))).catch(() => setSuppliers([]));
     loadItems();
   }, [loadItems]);
+
+  // PR-242: 다른 탭에서 공급업체를 마스터에 등록하고 돌아오면(탭 포커스 복귀) 목록만
+  // 다시 받아온다 — editBomItemForm.supplier 등 사람이 입력 중인 값은 전혀 건드리지
+  // 않는다(목록이 갱신되면 "마스터에 없음" 안내가 자연히 사라질 뿐).
+  useEffect(() => {
+    const onFocus = () => {
+      getSuppliers().then((res) => setSuppliers(Array.isArray(res) ? res : (res?.data ?? []))).catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
 
   useEffect(() => {
     if (!catalogOpen) return;
@@ -1539,6 +1552,21 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
                               <option value={editBomItemForm.supplier}>{editBomItemForm.supplier}(마스터에 없음)</option>
                             )}
                           </select>
+                          {/* PR-242: "마스터에 없음" 옵션 라벨만으로는 조치 방법이 안 보인다 —
+                              같은 안내 문구를 재사용해 통일한다. */}
+                          {editBomItemForm.supplier && !suppliers.some((s) => s.name === editBomItemForm.supplier) && (
+                            <p className="text-xs text-amber-700 mt-0.5" data-testid="edit-bom-supplier-mismatch-notice">
+                              {bomSupplierMismatchNotice({ reason: 'bomSupplierNotInMaster', rawName: editBomItemForm.supplier })}{' '}
+                              <a
+                                href={buildSuppliersMasterUrl(window.location.pathname)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline"
+                              >
+                                공급업체 마스터 열기
+                              </a>
+                            </p>
+                          )}
                         </td>
                         <td className="px-4 py-2 text-right">
                           <input

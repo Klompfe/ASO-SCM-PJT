@@ -3,7 +3,7 @@
 // 트랜잭션으로 보내면 한 업체 실패가 다른 업체까지 롤백시킨다 — 그래서 "업체별 발주서"는
 // 새 백엔드가 아니라, 기존 createPurchaseOrdersBulk를 업체별로 나눠 여러 번 호출하는
 // 것으로 구현한다(업체마다 독립된 트랜잭션 1개, 그 안에서는 전체 성공 또는 전체 롤백).
-import type { SupplierPrefillSource, PricePrefillSource } from './orderPrefill';
+import type { SupplierPrefillSource, PricePrefillSource, BomSupplierMismatch } from './orderPrefill';
 
 export type BulkOrderType = 'FIRM' | 'PROVISIONAL';
 
@@ -18,6 +18,10 @@ export interface BulkOrderRowInput {
   // 쪽에서 orderPrefill.ts의 pickSupplierPrefill로 계산해 넘긴다) — null이면 공급사 미지정.
   candidateSupplierId: number | null;
   candidateSupplierSource?: SupplierPrefillSource | null;
+  // PR-242: BOM 공급사 원문이 마스터와 매칭되지 않은 이유(매칭됐으면 null) — 채움 결과와
+  // 별개로, 다른 후보(품목 마스터·최근 발주)로 채워진 경우에도 "BOM 공급사는 마스터에
+  // 없다"는 사실 자체는 그대로 보여주기 위함.
+  bomSupplierMismatch?: BomSupplierMismatch | null;
   // 이 스타일에서 이 자재의 미입고(PENDING) 발주 건수.
   alreadyOrderedCount: number;
   // 필요수량(적용) 계산 결과 — null이면 근거 없음/극단 불일치 등으로 사람이 직접
@@ -37,6 +41,7 @@ export interface BulkOrderRowDraft {
   unit: string | null;
   supplierId: number | null;
   supplierSource: SupplierPrefillSource | null;
+  bomSupplierMismatch: BomSupplierMismatch | null;
   quantity: number | null;
   unitPrice: number | null;
   priceSource: PricePrefillSource | null;
@@ -56,6 +61,7 @@ export function buildInitialDrafts(rows: BulkOrderRowInput[]): BulkOrderRowDraft
     unit: r.unit,
     supplierId: r.candidateSupplierId,
     supplierSource: r.candidateSupplierId != null ? (r.candidateSupplierSource ?? null) : null,
+    bomSupplierMismatch: r.bomSupplierMismatch ?? null,
     quantity: r.suggestedQuantity,
     unitPrice: r.suggestedUnitPrice ?? null,
     priceSource: r.suggestedUnitPrice != null ? (r.priceSource ?? null) : null,
@@ -113,6 +119,18 @@ export function summarizeBulkOrders(drafts: BulkOrderRowDraft[]): { supplierCoun
   return { supplierCount: groups.length, totalCount: groups.reduce((s, g) => s + g.rows.length, 0) };
 }
 
+// PR-242: 상단 요약("공급업체 마스터에 없는 BOM 공급사 N종")용 — 다른 후보로 채워진
+// 행도 포함해 원문 이름을 중복 없이 모은다.
+export function collectNotInMasterSupplierNames(drafts: BulkOrderRowDraft[]): string[] {
+  const set = new Set<string>();
+  for (const d of drafts) {
+    if (d.bomSupplierMismatch?.reason === 'bomSupplierNotInMaster' && d.bomSupplierMismatch.rawName) {
+      set.add(d.bomSupplierMismatch.rawName);
+    }
+  }
+  return [...set];
+}
+
 export interface BulkOrderCreateItem {
   supplierId: number;
   itemId: number;
@@ -147,6 +165,35 @@ export interface SupplierCreationResult {
 // 나머지 업체는 계속 시도하고(독립), 실패한 업체는 그 호출 전체가 서버 트랜잭션으로
 // 롤백된 상태로 남는다(createdIds가 비어 있음). 테스트에서 createFn을 교체해 이
 // 독립성/롤백 결과 집계 로직을 DOM 없이 검증한다.
+// PR-242: 공급업체를 마스터에 등록한 뒤 "다시 확인"하면, 사람이 아직 직접 고르지 않은
+// 행만 새 매칭 결과로 갱신한다 — 이미 직접 고른 값(manuallyEditedIds)은 절대 덮어쓰지
+// 않는다. updates에 없는 행(id가 안 맞음)은 그대로 둔다.
+export interface SupplierRecheckUpdate {
+  bomItemId: number;
+  candidateSupplierId: number | null;
+  candidateSupplierSource: SupplierPrefillSource | null;
+  bomSupplierMismatch: BomSupplierMismatch | null;
+}
+
+export function recheckSupplierMatches(
+  drafts: BulkOrderRowDraft[],
+  updates: SupplierRecheckUpdate[],
+  manuallyEditedIds: Set<number>,
+): BulkOrderRowDraft[] {
+  const byId = new Map(updates.map((u) => [u.bomItemId, u]));
+  return drafts.map((d) => {
+    if (manuallyEditedIds.has(d.bomItemId)) return d;
+    const u = byId.get(d.bomItemId);
+    if (!u) return d;
+    return {
+      ...d,
+      supplierId: u.candidateSupplierId,
+      supplierSource: u.candidateSupplierId != null ? u.candidateSupplierSource : null,
+      bomSupplierMismatch: u.bomSupplierMismatch,
+    };
+  });
+}
+
 export async function createOrdersBySupplier(
   groups: SupplierGroup[],
   styleNo: string,
