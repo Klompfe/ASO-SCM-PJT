@@ -14,6 +14,17 @@ import { TransformInterceptor } from '../src/common/interceptors/transform.inter
 
 const DOCS = path.resolve(__dirname, '../docs');
 
+// PR-243: 이 명세는 실제 xlsx 파일을 업로드·파싱하고(TYVN2026-21은 한 테스트에서
+// createStyle 13건 + upload 1건 + detailsOf 13건, 총 27회의 순차 HTTP 요청) jest 기본
+// 제한(5000ms)에 걸린 적이 있다 — 단독 실행 시 각 테스트는 150ms~1.4s로 끝나지만
+// (측정값, prompt-reports/PR-243-report.md 참고), 전체 e2e를 --maxWorkers=2로 동시에
+// 돌리면 다른 워커들의 Nest 앱 부팅·sqlite I/O와 자원을 다투면서 같은 요청들이 5000ms를
+// 넘길 수 있다(테스트 설정이나 파서의 비효율이 아니라 병렬 실행 중 자원 경합, 다른
+// 명세의 beforeAll도 같은 식으로 간헐적으로 5000ms를 넘기는 것을 관찰함 — Gate A ②
+// 확인). 전체 e2e 동시 실행 중 실측한 최댓값(약 5.4s)의 약 3.7배로 — 전역 기본값은
+// 그대로 두고 이 명세에만 올린다.
+jest.setTimeout(20000);
+
 // PR-112: 실제 파일(TYVN2026-21/22/27) 업로드 → 상세포장내역(DPKL)이 스타일별로 나뉜 여러
 // ImportShipment에 source=EXCEL로 정확히 배분되는지 확인한다.
 describe('DPKL 상세포장내역 자동 파싱 — 실제 파일 업로드 (PR-112)', () => {
