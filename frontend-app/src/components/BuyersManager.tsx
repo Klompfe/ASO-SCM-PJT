@@ -9,6 +9,8 @@ import {
   type Buyer,
 } from '../api/buyers.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { buyerSearchFields, filterByText, findDuplicateName } from '../utils/partySearch';
+import { DuplicateNameHint, PartyNoResult, PartySearchBar } from './PartySearchBar';
 
 const emptyForm: CreateBuyer = { name: '', contactPerson: '', contactPhone: '', email: '', country: '', address: '', brandCode: '', defaultProductionType: undefined };
 
@@ -24,6 +26,10 @@ export const BuyersManager: React.FC = () => {
   const [newBuyer, setNewBuyer] = useState<CreateBuyer>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<CreateBuyer>(emptyForm);
+  // PR-245: 목록은 전체 로드이므로 화면에서 걸러낸다(빈 검색어 = 전체 목록).
+  const [query, setQuery] = useState('');
+  const visibleBuyers = filterByText(buyers, query, buyerSearchFields);
+  const duplicateBuyer = findDuplicateName(newBuyer.name, buyers);
 
   const loadBuyers = useCallback(async () => {
     setLoading(true);
@@ -110,6 +116,7 @@ export const BuyersManager: React.FC = () => {
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">고객사명</label>
           <input className="border border-gray-300 rounded px-3 py-2" required value={newBuyer.name} onChange={(e) => setNewBuyer({ ...newBuyer, name: e.target.value })} />
+          <DuplicateNameHint show={!!duplicateBuyer} />
         </div>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">브랜드/고객약칭 (선택, 비우면 고객사명에서 자동생성)</label>
@@ -152,6 +159,9 @@ export const BuyersManager: React.FC = () => {
         </div>
       </form>
 
+      <PartySearchBar query={query} onChange={setQuery} total={buyers.length} shown={visibleBuyers.length} ariaLabel="고객사 검색" />
+      <PartyNoResult query={query} total={buyers.length} shown={visibleBuyers.length} onReset={() => setQuery('')} />
+
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
         <table>
           <thead className="bg-gray-100 text-gray-700">
@@ -168,7 +178,7 @@ export const BuyersManager: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {buyers.map((b) =>
+            {visibleBuyers.map((b) =>
               editingId === b.id ? (
                 <tr key={b.id} className="bg-yellow-50">
                   <td className="px-4 py-2 font-mono">{b.code}</td>

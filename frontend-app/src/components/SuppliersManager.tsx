@@ -12,6 +12,8 @@ import { getMaterialCategories, type MaterialCategory } from '../api/materialCat
 import { CategoryChips } from './CategoryChips';
 import { getErrorMessage } from '../utils/errorMessage';
 import { categoryNames, legacyMainItemsNote } from '../utils/materialCategories';
+import { supplierSearchFields, filterByText, findDuplicateName } from '../utils/partySearch';
+import { DuplicateNameHint, PartyNoResult, PartySearchBar } from './PartySearchBar';
 
 const emptyForm: CreateSupplier = { name: '', businessNumber: '', contactPhone: '', email: '', address: '', abbrCode: '' };
 
@@ -30,6 +32,10 @@ export const SuppliersManager: React.FC = () => {
   // 목록 필터: 품목군을 고르면 그 품목군을 취급하는 업체만 본다('' = 전체).
   const [filterCategoryId, setFilterCategoryId] = useState('');
   const [categories, setCategories] = useState<MaterialCategory[]>([]);
+  // PR-245: 텍스트 검색은 (서버가 품목군으로 좁힌) 목록에 화면에서 AND 로 적용한다. 빈 검색어 = 그 목록 전체.
+  const [query, setQuery] = useState('');
+  // 중복 이름 안내는 품목군 필터와 무관하게 전체 업체와 비교해야 한다 — 필터 중에는 전체 목록을 따로 받아 둔다.
+  const [allSuppliers, setAllSuppliers] = useState<Supplier[] | null>(null);
 
   const loadSuppliers = useCallback(async (categoryId: string) => {
     setLoading(true);
@@ -38,6 +44,16 @@ export const SuppliersManager: React.FC = () => {
       const res = await getSuppliers(categoryId ? { categoryId: Number(categoryId) } : undefined);
       const data = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
       setSuppliers(data);
+      if (categoryId) {
+        try {
+          const all = await getSuppliers();
+          setAllSuppliers(Array.isArray(all) ? all : (all && Array.isArray(all.data) ? all.data : []));
+        } catch {
+          setAllSuppliers(null);
+        }
+      } else {
+        setAllSuppliers(null);
+      }
     } catch (err: any) {
       setError(getErrorMessage(err, '공급업체 목록을 불러오는 데 실패했습니다.'));
       setSuppliers([]);
@@ -55,6 +71,9 @@ export const SuppliersManager: React.FC = () => {
       .then((res) => setCategories(Array.isArray(res) ? res : (res?.data ?? [])))
       .catch(() => setCategories([]));
   }, []);
+
+  const visibleSuppliers = filterByText(suppliers, query, supplierSearchFields);
+  const duplicateSupplier = findDuplicateName(newSupplier.name, allSuppliers ?? suppliers);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,6 +144,7 @@ export const SuppliersManager: React.FC = () => {
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">이름</label>
           <input className="border border-gray-300 rounded px-3 py-2" required value={newSupplier.name} onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })} />
+          <DuplicateNameHint show={!!duplicateSupplier} />
         </div>
         <div className="flex flex-col">
           <label className="text-sm text-gray-600 mb-1">업체약칭 (선택, 비우면 업체명에서 자동생성)</label>
@@ -155,6 +175,8 @@ export const SuppliersManager: React.FC = () => {
         </div>
       </form>
 
+      <div className="flex flex-wrap items-center gap-4">
+      <PartySearchBar query={query} onChange={setQuery} total={suppliers.length} shown={visibleSuppliers.length} ariaLabel="공급업체 검색" />
       <div className="flex items-center gap-2">
         <label className="text-sm text-gray-600" htmlFor="supplier-category-filter">품목군 필터</label>
         <select
@@ -169,6 +191,8 @@ export const SuppliersManager: React.FC = () => {
           ))}
         </select>
       </div>
+      </div>
+      <PartyNoResult query={query} total={suppliers.length} shown={visibleSuppliers.length} onReset={() => setQuery('')} />
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
         <table>
@@ -186,7 +210,7 @@ export const SuppliersManager: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {suppliers.map((s) =>
+            {visibleSuppliers.map((s) =>
               editingId === s.id ? (
                 <tr key={s.id} className="bg-yellow-50">
                   <td className="px-4 py-2 font-mono">{s.code}</td>
