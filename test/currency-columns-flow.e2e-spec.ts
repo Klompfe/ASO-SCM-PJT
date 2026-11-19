@@ -74,6 +74,15 @@ describe('단가 통화 컬럼 흐름 (PR-244a)', () => {
       expect(JSON.stringify(upd.body)).toContain(msg);
     });
 
+    it('발주 목록 조회 응답에 currency 가 이미 포함돼 내려온다(PR-244b 화면이 그대로 읽는다)', async () => {
+      const itemId = await newItem('합성원단-목록');
+      await post('/purchase-orders').send({ supplierId, itemId, quantity: 3, unitPrice: 2.5, currency: 'USD' }).expect(201);
+      await post('/purchase-orders').send({ supplierId, itemId, quantity: 3, unitPrice: 100 }).expect(201);
+      const res = await get('/purchase-orders').query({ itemId }).expect(200);
+      const list: any[] = Array.isArray(res.body.data) ? res.body.data : res.body.data.data;
+      expect(list.map((p) => p.currency).sort()).toEqual(['KRW', 'USD']);
+    });
+
     it('일괄 생성도 통화를 저장한다', async () => {
       const itemId = await newItem('합성원단-일괄');
       const res = await post('/purchase-orders/bulk')

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { UPLOAD_KRW_NOTICE } from '../utils/currency';
 import { commitMapping, getBomDiff, reconcileBom, type BomReconcileResult } from '../api/mapping.service';
 import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
 import { APPROVE_LABEL, BADGE_ALREADY_REGISTERED, REAPPROVE_LABEL, REAPPROVE_NOTICE_POINTS, REAPPROVE_NOTICE_TITLE } from '../utils/mappingApproval';
@@ -154,7 +155,8 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
         )}
       </div>
 
-      {/* BOM Table */}
+      {/* PR-244b: 업로드 단가는 통화를 추측하지 않고 KRW 로 저장된다는 안내(기능 변경 없음). */}
+      <p className="text-xs text-gray-500 mb-1" data-testid="upload-currency-notice">{UPLOAD_KRW_NOTICE}</p>
       <div className="overflow-x-auto">
         <table className="border text-sm">
           <thead className="bg-gray-100">

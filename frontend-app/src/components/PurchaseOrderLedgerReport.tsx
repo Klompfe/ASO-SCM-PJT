@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { getPurchaseOrders, type GetPurchaseOrdersFilter, type PurchaseOrder } from '../api/purchaseOrders.service';
 import { type Supplier } from '../api/suppliers.service';
@@ -10,10 +10,16 @@ import {
   PO_STATUS_LABELS,
   amountOf,
   describePurchaseOrderFilters,
-  purchaseOrderColumns,
+  purchaseOrderColumnsFor,
+  currencyOf,
+  totalsOfSummary,
   summarizeBySupplier,
   summarizeByStatus,
 } from '../utils/purchaseOrderReport';
+import { formatAmount, formatTotals, formatUnitPrice, sumByCurrency, toKstDay, type CurrencyTotals } from '../utils/currency';
+import { isUsd, type UsdRow } from '../utils/krwReference';
+import { useImportRates } from '../hooks/useImportRates';
+import { KrwReferenceNote, KrwReferenceTotal } from './KrwReferenceNote';
 
 const fmt = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
 const STATUS_COLORS: Record<string, string> = { PENDING: 'text-yellow-600', RECEIVED: 'text-green-600', CANCELLED: 'text-gray-500' };
@@ -77,7 +83,23 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
 
   const byStatus = summarizeByStatus(orders);
   const bySupplier = summarizeBySupplier(orders);
-  const supplierTotal = bySupplier.reduce((a, s) => a + s.amount, 0);
+  // PR-244b: 통화가 다른 값은 더하지 않는다 — 합계는 통화별로 따로(KRW 만 있으면 표시는 이전과 같다).
+  const supplierTotals: CurrencyTotals = bySupplier.length > 0
+    ? sumByCurrency(
+        bySupplier.flatMap((s) => (Object.entries(totalsOfSummary(s)) as [string, number][]).map(([c, n]) => ({ c, n }))),
+        (x) => x.n,
+        (x) => x.c,
+      )
+    : {};
+  // 환산 참고(표시 전용): USD 발주의 발주일별 수입환율. 같은 날짜는 한 번만 조회한다.
+  const usdRowsOf = (list: PurchaseOrder[]): UsdRow[] =>
+    list.filter((o) => isUsd(o.currency)).map((o) => ({ usdAmount: amountOf(o), date: toKstDay(o.createdAt) }));
+  const allUsdDates = useMemo(
+    () => orders.filter((o) => isUsd(o.currency)).map((o) => toKstDay(o.createdAt)).filter((d): d is string => !!d),
+    [orders],
+  );
+  const { rates } = useImportRates(allUsdDates);
+  const columns = purchaseOrderColumnsFor(orders);
   const th = 'border border-gray-300 px-2 py-1 bg-gray-100 text-left';
   const td = 'border border-gray-300 px-2 py-1';
 
@@ -125,7 +147,7 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
         <PrintableReport
           title="발주 현황표 (발주 원장)"
           subtitle={describePurchaseOrderFilters(applied)}
-          columns={purchaseOrderColumns}
+          columns={columns}
           rows={orders}
           fileName="발주_현황표"
         >
@@ -140,7 +162,10 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
                     <tr key={s.status}>
                       <td className={`${td} font-medium ${STATUS_COLORS[s.status]}`}>{PO_STATUS_LABELS[s.status]}</td>
                       <td className={`${td} text-right`}>{s.count}건</td>
-                      <td className={`${td} text-right`}>{fmt(s.amount)}</td>
+                      <td className={`${td} text-right`}>
+                        {formatTotals(totalsOfSummary(s))}
+                        <KrwReferenceTotal rows={usdRowsOf(orders.filter((o) => o.status === s.status))} rates={rates} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -158,11 +183,14 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
                     <tr key={s.supplierId ?? 'none'}>
                       <td className={td}>{s.name}</td>
                       <td className={`${td} text-right`}>{s.count}건</td>
-                      <td className={`${td} text-right`}>{fmt(s.amount)}</td>
+                      <td className={`${td} text-right`}>
+                        {formatTotals(totalsOfSummary(s))}
+                        <KrwReferenceTotal rows={usdRowsOf(orders.filter((o) => o.status !== 'CANCELLED' && (o.supplierId ?? null) === s.supplierId))} rates={rates} />
+                      </td>
                     </tr>
                   ))}
                   {bySupplier.length > 0 && (
-                    <tr className="bg-gray-50 font-semibold"><td className={td}>합계</td><td className={`${td} text-right`}>{bySupplier.reduce((a, s) => a + s.count, 0)}건</td><td className={`${td} text-right`}>{fmt(supplierTotal)}</td></tr>
+                    <tr className="bg-gray-50 font-semibold"><td className={td}>합계</td><td className={`${td} text-right`}>{bySupplier.reduce((a, s) => a + s.count, 0)}건</td><td className={`${td} text-right`}>{formatTotals(supplierTotals)}<KrwReferenceTotal rows={usdRowsOf(orders.filter((o) => o.status !== 'CANCELLED'))} rates={rates} /></td></tr>
                   )}
                 </tbody>
               </table>
@@ -190,8 +218,11 @@ export const PurchaseOrderLedgerReport: React.FC = () => {
                     <td className={td}>{o.createdAt ? String(o.createdAt).slice(0, 10) : '-'}</td>
                     <td className={td}>{o.item?.name ?? `#${o.itemId}`}</td>
                     <td className={`${td} text-right`}>{fmt(Number(o.quantity))}</td>
-                    <td className={`${td} text-right`}>{o.unitPrice === null || o.unitPrice === undefined ? '-' : fmt(Number(o.unitPrice))}</td>
-                    <td className={`${td} text-right`}>{fmt(amountOf(o))}</td>
+                    <td className={`${td} text-right`}>{o.unitPrice === null || o.unitPrice === undefined ? '-' : formatUnitPrice(Number(o.unitPrice), o.currency)}</td>
+                    <td className={`${td} text-right`}>
+                      {formatAmount(amountOf(o), currencyOf(o))}
+                      {isUsd(o.currency) && <KrwReferenceNote usd={amountOf(o)} date={toKstDay(o.createdAt)} rates={rates} />}
+                    </td>
                     <td className={td}>{o.supplier?.name ?? '-'}</td>
                     <td className={td}>{PO_STATUS_LABELS[o.status] ?? o.status}</td>
                     <td className={td}>{o.notes ?? ''}</td>

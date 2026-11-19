@@ -11,7 +11,7 @@ describe('발주 폼: 최근 발주 이력 자동 채움 (PR-126)', () => {
   describe('pickLatestOrderDefaults', () => {
     it('이력이 있으면 가장 최근(id 최대) 발주의 공급업체/단가를 돌려준다(서버 정렬에 의존하지 않는다)', () => {
       const r = pickLatestOrderDefaults([po(3, { unitPrice: 7, supplier: sup(2, '나공급') }), po(9, { unitPrice: '12.50' as any, supplier: sup(4, '다공급') }), po(5)]);
-      expect(r).toEqual({ supplier: sup(4, '다공급'), unitPrice: 12.5, orderId: 9 });
+      expect(r).toEqual({ supplier: sup(4, '다공급'), unitPrice: 12.5, orderId: 9, currency: 'KRW' });
     });
 
     it('이력이 없으면(빈 목록/undefined) null → 공란', () => {

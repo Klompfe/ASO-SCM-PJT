@@ -4,6 +4,8 @@ import { getPurchaseOrders, createPurchaseOrdersBulk, getOrderTypeSuggestion } f
 import { canCreateWithOrderType, type PurchaseOrderType } from '../utils/purchaseOrderType';
 import { getSuppliers } from '../api/suppliers.service';
 import { getErrorMessage } from '../utils/errorMessage';
+import { normalizeCurrency, type Currency } from '../utils/currency';
+import { CurrencySelect } from './CurrencySelect';
 import { pickLatestOrderDefaults, resolveBulkSupplierId, isBulkRowReady, suggestedQuantity } from '../utils/purchaseOrderForm';
 
 export interface BulkDraftSource {
@@ -27,6 +29,8 @@ interface Draft {
   candidateSupplierIds: number[];
   quantity: number;
   unitPrice: number | null;
+  // PR-244b: 단가 통화(기본 KRW). 바꿔도 단가 숫자는 그대로(자동 환산 없음).
+  currency: Currency;
   note: string | null;
   // PR-180: 발주 구분(제안값으로 미리 채우고 사람이 확정한다).
   orderType: PurchaseOrderType | null;
@@ -72,8 +76,14 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, styleNo, onDon
           candidateSupplierIds: candidates,
           quantity: s.packagingShortagePackages != null ? Math.max(0, s.packagingShortagePackages) : suggestedQuantity(s.shortageQty),
           unitLabel: s.packagingUnitLabel,
-          unitPrice: latest ? latest.unitPrice : null,
-          note: s.hasEditablePending ? '이미 미입고 발주가 있어 기본 제외 — 필요하면 포함' : null,
+          // PR-244b: 최근 발주 단가는 통화가 이 행의 통화(기본 KRW)와 같을 때만 채운다 — 다르면 비우고 이유를 보여 준다.
+          unitPrice: latest && normalizeCurrency(latest.currency) === 'KRW' ? latest.unitPrice : null,
+          currency: 'KRW' as Currency,
+          note: s.hasEditablePending
+            ? '이미 미입고 발주가 있어 기본 제외 — 필요하면 포함'
+            : latest && normalizeCurrency(latest.currency) !== 'KRW'
+              ? `최근 발주 단가는 다른 통화(${normalizeCurrency(latest.currency)})라 채우지 않았습니다.`
+              : null,
           orderType: suggestions[i]?.orderType ?? null,
           orderTypeReason: suggestions[i]?.reason ?? null,
         };
@@ -107,6 +117,8 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, styleNo, onDon
         quantity: d.quantity,
         // MERGE-2: 가발주(CMT)는 단가가 선택 입력이라 비워둔 채 보낼 수 있다(PR-173 정책).
         unitPrice: d.unitPrice ?? undefined,
+        // PR-244b: KRW 는 보내지 않는다(서버 기본값 KRW — 이전 요청과 같다).
+        ...(d.currency !== 'KRW' ? { currency: d.currency } : {}),
         orderType: d.orderType as PurchaseOrderType,
         styleNo,
       })));
@@ -193,6 +205,9 @@ export const BulkOrderPreviewModal: React.FC<Props> = ({ sources, styleNo, onDon
                       onChange={(e) => update(d.itemId, { unitPrice: e.target.value === '' ? null : Number(e.target.value) })}
                       aria-label={`${d.itemName} 단가`}
                     />
+                    <div className="mt-1 flex justify-end">
+                      <CurrencySelect value={d.currency} onChange={(c) => update(d.itemId, { currency: c })} ariaLabel={`${d.itemName} 통화`} className="border rounded px-1 py-0.5 text-xs" />
+                    </div>
                     {/* MERGE-2: CMT(가발주)는 단가가 선적서류 작성 시점에 입력돼도 되므로 비워도 된다는 걸 알려준다. */}
                     {d.orderType === 'PROVISIONAL' && d.unitPrice == null && (
                       <div className="text-xs text-gray-400">CMT — 선택 입력, 선적서류 작성 시 입력 가능</div>

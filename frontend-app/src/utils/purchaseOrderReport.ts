@@ -1,5 +1,6 @@
 import type { PurchaseOrder } from '../api/purchaseOrders.service';
 import type { ExcelColumn } from './excelExport';
+import { hasForeignCurrency, normalizeCurrency, sumByCurrency, type CurrencyTotals } from './currency';
 
 export const PO_STATUS_LABELS: Record<string, string> = { PENDING: '대기', RECEIVED: '입고완료', CANCELLED: '취소' };
 export const PO_STATUS_ORDER = ['PENDING', 'RECEIVED', 'CANCELLED'] as const;
@@ -13,13 +14,23 @@ const num = (v: unknown): number => {
 
 export const amountOf = (po: PurchaseOrder): number => num(po.quantity) * num(po.unitPrice);
 
-export interface StatusSummary { status: string; count: number; amount: number }
-export interface SupplierSummary { supplierId: number | null; name: string; count: number; amount: number }
+// PR-244b: amount 는 KRW(통화 비움 포함) 합계만 — USD 가 섞인 행이 있을 때만 byCurrency 에 통화별 합계가
+// 담긴다(통화가 다른 값은 절대 더하지 않는다). KRW 만 있는 목록은 byCurrency 가 없어 객체가 이전과 같다.
+export interface StatusSummary { status: string; count: number; amount: number; byCurrency?: CurrencyTotals }
+export interface SupplierSummary { supplierId: number | null; name: string; count: number; amount: number; byCurrency?: CurrencyTotals }
+
+// 표시용: byCurrency 가 없으면 KRW 하나뿐인 합계.
+export const totalsOfSummary = (s: { amount: number; byCurrency?: CurrencyTotals }): CurrencyTotals => s.byCurrency ?? { KRW: s.amount };
+
+export const currencyOf = (po: PurchaseOrder) => normalizeCurrency(po.currency);
+const totalsOf = (orders: PurchaseOrder[]): CurrencyTotals => sumByCurrency(orders, amountOf, currencyOf);
 
 export const summarizeByStatus = (orders: PurchaseOrder[]): StatusSummary[] =>
   PO_STATUS_ORDER.map((status) => {
     const rows = orders.filter((o) => o.status === status);
-    return { status, count: rows.length, amount: rows.reduce((a, o) => a + amountOf(o), 0) };
+    const byCurrency = totalsOf(rows);
+    const base = { status, count: rows.length, amount: byCurrency.KRW ?? 0 };
+    return hasForeignCurrency(byCurrency) ? { ...base, byCurrency } : base;
   });
 
 // 공급업체별 "발주 금액" 합계는 취소된 발주를 제외한다(취소분은 실제 발주 금액이 아니므로).
@@ -32,13 +43,19 @@ export const summarizeBySupplier = (orders: PurchaseOrder[]): SupplierSummary[] 
     const key = supplierId === null ? 'none' : String(supplierId);
     const cur = map.get(key) ?? { supplierId, name: o.supplier?.name ?? (supplierId === null ? NO_SUPPLIER_LABEL : `#${supplierId}`), count: 0, amount: 0 };
     cur.count += 1;
-    cur.amount += amountOf(o);
+    const c = currencyOf(o);
+    const tot = (cur.byCurrency ?? (cur.byCurrency = {}));
+    tot[c] = (tot[c] ?? 0) + amountOf(o);
+    cur.amount = tot.KRW ?? 0;
     map.set(key, cur);
   }
+  for (const s of map.values()) if (s.byCurrency && !hasForeignCurrency(s.byCurrency)) delete s.byCurrency;
   return [...map.values()].sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
 };
 
 const day = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
+
+export const purchaseOrderTotalsByCurrency = (orders: PurchaseOrder[]): CurrencyTotals => totalsOf(orders);
 
 export const purchaseOrderColumns: ExcelColumn<PurchaseOrder>[] = [
   { header: '발주번호', accessor: (o) => `#${o.id}` },
@@ -51,6 +68,12 @@ export const purchaseOrderColumns: ExcelColumn<PurchaseOrder>[] = [
   { header: '상태', accessor: (o) => PO_STATUS_LABELS[o.status] ?? o.status },
   { header: '비고', accessor: (o) => o.notes ?? '' },
 ];
+
+// USD 행이 하나라도 있으면 "통화" 열을 덧붙인다(KRW 만 있으면 열 구성은 이전과 동일).
+export const purchaseOrderColumnsFor = (orders: PurchaseOrder[]): ExcelColumn<PurchaseOrder>[] =>
+  orders.some((o) => currencyOf(o) !== 'KRW')
+    ? [...purchaseOrderColumns, { header: '통화', accessor: (o: PurchaseOrder) => currencyOf(o) }]
+    : purchaseOrderColumns;
 
 export const describePurchaseOrderFilters = (f: { supplierName?: string; status?: string; startDate?: string; endDate?: string }): string | undefined => {
   const parts: string[] = [];

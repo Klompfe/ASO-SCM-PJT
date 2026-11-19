@@ -29,6 +29,8 @@ import { getPurchaseOrders, type PurchaseOrder } from '../api/purchaseOrders.ser
 import { PurchaseOrderEditModal } from './PurchaseOrderEditModal';
 import { formatBomItemQty, looksLikeThreadOrTape } from '../utils/materialRequirementDisplay';
 import { filterBomRows, distinctNonEmptySorted } from '../utils/bomLookupFilter';
+import { normalizeCurrency, withCurrencyLabel } from '../utils/currency';
+import { CurrencySelect } from './CurrencySelect';
 import { buildColorQtyMap, resolveAppliedQuantity, APPLIED_BASIS_LABEL, isExtremeConsumptionMismatch, type AppliedQuantityResult } from '../utils/appliedQuantity';
 import { UNIT_CHANGE_CONFIRM_TEXT, isUnitChanged, resolveLiveQtyReason, describeLiveQtyReason, describeSnapshotNote, isBlockedUnitForLengthBasedMaterial, BLOCKED_PACKAGING_UNIT_MESSAGE } from '../utils/bomQtyReason';
 import {
@@ -157,7 +159,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
   // PR-241: materialName(이 행만 자재명 변경)·supplier/unitPrice(이 행만 공급업체/단가)도
   // 같은 수정 모드에 둔다. materialName은 저장 시 바뀌어 있으면 별도 API(renameBomItemMaterial)
   // 를 먼저 호출한다(일반 필드 PATCH와는 다른 안전장치가 있는 요청이라 분리).
-  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string; unit: string; manualRequiredQty: string; manualRequiredQtyNote: string; manualRequiredQtyMode: ManualQtyInputMode; materialName: string; supplier: string; unitPrice: string }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '', manualRequiredQtyMode: 'length', materialName: '', supplier: '', unitPrice: '' });
+  const [editBomItemForm, setEditBomItemForm] = useState<{ composition: string; hsCode: string; threadType: string; consumption: string; spec: string; colorCode: string; category: string; unit: string; manualRequiredQty: string; manualRequiredQtyNote: string; manualRequiredQtyMode: ManualQtyInputMode; materialName: string; supplier: string; unitPrice: string; currency: string }>({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '', manualRequiredQtyMode: 'length', materialName: '', supplier: '', unitPrice: '', currency: 'KRW' });
   // PR-241: 자재마스터 이름 변경(모든 스타일 적용) 처리 중 — 중복 클릭 방지.
   const [renamingMasterId, setRenamingMasterId] = useState<number | null>(null);
   // PR-099: "라벨류 기본 세트 추가" 버튼 처리 중 표시.
@@ -480,6 +482,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
       materialName: row.material?.name || '',
       supplier: row.supplier || '',
       unitPrice: row.unitPrice ? String(row.unitPrice) : '',
+      // PR-244b: NULL/빈 값은 KRW. 바꿔도 단가 숫자는 그대로 둔다(자동 환산 없음).
+      currency: normalizeCurrency(row.currency),
     });
   };
 
@@ -580,7 +584,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
 
   const cancelEditBomItem = () => {
     setEditingBomItemId(null);
-    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '', manualRequiredQtyMode: 'length', materialName: '', supplier: '', unitPrice: '' });
+    setEditBomItemForm({ composition: '', hsCode: '', threadType: '', consumption: '', spec: '', colorCode: '', category: '', unit: '', manualRequiredQty: '', manualRequiredQtyNote: '', manualRequiredQtyMode: 'length', materialName: '', supplier: '', unitPrice: '', currency: 'KRW' });
   };
 
   const handleUpdateBomItem = async (id: number) => {
@@ -684,6 +688,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
         // PR-241: 이 행만의 공급업체/단가 — 빈 값은 "미정"으로 해제.
         supplier: editBomItemForm.supplier || null,
         unitPrice: newUnitPrice,
+        // PR-244b: 통화를 바꿨을 때만 보낸다(안 바꾸면 요청이 이전과 같다).
+        ...(editBomItemForm.currency !== normalizeCurrency(original?.currency) ? { currency: editBomItemForm.currency } : {}),
       });
       if (unitChanged && !nameChanged && original?.material) {
         await updateItem(original.material.id, { unit: newUnit });
@@ -1578,6 +1584,13 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
                             value={editBomItemForm.unitPrice}
                             onChange={(e) => setEditBomItemForm({ ...editBomItemForm, unitPrice: e.target.value })}
                           />
+                          <div className="mt-1 flex flex-col items-end">
+                            <CurrencySelect
+                              value={editBomItemForm.currency}
+                              onChange={(c) => setEditBomItemForm({ ...editBomItemForm, currency: c })}
+                              ariaLabel="통화(이 행만)"
+                            />
+                          </div>
                         </td>
                         <td className="px-4 py-2">{it.remarks}</td>
                         <td className="px-4 py-2">
@@ -1652,7 +1665,7 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
                         <td className="px-4 py-2 text-right">{it.consumption}</td>
                         <td className="px-4 py-2 text-right">{renderBomItemQtyCell(it)}</td>
                         <td className="px-4 py-2">{it.supplier}</td>
-                        <td className="px-4 py-2 text-right">{it.unitPrice}</td>
+                        <td className="px-4 py-2 text-right">{withCurrencyLabel(String(it.unitPrice), it.currency)}</td>
                         <td className="px-4 py-2">{it.remarks}</td>
                         <td className="px-4 py-2">{it.composition ?? '-'}</td>
                         <td className="px-4 py-2">{it.hsCode ?? '-'}</td>

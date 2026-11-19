@@ -3,6 +3,8 @@
 // 같은 자재의 최근 발주 공급사/단가)를 우선순위대로 미리 채운다. 수량은 기존
 // resolveAppliedQuantity/suggestStyleLinkedQuantity(포장 환산·needsColorQty·극단 불일치
 // 안전정책 포함)를 그대로 재사용하므로 여기서 새로 다루지 않는다.
+import { normalizeCurrency, type Currency } from './currency';
+
 export interface SupplierRefLike {
   id: number;
   name: string;
@@ -71,21 +73,50 @@ export interface PricePrefillInput {
   // 값)를 포장 단위 수량에 그대로 쓰면 금액이 틀리므로(자동 환산 금지 요구사항) BOM 확정
   // 단가는 후보에서 제외하고 최근 발주 단가(이미 같은 포장 단위 기준으로 쌓인 값)만 쓴다.
   packagingApplies: boolean;
+  // PR-244b: 단가의 통화. 생략하면 KRW(기존 호출·데이터와 동일).
+  // bomCurrency = BOM 행의 통화(BOM 확정 단가의 통화이자, BOM 에서 넘어올 때 폼의 통화로 함께 채운다).
+  // recentOrderCurrency = 최근 발주의 통화. 폼의 통화(formCurrency, 생략 시 bomCurrency)와 다르면 채우지 않는다.
+  bomCurrency?: string | null;
+  recentOrderCurrency?: string | null;
+  formCurrency?: string | null;
 }
 
 export interface ResolvedPricePrefill {
   unitPrice: number;
   source: PricePrefillSource;
+  // 이 단가가 입력된 통화 — 화면은 통화 칸을 이 값으로 채우고 출처(source)를 함께 보여 준다.
+  currency: Currency;
+}
+
+// 폼의 통화: 명시되면 그 값, 아니면 BOM 행의 통화(BOM 에서 발주하러 넘어온 경우 폼은 BOM 통화로 시작한다).
+function targetCurrency(input: PricePrefillInput): Currency {
+  return normalizeCurrency(input.formCurrency ?? input.bomCurrency);
+}
+
+// 최근 발주 단가는 통화가 폼과 같을 때만 쓸 수 있다 — 다르면 값을 환산해서 넣지 않고 비운다.
+export function recentOrderPriceUsable(input: PricePrefillInput): boolean {
+  return input.recentOrderUnitPrice != null && input.recentOrderUnitPrice > 0
+    && normalizeCurrency(input.recentOrderCurrency) === targetCurrency(input);
 }
 
 export function pickPricePrefill(input: PricePrefillInput): ResolvedPricePrefill | null {
   if (!input.packagingApplies && input.bomUnitPrice != null && input.bomUnitPrice > 0) {
-    return { unitPrice: input.bomUnitPrice, source: 'bom' };
+    return { unitPrice: input.bomUnitPrice, source: 'bom', currency: normalizeCurrency(input.bomCurrency) };
   }
-  if (input.recentOrderUnitPrice != null && input.recentOrderUnitPrice > 0) {
-    return { unitPrice: input.recentOrderUnitPrice, source: 'recentOrder' };
+  if (recentOrderPriceUsable(input)) {
+    return { unitPrice: input.recentOrderUnitPrice as number, source: 'recentOrder', currency: targetCurrency(input) };
   }
   return null;
+}
+
+// 최근 발주 단가가 있는데 통화가 달라 채우지 않았다면 그 이유(없으면 null).
+// 이미 BOM 단가로 채워졌다면(= 최근 발주 단가를 쓰지 않는 경우) 안내하지 않는다.
+export function recentPriceSkippedNotice(input: PricePrefillInput): string | null {
+  if (pickPricePrefill(input)) return null;
+  if (input.recentOrderUnitPrice == null || !(input.recentOrderUnitPrice > 0)) return null;
+  const recent = normalizeCurrency(input.recentOrderCurrency);
+  if (recent === targetCurrency(input)) return null;
+  return `최근 발주 단가는 다른 통화(${recent})라 채우지 않았습니다.`;
 }
 
 // PR-242: BOM에 적힌 공급사 원문이 "공급업체 마스터"와 왜 연결되지 않았는지(findExactSupplierMatch

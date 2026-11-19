@@ -4,6 +4,7 @@ import {
   findExactSupplierMatch,
   pickSupplierPrefill,
   pickPricePrefill,
+  recentPriceSkippedNotice,
   describeBomSupplierMismatch,
   bomSupplierMismatchShortLabel,
   bomSupplierMismatchNotice,
@@ -56,22 +57,22 @@ describe('pickSupplierPrefill (PR-240)', () => {
 describe('pickPricePrefill (PR-240)', () => {
   it('포장 환산이 적용되지 않는 행은 BOM 확정 단가를 1순위로 쓴다', () => {
     expect(pickPricePrefill({ bomUnitPrice: 1000, recentOrderUnitPrice: 2000, packagingApplies: false })).toEqual({
-      unitPrice: 1000, source: 'bom',
+      unitPrice: 1000, source: 'bom', currency: 'KRW',
     });
   });
 
   it('BOM 확정 단가가 0이거나 없으면(미입력) 최근 발주 단가를 쓴다', () => {
     expect(pickPricePrefill({ bomUnitPrice: 0, recentOrderUnitPrice: 2000, packagingApplies: false })).toEqual({
-      unitPrice: 2000, source: 'recentOrder',
+      unitPrice: 2000, source: 'recentOrder', currency: 'KRW',
     });
     expect(pickPricePrefill({ bomUnitPrice: null, recentOrderUnitPrice: 2000, packagingApplies: false })).toEqual({
-      unitPrice: 2000, source: 'recentOrder',
+      unitPrice: 2000, source: 'recentOrder', currency: 'KRW',
     });
   });
 
   it('포장 환산이 적용되는 행은(단위 기준이 달라 자동 환산 금지) BOM 확정 단가를 쓰지 않고 최근 발주 단가만 쓴다', () => {
     expect(pickPricePrefill({ bomUnitPrice: 1000, recentOrderUnitPrice: 2000, packagingApplies: true })).toEqual({
-      unitPrice: 2000, source: 'recentOrder',
+      unitPrice: 2000, source: 'recentOrder', currency: 'KRW',
     });
   });
 
@@ -97,7 +98,7 @@ describe('PR-241 C 저장값을 PR-240 미리 채움이 그대로 읽는다', ()
   it('BOM 행 수정에서 방금 저장한 단가(포장 환산 없는 일반 행)가 최근 발주 단가보다 우선 적용된다', () => {
     const justEditedBomUnitPrice = 9999;
     const result = pickPricePrefill({ bomUnitPrice: justEditedBomUnitPrice, recentOrderUnitPrice: 1, packagingApplies: false });
-    expect(result).toEqual({ unitPrice: 9999, source: 'bom' });
+    expect(result).toEqual({ unitPrice: 9999, source: 'bom', currency: 'KRW' });
   });
 });
 
@@ -142,5 +143,41 @@ describe('bomSupplierMismatchShortLabel / bomSupplierMismatchNotice (PR-242)', (
     expect(bomSupplierMismatchShortLabel({ reason: 'bomSupplierPlaceholder', rawName: '미정' })).toBe('미정');
     expect(bomSupplierMismatchNotice({ reason: 'bomSupplierEmpty', rawName: null })).toBeNull();
     expect(bomSupplierMismatchNotice({ reason: 'bomSupplierPlaceholder', rawName: '미정' })).toBeNull();
+  });
+});
+
+describe('pickPricePrefill — 통화 규칙 (PR-244b)', () => {
+  it('통화 정보가 없으면(기존 호출) 이전과 같고 통화는 KRW', () => {
+    expect(pickPricePrefill({ bomUnitPrice: 1000, recentOrderUnitPrice: 2000, packagingApplies: false })).toEqual({ unitPrice: 1000, source: 'bom', currency: 'KRW' });
+    expect(pickPricePrefill({ bomUnitPrice: 0, recentOrderUnitPrice: 2000, packagingApplies: false })).toEqual({ unitPrice: 2000, source: 'recentOrder', currency: 'KRW' });
+  });
+
+  it('BOM 확정 단가는 BOM 행의 통화로 함께 채운다', () => {
+    expect(pickPricePrefill({ bomUnitPrice: 2.5, bomCurrency: 'USD', recentOrderUnitPrice: 2000, packagingApplies: false })).toEqual({ unitPrice: 2.5, source: 'bom', currency: 'USD' });
+  });
+
+  it('최근 발주 단가는 통화가 폼(=BOM 통화)과 같을 때만 채운다', () => {
+    expect(pickPricePrefill({ bomUnitPrice: 0, bomCurrency: 'USD', recentOrderUnitPrice: 3, recentOrderCurrency: 'USD', packagingApplies: false })).toEqual({ unitPrice: 3, source: 'recentOrder', currency: 'USD' });
+    expect(pickPricePrefill({ bomUnitPrice: 0, bomCurrency: 'USD', recentOrderUnitPrice: 2000, recentOrderCurrency: 'KRW', packagingApplies: false })).toBeNull();
+    expect(pickPricePrefill({ bomUnitPrice: 0, recentOrderUnitPrice: 3, recentOrderCurrency: 'USD', packagingApplies: false })).toBeNull();
+  });
+
+  it('포장 환산 자재: BOM 단가 제외 + 통화가 다른 최근 단가도 비움(값을 환산해 넣지 않는다)', () => {
+    expect(pickPricePrefill({ bomUnitPrice: 2.5, bomCurrency: 'USD', recentOrderUnitPrice: 2000, recentOrderCurrency: 'KRW', packagingApplies: true })).toBeNull();
+  });
+
+  it('명시한 폼 통화(formCurrency)가 우선한다', () => {
+    expect(pickPricePrefill({ bomUnitPrice: 0, bomCurrency: 'USD', formCurrency: 'KRW', recentOrderUnitPrice: 2000, recentOrderCurrency: 'KRW', packagingApplies: false })?.currency).toBe('KRW');
+  });
+});
+
+describe('recentPriceSkippedNotice (PR-244b)', () => {
+  it('통화 불일치로 못 채웠을 때만 이유를 낸다', () => {
+    expect(recentPriceSkippedNotice({ bomUnitPrice: 0, bomCurrency: 'USD', recentOrderUnitPrice: 2000, recentOrderCurrency: 'KRW', packagingApplies: false }))
+      .toBe('최근 발주 단가는 다른 통화(KRW)라 채우지 않았습니다.');
+    // 채워졌거나 최근 단가가 없거나 같은 통화면 안내 없음
+    expect(recentPriceSkippedNotice({ bomUnitPrice: 5, bomCurrency: 'USD', recentOrderUnitPrice: 2000, recentOrderCurrency: 'KRW', packagingApplies: false })).toBeNull();
+    expect(recentPriceSkippedNotice({ bomUnitPrice: 0, recentOrderUnitPrice: null, packagingApplies: false })).toBeNull();
+    expect(recentPriceSkippedNotice({ bomUnitPrice: 0, recentOrderUnitPrice: 2000, packagingApplies: false })).toBeNull();
   });
 });

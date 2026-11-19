@@ -17,10 +17,13 @@ import { buildColorQtyMap, resolveAppliedQuantity } from '../utils/appliedQuanti
 import { formatBomItemQty } from '../utils/materialRequirementDisplay';
 import { pickLatestOrderDefaults } from '../utils/purchaseOrderForm';
 import { buildSuppliersMasterUrl } from '../utils/bomBulkOrderNav';
+import { normalizeCurrency } from '../utils/currency';
+import { CurrencySelect } from './CurrencySelect';
 import {
   findExactSupplierMatch,
   pickSupplierPrefill,
   pickPricePrefill,
+  recentPriceSkippedNotice,
   describeBomSupplierMismatch,
   bomSupplierMismatchShortLabel,
   SUPPLIER_SOURCE_LABEL,
@@ -125,6 +128,7 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
         const alreadyOrderedByItem = new Map<number, number>();
         const recentOrderSupplierByItem = new Map<number, { id: number; name: string } | null>();
         const recentOrderPriceByItem = new Map<number, number | null>();
+        const recentOrderCurrencyByItem = new Map<number, string | null>();
         const vendorNameByItem = new Map<number, string | null>();
         itemIds.forEach((id, i) => {
           const list: any[] = Array.isArray(histories[i]) ? histories[i] : ((histories[i] as any)?.data ?? []);
@@ -136,6 +140,7 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
           recentOrderSupplierByItem.set(id, candidateSupplierId != null ? (latest?.supplier ?? null) : null);
           // "같은 자재+같은 공급사"만 믿는다 — 최근 발주가 다른 공급사 건이면 단가를 쓰지 않는다.
           recentOrderPriceByItem.set(id, latest && candidateSupplierId != null && latest.supplier.id === candidateSupplierId ? latest.unitPrice : null);
+          recentOrderCurrencyByItem.set(id, latest?.currency ?? null);
           vendorNameByItem.set(id, vendorInfos[i]?.vendor ?? null);
         });
 
@@ -176,11 +181,16 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
             vendor: vendorMatchByItemId.get(itemId) ?? null,
             recentOrder: recentOrderSupplierByItem.get(itemId) ?? null,
           });
-          const pricePick = pickPricePrefill({
+          // PR-244b: BOM 행의 통화로 통화 칸도 함께 채운다. 최근 발주 단가는 통화가 같을 때만 쓰고, 다르면 비운다(환산 안 함).
+          const priceInput = {
             bomUnitPrice: it.unitPrice,
             recentOrderUnitPrice: recentOrderPriceByItem.get(itemId) ?? null,
             packagingApplies,
-          });
+            bomCurrency: it.currency ?? null,
+            recentOrderCurrency: recentOrderCurrencyByItem.get(itemId) ?? null,
+          };
+          const pricePick = pickPricePrefill(priceInput);
+          const priceSkippedNotice = recentPriceSkippedNotice(priceInput);
           // PR-242: BOM 공급사가 실제 공급업체와 매칭되지 않은 이유 — 다른 후보(품목
           // 마스터·최근 발주)로 채워진 경우에도 "BOM 공급사는 마스터에 없다"는 사실은 그대로 남긴다.
           const bomSupplierMismatch = describeBomSupplierMismatch(it.supplier, bomSupplierMatchByBomItemId.get(it.id) ?? null);
@@ -198,6 +208,8 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
             suggestedQuantity,
             suggestedUnitPrice: pricePick?.unitPrice ?? null,
             priceSource: pricePick?.source ?? null,
+            suggestedCurrency: pricePick?.currency ?? normalizeCurrency(it.currency),
+            priceSkippedNotice,
           };
         });
 
@@ -482,6 +494,17 @@ export function BomBulkOrderPanel({ styleNo, bomItemIds, onClose }: BomBulkOrder
                       value={d.unitPrice ?? ''}
                       onChange={(e) => updateDraft(d.bomItemId, { unitPrice: e.target.value === '' ? null : Number(e.target.value), priceSource: null })}
                     />
+                    <div className="mt-1 flex justify-end">
+                      <CurrencySelect
+                        value={d.currency}
+                        onChange={(c) => updateDraft(d.bomItemId, { currency: c, priceSource: null })}
+                        ariaLabel={`${d.itemName} 통화`}
+                        className="border rounded px-1 py-0.5 text-xs"
+                      />
+                    </div>
+                    {d.priceSkippedNotice && d.unitPrice == null && (
+                      <span className="block text-xs text-amber-700 max-w-[200px]" data-testid="bulk-price-skipped">{d.priceSkippedNotice}</span>
+                    )}
                     {d.unitPrice != null && (
                       <span className="block text-xs text-gray-400" data-testid="bulk-price-source">
                         {d.priceSource ? PRICE_SOURCE_LABEL[d.priceSource] : '직접 입력'}

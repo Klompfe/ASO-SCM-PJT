@@ -4,6 +4,7 @@
 // 새 백엔드가 아니라, 기존 createPurchaseOrdersBulk를 업체별로 나눠 여러 번 호출하는
 // 것으로 구현한다(업체마다 독립된 트랜잭션 1개, 그 안에서는 전체 성공 또는 전체 롤백).
 import type { SupplierPrefillSource, PricePrefillSource, BomSupplierMismatch } from './orderPrefill';
+import { normalizeCurrency, type Currency } from './currency';
 
 export type BulkOrderType = 'FIRM' | 'PROVISIONAL';
 
@@ -30,6 +31,9 @@ export interface BulkOrderRowInput {
   // PR-240: BOM 확정 단가/최근 발주 단가 우선순위로 이미 미리 채운 단가(pickPricePrefill).
   suggestedUnitPrice?: number | null;
   priceSource?: PricePrefillSource | null;
+  // PR-244b: 이 행의 통화(BOM 행의 통화로 채움, 생략하면 KRW)와, 통화가 달라 최근 발주 단가를 못 채운 이유.
+  suggestedCurrency?: string | null;
+  priceSkippedNotice?: string | null;
 }
 
 export interface BulkOrderRowDraft {
@@ -45,6 +49,9 @@ export interface BulkOrderRowDraft {
   quantity: number | null;
   unitPrice: number | null;
   priceSource: PricePrefillSource | null;
+  // PR-244b: 단가의 통화. 통화를 바꿔도 단가 숫자는 그대로(자동 환산 없음).
+  currency?: Currency;
+  priceSkippedNotice?: string | null;
   orderType: BulkOrderType | null;
   excluded: boolean;
   alreadyOrderedCount: number;
@@ -65,6 +72,8 @@ export function buildInitialDrafts(rows: BulkOrderRowInput[]): BulkOrderRowDraft
     quantity: r.suggestedQuantity,
     unitPrice: r.suggestedUnitPrice ?? null,
     priceSource: r.suggestedUnitPrice != null ? (r.priceSource ?? null) : null,
+    currency: normalizeCurrency(r.suggestedCurrency),
+    priceSkippedNotice: r.priceSkippedNotice ?? null,
     orderType: null,
     excluded: false,
     alreadyOrderedCount: r.alreadyOrderedCount,
@@ -136,6 +145,8 @@ export interface BulkOrderCreateItem {
   itemId: number;
   quantity: number;
   unitPrice?: number;
+  // PR-244b: KRW 는 보내지 않는다(서버 기본값 KRW) — 이전 요청 본문과 같다. USD 일 때만 보낸다.
+  currency?: Currency;
   orderType?: BulkOrderType;
   styleNo: string;
 }
@@ -149,6 +160,7 @@ export function buildBulkOrderCreatePayload(group: SupplierGroup, styleNo: strin
     itemId: r.itemId,
     quantity: r.quantity as number,
     unitPrice: r.unitPrice ?? undefined,
+    ...(normalizeCurrency(r.currency) !== 'KRW' ? { currency: normalizeCurrency(r.currency) } : {}),
     orderType: r.orderType ?? undefined,
     styleNo,
   }));

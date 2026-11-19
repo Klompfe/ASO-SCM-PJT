@@ -1,5 +1,6 @@
 import type { PurchaseOrder } from '../api/purchaseOrders.service';
 import type { MaterialRequirementRow } from './bomRequirementReport';
+import { normalizeCurrency, type Currency } from './currency';
 
 export interface SupplierRef {
   id: number;
@@ -11,6 +12,8 @@ export interface LatestOrderDefaults {
   supplier: SupplierRef;
   unitPrice: number;
   orderId: number;
+  // PR-244b: 그 발주 단가의 통화(비움=KRW). 폼의 통화와 같을 때만 단가를 채운다.
+  currency?: Currency;
 }
 
 // pg decimal은 문자열로 올 수 있어 Number()로 통일한다.
@@ -28,7 +31,7 @@ export function pickLatestOrderDefaults(orders: PurchaseOrder[] | null | undefin
     .sort((a, b) => b.id - a.id);
   const latest = usable[0];
   if (!latest || !latest.supplier) return null;
-  return { supplier: latest.supplier, unitPrice: num(latest.unitPrice), orderId: latest.id };
+  return { supplier: latest.supplier, unitPrice: num(latest.unitPrice), orderId: latest.id, currency: normalizeCurrency(latest.currency) };
 }
 
 export interface AutofillState {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import { orderTypeLabel, orderTypeNote, canCreateWithOrderType, type PurchaseOrderType } from '../utils/purchaseOrderType';
 import toast from 'react-hot-toast';
 import {
@@ -43,6 +43,7 @@ import {
   findExactSupplierMatch,
   pickSupplierPrefill,
   pickPricePrefill,
+  recentPriceSkippedNotice,
   describeBomSupplierMismatch,
   bomSupplierMismatchNotice,
   SUPPLIER_SOURCE_LABEL,
@@ -51,6 +52,11 @@ import {
   type PricePrefillSource,
   type BomSupplierMismatch,
 } from '../utils/orderPrefill';
+import { normalizeCurrency, withCurrencyLabel, formatAmountDefaultLocale, toKstDay, type Currency } from '../utils/currency';
+import { isUsd } from '../utils/krwReference';
+import { useImportRates } from '../hooks/useImportRates';
+import { CurrencySelect, CurrencyChangeNotice } from './CurrencySelect';
+import { KrwReferenceNote } from './KrwReferenceNote';
 
 interface ItemRef { id: number; name: string; code: string; categoryId?: number | null; unit?: string | null }
 interface StyleOption { styleNo: string; overview?: { styleName?: string | null } | null }
@@ -87,6 +93,12 @@ interface PurchaseOrdersManagerProps {
 
 export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ prefillItemId, onPrefillConsumed, prefillStyleNo, onStylePrefillConsumed, prefillItemStyleNo }) => {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  // PR-244b: USD 발주의 원화 환산 참고용 — 발주일별 수입환율(같은 날짜는 한 번만 조회, 표시 전용).
+  const usdOrderDates = useMemo(
+    () => purchaseOrders.filter((o) => isUsd(o.currency)).map((o) => toKstDay(o.createdAt)).filter((d): d is string => !!d),
+    [purchaseOrders],
+  );
+  const { rates } = useImportRates(usdOrderDates);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newPo, setNewPo] = useState<CreatePurchaseOrder>(emptyForm);
@@ -124,11 +136,18 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   // 없으면 직접 입력이라는 뜻 — 별도 boolean을 두지 않는다).
   const [supplierSource, setSupplierSource] = useState<SupplierPrefillSource | null>(null);
   const [priceSource, setPriceSource] = useState<PricePrefillSource | null>(null);
+  // PR-244b: 단가 통화(기본 KRW). BOM 행에서 넘어오면 그 행의 통화로 채우고(currencyFromBom),
+  // 통화를 바꿔도 단가 숫자는 그대로 둔다(자동 환산 없음).
+  const [currency, setCurrency] = useState<Currency>('KRW');
+  const [currencyFromBom, setCurrencyFromBom] = useState(false);
+  // 사용자가 통화 칸을 직접 바꿨는지(알림 표시용 — 미리 채움으로 바뀐 경우는 알림 없음).
+  const [currencyTouched, setCurrencyTouched] = useState(false);
+  const currencyRef = useRef<Currency>('KRW');
   // PR-242: BOM 공급사가 공급업체 마스터에 없는 이유(매칭됐으면 null) — 다른 후보(품목
   // 마스터·최근 발주)로 채워진 경우에도 이유는 그대로 보여준다. "다시 확인"/탭 포커스
   // 복귀로 재매칭할 때 쓸 원문도 함께 기억해 둔다.
   const [bomSupplierMismatch, setBomSupplierMismatch] = useState<BomSupplierMismatch | null>(null);
-  const lastBomPrefillOptsRef = useRef<{ bomSupplierName?: string | null; itemVendorName?: string | null; bomUnitPrice?: number | null } | null>(null);
+  const lastBomPrefillOptsRef = useRef<{ bomSupplierName?: string | null; itemVendorName?: string | null; bomUnitPrice?: number | null; bomCurrency?: string | null } | null>(null);
   // PR-180: 발주 구분 — 품목을 고르면 스타일 계약방식 제안을 미리 채우되, 사람이 바꾸거나 직접 고른다.
   const [orderType, setOrderType] = useState<PurchaseOrderType | null>(null);
   const [orderTypeHint, setOrderTypeHint] = useState<string | null>(null);
@@ -211,6 +230,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   }, [filterSupplier, filterItem, listTrack, filterStyleNo]);
 
   formValuesRef.current = { supplier, unitPrice: newPo.unitPrice ?? 0, autofilled };
+  currencyRef.current = currency;
 
   // 서버 검색(검색어마다 조회) — 100건 캡이 없다. 품목은 원자재만(완제품 Item과 섞이지 않게), 한 번에 20건.
   const searchSuppliers = useCallback(async (keyword: string): Promise<SupplierRef[]> => {
@@ -273,7 +293,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
   const selectItem = useCallback(async (picked: ItemRef | null, opts?: {
     quantityInput?: string; styleNo?: string;
     bomSupplierName?: string | null; itemVendorName?: string | null;
-    bomUnitPrice?: number | null; packagingApplies?: boolean;
+    bomUnitPrice?: number | null; bomCurrency?: string | null; packagingApplies?: boolean;
   }) => {
     setItem(picked);
     setAutofillNote(null);
@@ -284,6 +304,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     setTempSubtype(null);
     setSupplierSource(null);
     setPriceSource(null);
+    setCurrencyFromBom(false);
+    setCurrencyTouched(false);
     setBomSupplierMismatch(null);
     lastBomPrefillOptsRef.current = null;
     if (opts?.quantityInput !== undefined) setQuantityInput(opts.quantityInput);
@@ -316,11 +338,18 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         lastBomPrefillOptsRef.current = opts ?? null;
         setBomSupplierMismatch(describeBomSupplierMismatch(opts?.bomSupplierName, bomMatch));
         const supplierPick = pickSupplierPrefill({ bom: bomMatch, vendor: vendorMatch, recentOrder: latest?.supplier ?? null });
-        const pricePick = pickPricePrefill({
+        // PR-244b: BOM 행에서 넘어오면 통화도 BOM 행의 통화로 함께 채운다. 최근 발주 단가는 통화가 같을 때만 쓴다.
+        const priceInput = {
           bomUnitPrice: opts?.bomUnitPrice ?? null,
           recentOrderUnitPrice: latest?.unitPrice ?? null,
           packagingApplies: !!opts?.packagingApplies,
-        });
+          bomCurrency: opts?.bomCurrency ?? null,
+          recentOrderCurrency: latest?.currency ?? null,
+        };
+        const pricePick = pickPricePrefill(priceInput);
+        const skippedNotice = recentPriceSkippedNotice(priceInput);
+        setCurrency(pricePick?.currency ?? normalizeCurrency(opts?.bomCurrency));
+        setCurrencyFromBom(opts?.bomCurrency !== undefined && opts?.bomCurrency !== null);
         setSupplier(supplierPick?.supplier ?? null);
         setSupplierSource(supplierPick?.source ?? null);
         setNewPo((prev) => ({ ...prev, unitPrice: pricePick?.unitPrice ?? 0 }));
@@ -328,19 +357,27 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
         setAutofilled(!!supplierPick || !!pricePick);
         setAutofillNote(
           supplierPick || pricePick
-            ? `공급업체/단가를 기존 정보로 미리 채웠습니다(${[supplierPick && SUPPLIER_SOURCE_LABEL[supplierPick.source], pricePick && PRICE_SOURCE_LABEL[pricePick.source]].filter(Boolean).join(', ')}). 필요하면 수정하세요.`
-            : '이 품목으로 채울 수 있는 공급업체/단가 정보가 없어 직접 선택해 주세요.',
+            ? `공급업체/단가를 기존 정보로 미리 채웠습니다(${[supplierPick && SUPPLIER_SOURCE_LABEL[supplierPick.source], pricePick && PRICE_SOURCE_LABEL[pricePick.source]].filter(Boolean).join(', ')}). 필요하면 수정하세요.${skippedNotice ? ` ${skippedNotice}` : ''}`
+            : `이 품목으로 채울 수 있는 공급업체/단가 정보가 없어 직접 선택해 주세요.${skippedNotice ? ` ${skippedNotice}` : ''}`,
         );
       } else {
         // 어떤 값이 자동 채움이고 어떤 값이 사용자가 넣은 값인지는 resolveAutofill(테스트된 순수 함수)이 정한다.
         const cur = formValuesRef.current;
-        const next = resolveAutofill({ supplier: cur.supplier, unitPrice: cur.unitPrice, autofilled: cur.autofilled }, latest);
+        // PR-244b: 최근 발주 단가의 통화가 지금 폼의 통화와 다르면 단가는 채우지 않는다(환산해서 넣지 않음) — 공급업체만 채운다.
+        const currencyMismatch = !!latest && normalizeCurrency(latest.currency) !== currencyRef.current;
+        const next = resolveAutofill({ supplier: cur.supplier, unitPrice: cur.unitPrice, autofilled: cur.autofilled }, latest && currencyMismatch ? { ...latest, unitPrice: 0 } : latest);
         setSupplier(next.supplier);
         setNewPo((prev) => ({ ...prev, unitPrice: next.unitPrice }));
         setAutofilled(next.autofilled);
         setSupplierSource(latest ? 'recentOrder' : null);
-        setPriceSource(latest ? 'recentOrder' : null);
-        setAutofillNote(latest ? `최근 발주 #${latest.orderId}의 공급업체(${latest.supplier.name})/단가(${latest.unitPrice})를 채웠습니다. 필요하면 수정하세요.` : '이 품목의 발주 이력이 없어 공급업체/단가는 직접 선택해 주세요.');
+        setPriceSource(latest && !currencyMismatch ? 'recentOrder' : null);
+        setAutofillNote(
+          latest && currencyMismatch
+            ? `최근 발주 #${latest.orderId}의 공급업체(${latest.supplier.name})를 채웠습니다. 최근 발주 단가는 다른 통화(${normalizeCurrency(latest.currency)})라 채우지 않았습니다.`
+            : latest
+              ? `최근 발주 #${latest.orderId}의 공급업체(${latest.supplier.name})/단가(${latest.unitPrice})를 채웠습니다. 필요하면 수정하세요.`
+              : '이 품목의 발주 이력이 없어 공급업체/단가는 직접 선택해 주세요.',
+        );
       }
     } catch {
       // 이력 조회 실패는 발주 자체를 막지 않는다 — 자동 채움만 건너뛴다.
@@ -397,7 +434,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
     styleNoOverride?: string,
     // PR-240: 자재명세의 "발주하기"로 넘어온 경우(단일/PR-238 일괄) 그 BOM 행 공급사/
     // 확정 단가·품목 마스터 vendor를 함께 넘긴다 — 최근 발주 이력보다 우선 적용된다.
-    bomPrefillOpts?: { bomSupplierName?: string | null; itemVendorName?: string | null; bomUnitPrice?: number | null },
+    bomPrefillOpts?: { bomSupplierName?: string | null; itemVendorName?: string | null; bomUnitPrice?: number | null; bomCurrency?: string | null },
   ) => {
     if (!picked) { void selectItem(null); return; }
     const row = rowOverride ?? styleMaterialRows.find((r) => r.itemId === picked.id);
@@ -501,7 +538,7 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 ?? bomRes.items.find((b: BomItemRow) => b.material?.id === it.id);
             }
           }
-          const bomPrefillOpts = { bomSupplierName: bomRow?.supplier ?? null, itemVendorName: it.vendor ?? null, bomUnitPrice: bomRow?.unitPrice ?? null };
+          const bomPrefillOpts = { bomSupplierName: bomRow?.supplier ?? null, itemVendorName: it.vendor ?? null, bomUnitPrice: bomRow?.unitPrice ?? null, bomCurrency: bomRow?.currency ?? null };
           if (row) {
             selectStyleMaterial(picked, row, styleNo, bomPrefillOpts);
           } else {
@@ -576,6 +613,8 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       const orderTypeValue = orderType as 'FIRM' | 'PROVISIONAL';
       const common = {
         supplierId: supplier.id, itemId: item.id, unitPrice, orderType: orderTypeValue,
+        // PR-244b: KRW 는 보내지 않는다(서버 기본값 KRW — 이전 요청과 같다). USD 일 때만 보낸다.
+        ...(currency !== 'KRW' ? { currency } : {}),
         notes: newPo.notes,
         styleNo: styleSearch?.styleNo || undefined,
         referenceUnitPriceUsd: priceRef.usd ?? undefined,
@@ -590,6 +629,9 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
       toast.success('발주가 생성되었습니다.');
       setPoLines([]);
       setNewPo(emptyForm);
+      setCurrency('KRW');
+      setCurrencyFromBom(false);
+      setCurrencyTouched(false);
       setQuantityInput('');
       setSupplier(null);
       setItem(null);
@@ -865,6 +907,16 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
               onChange={(e) => { setNewPo({ ...newPo, unitPrice: Number(e.target.value) }); setAutofilled(false); setPriceSource(null); setFieldErrors((f) => ({ ...f, unitPrice: false })); }}
               aria-label="단가"
             />
+            <div className="mt-1 flex items-center gap-1">
+              <CurrencySelect
+                value={currency}
+                onChange={(c) => { setCurrency(c); setCurrencyFromBom(false); setAutofilled(false); setCurrencyTouched(true); }}
+                ariaLabel="통화"
+                hideNotice
+              />
+              {currencyFromBom && <span className="text-xs text-gray-400" data-testid="currency-source">BOM 행 통화</span>}
+            </div>
+            {currencyTouched && <CurrencyChangeNotice />}
             {!!newPo.unitPrice && newPo.unitPrice > 0 && (
               <span className="text-xs text-gray-400 mt-0.5" data-testid="price-source">
                 {priceSource ? PRICE_SOURCE_LABEL[priceSource] : '직접 입력'}
@@ -1112,11 +1164,11 @@ export const PurchaseOrdersManager: React.FC<PurchaseOrdersManagerProps> = ({ pr
                 </td>
                 <td className="px-4 py-2 text-right">{po.quantity}</td>
                 <td className="px-4 py-2 text-right">
-                  {po.unitPrice != null ? po.unitPrice : (
+                  {po.unitPrice != null ? withCurrencyLabel(String(po.unitPrice), po.currency) : (
                     <span className="inline-block bg-yellow-100 text-yellow-800 text-xs px-2 py-0.5 rounded-full" title="CMT 등 단가가 아직 정해지지 않은 발주 — 수출선적서류 작성 시 입력">단가 미입력</span>
                   )}
                 </td>
-                <td className="px-4 py-2 text-right">{po.unitPrice != null ? (po.unitPrice * po.quantity).toLocaleString() : '-'}</td>
+                <td className="px-4 py-2 text-right">{po.unitPrice != null ? formatAmountDefaultLocale(po.unitPrice * po.quantity, po.currency) : '-'}{po.unitPrice != null && isUsd(po.currency) && <KrwReferenceNote usd={po.unitPrice * po.quantity} date={toKstDay(po.createdAt)} rates={rates} />}</td>
                 <td className="px-4 py-2">{po.supplier?.name ?? '-'}</td>
                 <td className="px-4 py-2 text-xs whitespace-nowrap" data-testid="order-type-cell">
                   <span className={`px-2 py-1 rounded font-medium ${po.orderType === 'PROVISIONAL' ? 'bg-purple-100 text-purple-800' : po.orderType === 'FIRM' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'}`}>{orderTypeLabel(po.orderType)}</span>

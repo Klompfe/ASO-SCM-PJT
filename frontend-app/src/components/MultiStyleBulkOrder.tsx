@@ -9,6 +9,8 @@ import { getPurchaseOrders, getOrderTypeSuggestion, createPurchaseOrdersBulk, ge
 import { downloadBase64File } from '../utils/fileDownload';
 import { getErrorMessage } from '../utils/errorMessage';
 import { isBulkRowReady } from '../utils/purchaseOrderForm';
+import { type Currency } from '../utils/currency';
+import { CurrencySelect } from './CurrencySelect';
 import { canCreateWithOrderType, type PurchaseOrderType } from '../utils/purchaseOrderType';
 import {
   groupMultiStyleRequirements,
@@ -31,6 +33,8 @@ interface RowDraft {
   candidateSupplierIds: number[];
   quantity: number;
   unitPrice: number | null;
+  // PR-244b: 단가 통화(기본 KRW). 바꿔도 단가 숫자는 그대로(자동 환산 없음).
+  currency: Currency;
   orderType: PurchaseOrderType | null;
   orderTypeReason: string | null;
 }
@@ -140,6 +144,7 @@ export const MultiStyleBulkOrder: React.FC<MultiStyleBulkOrderProps> = ({ prefil
               candidateSupplierIds: candidates,
               quantity: row.suggestion.quantity ?? 0,
               unitPrice: null,
+              currency: 'KRW',
               orderType: typeInfo.orderType,
               orderTypeReason: typeInfo.reason,
             });
@@ -199,6 +204,8 @@ export const MultiStyleBulkOrder: React.FC<MultiStyleBulkOrderProps> = ({ prefil
         itemId: d.itemId,
         quantity: d.quantity,
         unitPrice: d.unitPrice ?? undefined,
+        // PR-244b: KRW 는 보내지 않는다(서버 기본값 KRW — 이전 요청과 같다).
+        ...(d.currency !== 'KRW' ? { currency: d.currency } : {}),
         orderType: d.orderType as PurchaseOrderType,
         styleNo: d.styleNo,
       })));
@@ -369,6 +376,9 @@ export const MultiStyleBulkOrder: React.FC<MultiStyleBulkOrderProps> = ({ prefil
                                       onChange={(e) => updateDraft(key, { unitPrice: e.target.value === '' ? null : Number(e.target.value) })}
                                       aria-label={`${row.styleNo} ${item.itemName} 단가`}
                                     />
+                                    <div className="mt-1 flex justify-end">
+                                      <CurrencySelect value={d.currency} onChange={(c) => updateDraft(key, { currency: c })} ariaLabel={`${row.styleNo} ${item.itemName} 통화`} className="border rounded px-1 py-0.5 text-xs" />
+                                    </div>
                                   </td>
                                 </tr>
                               );

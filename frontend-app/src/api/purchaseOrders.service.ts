@@ -6,6 +6,8 @@ export interface PurchaseOrder {
   item?: { id: number; code: string; name: string };
   quantity: number;
   unitPrice?: number;
+  // PR-244a/b: 단가 통화(KRW/USD). 기존 행은 NULL → KRW 로 본다.
+  currency?: string | null;
   status: 'PENDING' | 'RECEIVED' | 'CANCELLED';
   supplierId?: number;
   supplier?: { id: number; code: string; name: string };
@@ -37,6 +39,8 @@ export interface CreatePurchaseOrder {
   quantity?: number;
   // PR-173: CMT 계약 건은 단가가 당장 필요 없어(수출선적서류 작성 시점에 입력) 선택값으로 바뀌었다.
   unitPrice?: number;
+  // PR-244b: 비우면 서버가 KRW 로 저장한다.
+  currency?: string;
   lines?: PurchaseOrderLine[];
   notes?: string;
   orderType?: 'FIRM' | 'PROVISIONAL';
@@ -89,7 +93,7 @@ export const updatePurchaseOrderStatus = (
 export const updatePurchaseOrder = (
   id: number,
   data: {
-    quantity?: number; unitPrice?: number; notes?: string; lines?: PurchaseOrderLine[];
+    quantity?: number; unitPrice?: number; currency?: string; notes?: string; lines?: PurchaseOrderLine[];
     // PR-185: null이면 스타일 연결 해제, 값이면 재검증 후 연결/변경.
     styleNo?: string | null;
     referenceUnitPriceUsd?: number;
@@ -101,7 +105,7 @@ export const updatePurchaseOrder = (
 // PR-179: 일괄발주 — 미리보기에서 확인된 행들을 한 번에 생성(서버는 하나라도 틀리면 전부 취소).
 // MERGE-2: CMT(가발주) 건은 단가가 선택 입력이라 unitPrice를 생략할 수 있다(PR-173 정책).
 export const createPurchaseOrdersBulk = (
-  orders: { supplierId: number; itemId: number; quantity: number; unitPrice?: number; notes?: string; orderType?: 'FIRM' | 'PROVISIONAL'; styleNo?: string }[],
+  orders: { supplierId: number; itemId: number; quantity: number; unitPrice?: number; currency?: string; notes?: string; orderType?: 'FIRM' | 'PROVISIONAL'; styleNo?: string }[],
 ): Promise<any> => apiClient.post('/purchase-orders/bulk', { orders });
 
 // PR-178: 발주서 표준 양식(엑셀) — base64로 내려온다(Bearer 인증 때문에 직접 링크 불가).

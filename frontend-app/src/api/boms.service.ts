@@ -21,6 +21,8 @@ export interface BomItemRow {
   requiredQty: number;
   supplier: string;
   unitPrice: number;
+  // PR-244a/b: 단가 통화(KRW/USD). 기존 행은 NULL → KRW 로 본다(엔티티가 그대로 내려온다).
+  currency?: string | null;
   remarks: string;
   composition?: string;
   hsCode?: string;
@@ -64,6 +66,8 @@ export interface UpdateBomItem {
   // 빈 문자열/null은 "미정"으로 해제.
   supplier?: string | null;
   unitPrice?: number;
+  // PR-244b: 통화만 바꾼다 — 단가 숫자는 서버도 자동 환산하지 않는다. 비우면 KRW.
+  currency?: string;
 }
 
 // PR-197: updateBomItem() 응답에 변경 전 값(before)이 함께 온다 — "요척 2.7 → 2.9" 같은

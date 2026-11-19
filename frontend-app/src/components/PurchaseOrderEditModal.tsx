@@ -3,6 +3,8 @@ import toast from 'react-hot-toast';
 import { updatePurchaseOrder, type PurchaseOrder, type PurchaseOrderLine } from '../api/purchaseOrders.service';
 import { getErrorMessage } from '../utils/errorMessage';
 import { sumPurchaseOrderLines } from '../utils/purchaseOrderForm';
+import { normalizeCurrency, type Currency } from '../utils/currency';
+import { CurrencySelect, CurrencyChangeNotice } from './CurrencySelect';
 
 interface PurchaseOrderEditModalProps {
   order: PurchaseOrder;
@@ -19,6 +21,8 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
   // 오해하기 쉬워 빈 칸으로 보여준다. 건드리지 않고 저장하면 undefined로 보내 기존 값(null
   // 포함) 그대로 유지한다(update()의 "undefined면 안 건드림" 규칙과 동일).
   const [unitPrice, setUnitPrice] = useState<number | null>(order.unitPrice != null ? Number(order.unitPrice) : null);
+  // PR-244b: 통화(NULL/빈 값은 KRW). 바꿔도 단가 숫자는 그대로 둔다(자동 환산 없음) — 바꿨을 때만 서버에 보낸다.
+  const [currency, setCurrency] = useState<Currency>(normalizeCurrency(order.currency));
   const [notes, setNotes] = useState(order.notes ?? '');
   // PR-185: 스타일 연결/해제/변경 — 비우면 연결 해제, 바꾸지 않으면 서버에 아예 안 보낸다.
   const [styleNoInput, setStyleNoInput] = useState(order.styleNo ?? '');
@@ -54,6 +58,7 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
       const res = await updatePurchaseOrder(order.id, {
         quantity: hasLines ? sumPurchaseOrderLines(poLines) : quantity,
         unitPrice: unitPrice ?? undefined,
+        ...(currency !== normalizeCurrency(order.currency) ? { currency } : {}),
         notes,
         lines: linesPayload,
         ...(styleNoChanged ? { styleNo: styleNoInput.trim() === '' ? null : styleNoInput.trim() } : {}),
@@ -90,9 +95,15 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
             aria-label="수정 수량"
           />
         </label>
-        <label className="flex flex-col text-sm text-gray-600">단가
-          <input type="number" min={0} step="any" className="border rounded px-3 py-2 mt-1" placeholder="CMT는 비워둘 수 있음" value={unitPrice ?? ''} onChange={(e) => setUnitPrice(e.target.value === '' ? null : Number(e.target.value))} aria-label="수정 단가" />
-        </label>
+        <div className="flex flex-col text-sm text-gray-600">
+          <div className="flex items-end gap-2">
+            <label className="flex flex-col flex-1">단가
+              <input type="number" min={0} step="any" className="border rounded px-3 py-2 mt-1" placeholder="CMT는 비워둘 수 있음" value={unitPrice ?? ''} onChange={(e) => setUnitPrice(e.target.value === '' ? null : Number(e.target.value))} aria-label="수정 단가" />
+            </label>
+            <CurrencySelect value={currency} onChange={setCurrency} ariaLabel="수정 통화" className="border border-gray-300 rounded px-2 py-2" hideNotice />
+          </div>
+          {currency !== normalizeCurrency(order.currency) && <CurrencyChangeNotice />}
+        </div>
         <label className="flex flex-col text-sm text-gray-600">비고
           <input className="border rounded px-3 py-2 mt-1" value={notes} onChange={(e) => setNotes(e.target.value)} aria-label="수정 비고" />
         </label>
