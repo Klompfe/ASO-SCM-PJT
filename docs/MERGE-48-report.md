@@ -39,3 +39,8 @@ ALTER TABLE "bom_item_details" DROP COLUMN IF EXISTS "currency"
 결론: 테스트 브랜치 최종 상태 = 마이그레이션 적용됨(운영 반영 전 상태 아님, 테스트 브랜치 한정). 운영 DB(.env host)에는 어떤 명령도 실행하지 않음.
 
 main 병합은 하지 않음(게이트 2 는 `Render 확인 완료` 줄 필요).
+
+## 게이트 2 — 병합 (2026-11-19)
+- 병합 전 main `9ead89a`, ff 병합 대상 `784089f`(코드 `65dc907` + 보고서 커밋). src/·test/ 트리는 검증 트리와 동일, 루트 트리 차이는 이 보고서 파일뿐. 병합 후 `npm run build` 성공.
+- **Render 는 배포 시작 때 `npm run migration:run:prod` 를 자동 실행하므로 이 push 가 곧 운영 마이그레이션이다.**
+- push 완료: main `9ead89a` → `784089f`. 배포 대기 중 — 확인 후 알려 주세요. 롤백은 자동으로 하지 않음(문제 시 병합 커밋 revert, force push 금지).
