@@ -53,6 +53,11 @@ export class BomItem {
   @Column('decimal')
   unitPrice: number;
 
+  // PR-244a: 단가의 통화(KRW/USD). NULL 은 KRW 로 취급한다(코드: effectiveCurrency). 통화를
+  // 바꿔도 unitPrice 숫자는 자동 환산하지 않는다 — 사용자가 새 통화로 직접 입력한다.
+  @Column({ type: 'varchar', length: 3, nullable: true, default: 'KRW' })
+  currency?: string | null;
+
   @Column()
   remarks: string;
 

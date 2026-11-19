@@ -1,5 +1,6 @@
 import * as xlsx from 'xlsx';
 import { BadRequestException } from '@nestjs/common';
+import { effectiveCurrency } from '../../common/constants/currency';
 
 // PR-169: 공급업체 포장내역 표준양식 — 발주 생성 시 자동으로 상단 컨텍스트(발주/스타일/
 // 자재 정보)를 채워 다운로드하고, 공급업체가 하단 실측 표를 채워 다시 업로드하면 그대로
@@ -41,6 +42,7 @@ export interface PackingReceiptTemplateContext {
   composition: string | null;
   hsCode: string | null;
   unitPrice: number | null;
+  currency?: string | null; // PR-244a: 없으면 KRW
   quantity: number;
   midoPriceCandidates: MidoPriceCandidateSummary[];
 }
@@ -91,7 +93,7 @@ function contextRows(ctx: PackingReceiptTemplateContext): [string, string | numb
     ['자재영문명', ctx.itemEnglishName ?? ''],
     ['혼용률', ctx.composition ?? ''],
     ['HS코드', ctx.hsCode ?? ''],
-    ['발주단가(KRW)', ctx.unitPrice ?? ''],
+    [`발주단가(${effectiveCurrency(ctx.currency)})`, ctx.unitPrice ?? ''],
     ['발주수량(참고용)', ctx.quantity],
   ];
   // 발주단가가 없는 자재는 미도 단가표에서 느슨하게 일치하는 후보들을 참고용으로 함께

@@ -11,6 +11,7 @@ import { PurchaseOrder, PurchaseOrderStatus } from '../purchase-orders/entities/
 import { LABEL_SET } from './label-set.constants';
 import { areBomContentsIdentical, normalizeMaterialName, pickActiveBom } from './utils/active-bom.util';
 import { normalizeForFuzzyMatch } from './utils/bom-name-normalize.util';
+import { resolveCurrencyInput } from '../common/constants/currency';
 
 // PR-197: updateItem()이 돌려주는 변경 전 값 스냅샷 — 화면이 "요척 2.7 → 2.9" 같은
 // 변경 전/후 확인 문구를 만들 수 있게 한다(감사 테이블은 만들지 않음, 서버 로그만 남김).
@@ -143,6 +144,9 @@ export class BomsService {
     // 문자열/null은 "미정"으로 해제(기존 mapping-commit.service.ts의 null 관례와 동일).
     if (dto.supplier !== undefined) bomItem.supplier = dto.supplier || null;
     if (dto.unitPrice !== undefined) bomItem.unitPrice = dto.unitPrice;
+    // PR-244a: 통화만 바꾼다 — 단가 숫자는 자동 환산하지 않는다(사용자가 새 통화로 직접 입력).
+    const currency = resolveCurrencyInput(dto.currency);
+    if (currency !== undefined) bomItem.currency = currency;
 
     // PR-231: 필요수량 직접 지정 — null을 보내면 세 컬럼 모두 해제(계산값으로 복귀).
     // 값을 보내면 그 값 + (같이 왔으면) 사유를 저장하고 지정 시각을 지금으로 기록한다.

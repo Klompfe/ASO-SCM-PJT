@@ -19,6 +19,7 @@ import { Bom } from '../boms/entities/bom.entity';
 import { pickActiveBom } from '../boms/utils/active-bom.util';
 import { buildItemStyleUsage, attributePo } from './utils/po-style-attribution.util';
 import { IsNull, Not } from 'typeorm';
+import { DEFAULT_CURRENCY, resolveCurrencyInput } from '../common/constants/currency';
 
 // PR-196: "미연결 발주 정리" 화면(GET /purchase-orders/unlinked)의 행 1개.
 export interface UnlinkedPurchaseOrderRow {
@@ -83,6 +84,7 @@ export class PurchaseOrdersService {
     const po = this.poRepository.create({
       quantity,
       unitPrice: dto.unitPrice,
+      currency: resolveCurrencyInput(dto.currency) ?? DEFAULT_CURRENCY,
       orderType: dto.orderType ?? null,
       notes: dto.notes,
       supplier,
@@ -213,6 +215,7 @@ export class PurchaseOrdersService {
         const po = queryRunner.manager.create(PurchaseOrder, {
           quantity: dto.quantity,
           unitPrice: dto.unitPrice,
+          currency: resolveCurrencyInput(dto.currency) ?? DEFAULT_CURRENCY,
           orderType: dto.orderType ?? null,
           notes: dto.notes,
           supplier: suppliers.find((s) => s.id === dto.supplierId),
@@ -442,6 +445,9 @@ export class PurchaseOrdersService {
       po.quantity = dto.quantity;
     }
     if (dto.unitPrice !== undefined) po.unitPrice = dto.unitPrice;
+    // PR-244a: 통화만 바꾼다 — 단가 숫자는 자동 환산하지 않는다.
+    const newCurrency = resolveCurrencyInput(dto.currency);
+    if (newCurrency !== undefined) po.currency = newCurrency;
     if (dto.notes !== undefined) po.notes = dto.notes;
     // PR-185: 스타일 연결 변경/해제. null이면 해제, 값이면 재검증 후 연결(이미 발주된
     // 미입고 건을 사람이 직접 연결/변경해 주는 용도).

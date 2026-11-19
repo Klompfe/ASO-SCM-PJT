@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { ThreadType, TapeType } from '../entities/bom-item.entity';
+import { CurrencyField } from '../../common/constants/currency';
 
 // PR-073: 수출 선적서류(INVOICE/Packing List) 자동생성을 위해 BomItem에 혼용율/HS코드를
 // 스타일별로 입력·수정할 수 있어야 한다. PR-197: 요척/규격/색상/구분(consumption/spec/
@@ -93,4 +94,8 @@ export class UpdateBomItemDto {
   @IsNumber()
   @Min(0)
   unitPrice?: number;
+
+  // PR-244a: 이 행 단가의 통화. 바꿔도 단가 숫자는 자동 환산하지 않는다.
+  @CurrencyField()
+  currency?: string;
 }

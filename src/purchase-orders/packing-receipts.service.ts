@@ -125,6 +125,7 @@ export class PackingReceiptsService {
       composition: bomItem.composition ?? null,
       hsCode: bomItem.hsCode ?? null,
       unitPrice: po.unitPrice != null ? Number(po.unitPrice) : null,
+      currency: po.currency ?? null,
       quantity: Number(po.quantity),
       midoPriceCandidates,
     };

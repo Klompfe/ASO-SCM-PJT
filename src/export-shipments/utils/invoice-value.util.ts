@@ -26,3 +26,21 @@ export function convertUsdToKrw(
   if (exchangeRateUsdKrw == null || exchangeRateUsdKrw <= 0) return null;
   return Math.round(amountUsd * exchangeRateUsdKrw);
 }
+
+// PR-244a: 발주 단가의 통화를 보고 USD 값을 계산한다.
+// - KRW/NULL(기존 데이터 전부): 기존 calculateUsdValueFromKrw 그대로(환율로 나눔).
+// - USD: 환산하지 않고 단가를 그대로 USD 단가로 쓴다(환율 불필요).
+// 행마다 개별 판단하므로 한 INVOICE 안에 통화가 섞여도 된다.
+export function calculateUsdValueForPo(
+  unitPrice: number | null | undefined,
+  currency: string | null | undefined,
+  qty: number,
+  exchangeRateUsdKrw: number | null | undefined,
+): UsdValueResult | null {
+  if (currency != null && currency.trim().toUpperCase() === 'USD') {
+    if (unitPrice == null) return null;
+    const unitPriceUsd = round4(Number(unitPrice));
+    return { unitPriceUsd, amountUsd: round4(unitPriceUsd * qty) };
+  }
+  return calculateUsdValueFromKrw(unitPrice, qty, exchangeRateUsdKrw);
+}

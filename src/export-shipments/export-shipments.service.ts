@@ -7,7 +7,7 @@ import { BomItem } from '../boms/entities/bom-item.entity';
 import { ExportShipment, ExportShipmentStatus, ExportShipmentSource } from './entities/export-shipment.entity';
 import { ExportShipmentLine, ExportShipmentLinePriceSource } from './entities/export-shipment-line.entity';
 import { splitFabricByColor, splitTrimByColor, allocateCbm } from './utils/packing-color-split.util';
-import { calculateUsdValueFromKrw } from './utils/invoice-value.util';
+import { calculateUsdValueForPo } from './utils/invoice-value.util';
 import { GenerateExportShipmentDto } from './dto/generate-export-shipment.dto';
 import { FindExportShipmentsDto } from './dto/find-export-shipments.dto';
 import { UpdateExportShipmentLineDto } from './dto/update-export-shipment-line.dto';
@@ -183,7 +183,7 @@ export class ExportShipmentsService {
           const colorLines = splitFabricByColor(receipt.rolls ?? []);
           const receiptTotalQty = colorLines.reduce((acc, cl) => acc + cl.qty, 0);
           for (const cl of colorLines) {
-            const usd = calculateUsdValueFromKrw(po.unitPrice, cl.qty, dto.exchangeRateUsdKrw);
+            const usd = calculateUsdValueForPo(po.unitPrice, po.currency, cl.qty, dto.exchangeRateUsdKrw);
             linesToCreate.push({
               styleNo,
               packingReceiptId: receipt.id,
@@ -216,7 +216,7 @@ export class ExportShipmentsService {
           const colorLines = splitTrimByColor(receipt.cartons ?? []);
           const receiptTotalQty = colorLines.reduce((acc, cl) => acc + cl.qty, 0);
           for (const cl of colorLines) {
-            const usd = calculateUsdValueFromKrw(po.unitPrice, cl.qty, dto.exchangeRateUsdKrw);
+            const usd = calculateUsdValueForPo(po.unitPrice, po.currency, cl.qty, dto.exchangeRateUsdKrw);
             linesToCreate.push({
               styleNo,
               packingReceiptId: receipt.id,
@@ -536,7 +536,7 @@ export class ExportShipmentsService {
     for (const line of recalculable) {
       const receipt = receiptById.get(line.packingReceiptId!);
       const po = receipt ? poById.get(receipt.purchaseOrderId) : null;
-      const usd = calculateUsdValueFromKrw(po?.unitPrice, Number(line.qty), dto.exchangeRateUsdKrw);
+      const usd = calculateUsdValueForPo(po?.unitPrice, po?.currency, Number(line.qty), dto.exchangeRateUsdKrw);
       line.unitPriceUsd = usd?.unitPriceUsd ?? null;
       line.amountUsd = usd?.amountUsd ?? null;
       line.priceSource = usd ? ExportShipmentLinePriceSource.PURCHASE_ORDER : null;

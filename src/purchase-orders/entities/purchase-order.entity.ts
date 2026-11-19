@@ -50,6 +50,10 @@ export class PurchaseOrder {
   @Column({ type: 'decimal', nullable: true })
   unitPrice?: number;
 
+  // PR-244a: unitPrice 의 통화(KRW/USD). NULL 은 KRW 로 취급한다(effectiveCurrency).
+  @Column({ type: 'varchar', length: 3, nullable: true, default: 'KRW' })
+  currency?: string | null;
+
   @Column({
     type: 'varchar',
     enum: PurchaseOrderStatus,

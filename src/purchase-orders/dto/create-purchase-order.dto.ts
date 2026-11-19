@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsPositive, IsString, Min, ValidateNested } from 'class-validator';
 import { PurchaseOrderType } from '../entities/purchase-order.entity';
+import { CurrencyField } from '../../common/constants/currency';
 
 // PR-176: 색상/사이즈별 상세 한 줄(자유 텍스트 색상/사이즈 + 수량).
 export class PurchaseOrderLineDto {
@@ -49,6 +50,10 @@ export class CreatePurchaseOrderDto {
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   unitPrice?: number;
+
+  // PR-244a: 단가 통화(KRW/USD, 비우면 KRW).
+  @CurrencyField()
+  currency?: string;
 
   // PR-180: 실발주(FIRM)/가발주(PROVISIONAL). 화면이 제안값을 보여주고 사람이 확정해 보낸다 — 서버는 추측해서 채우지 않는다.
   @ApiProperty({ enum: PurchaseOrderType, required: false, description: '발주 구분(실발주/가발주)' })

@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsPositive, IsString, Min, ValidateNested } from 'class-validator';
 import { PurchaseOrderLineDto } from './create-purchase-order.dto';
+import { CurrencyField } from '../../common/constants/currency';
 
 // PR-177: 미입고(PENDING) 발주의 수량/단가/비고 수정. 입고·취소된 발주는 서비스에서 막는다.
 export class UpdatePurchaseOrderDto {
@@ -16,6 +17,10 @@ export class UpdatePurchaseOrderDto {
   @IsNumber()
   @Min(0)
   unitPrice?: number;
+
+  // PR-244a: 단가 통화(KRW/USD). 바꿔도 단가 숫자는 자동 환산하지 않는다.
+  @CurrencyField()
+  currency?: string;
 
   @ApiPropertyOptional({ example: '긴급 발주' })
   @IsOptional()

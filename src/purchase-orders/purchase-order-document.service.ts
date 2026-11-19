@@ -61,6 +61,7 @@ export class PurchaseOrderDocumentService {
       factory: bom.factory,
       quantity: Number(po.quantity),
       unitPrice: po.unitPrice != null ? Number(po.unitPrice) : null,
+      currency: po.currency ?? null,
       notes: po.notes ?? null,
       lines: [],
     };
@@ -135,6 +136,7 @@ export class PurchaseOrderDocumentService {
           styleNo: po.styleNo ?? null,
           quantity: Number(po.quantity),
           unitPrice: po.unitPrice != null ? Number(po.unitPrice) : null,
+          currency: po.currency ?? null,
           requiredDate: styleInfo?.targetRdd ?? null,
           notes: po.notes ?? null,
         };
