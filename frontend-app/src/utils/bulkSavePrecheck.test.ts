@@ -24,7 +24,8 @@ const existing = (o: Partial<SalesOrderBomCompareExistingRow> = {}): SalesOrderB
 const sameRow = (o: { consumption?: number; requiredQty?: number; compositionStatus?: any } = {}): SalesOrderBomCompareRow => ({
   type: 'same', incomingIndex: 0, existing: existing(),
   incoming: { itemName: '자재A', consumption: o.consumption ?? 1, requiredQty: o.requiredQty ?? 100 },
-  compositionStatus: o.compositionStatus,
+  // 서버는 기존·들어온 행이 모두 있는 행에는 항상 혼용률 상태를 채워 준다 — 기본값은 same.
+  compositionStatus: o.compositionStatus ?? 'same',
 });
 const compare = (rows: SalesOrderBomCompareRow[], overview?: SalesOrderBomCompareResponse['overview'], hasExistingBom = true): SalesOrderBomCompareResponse => ({
   hasExistingBom, rows, ...(overview ? { overview } : {}),
@@ -196,5 +197,87 @@ describe('runWithConcurrency (PR-250)', () => {
 
   it('빈 입력도 정상(결과 빈 배열)', async () => {
     expect(await runWithConcurrency([], 3, async () => 1)).toEqual([]);
+  });
+});
+
+// PR-250 보강(MERGE-55 Gate A ③): 모르는 값은 안전한 쪽(변경 있음 / 확인 필요)으로 — fail-closed. 합성 값만 사용.
+describe('classifyBulkPrecheck — 알 수 없는 값은 변경 있음, 비정상 응답은 확인 필요 (PR-250 보강)', () => {
+  const weird = (v: unknown) => v as any;
+  const kind = (c: unknown) => classifyBulkPrecheck([{ index: 0, styleNo: 'S-X', compare: c as any }])[0];
+
+  it('미지의 자재 행 type → 변경 있음(변경 없음·신규로 분류되지 않음)', () => {
+    for (const type of ['moved', '', 7, null, undefined]) {
+      const e = kind(compare([weird({ type, existing: existing(), incoming: { itemName: 'A' } })]));
+      expect(e.kind).toBe('changed');
+      expect(e.counts.unknownItems).toBe(1);
+      expect(e.summary).toContain('해석할 수 없는 값 1건');
+    }
+  });
+
+  it('미지의 오더개요 status → 변경 있음', () => {
+    for (const status of ['pending', '', 3, null, undefined]) {
+      const e = kind(compare([sameRow()], [weird({ field: 'buyer', existing: 'A', incoming: 'B', status })]));
+      expect(e.kind).toBe('changed');
+      expect(e.counts.unknownItems).toBe(1);
+    }
+  });
+
+  it('미지의 혼용률 status(누락 포함) → 변경 있음', () => {
+    for (const compositionStatus of ['weird', '', 9, null, undefined]) {
+      const row = { ...sameRow(), compositionStatus: weird(compositionStatus) };
+      const e = kind(compare([row]));
+      expect(e.kind).toBe('changed');
+      expect(e.counts.unknownItems).toBe(1);
+    }
+  });
+
+  it('same 행인데 기존·들어온 행이 빠져 있으면(판단 불가) 변경 있음', () => {
+    const e = kind(compare([weird({ type: 'same', compositionStatus: 'same' })]));
+    expect(e.kind).toBe('changed');
+  });
+
+  it('알려진 값 조합은 기존과 같은 결과(회귀): 신규 / 변경 없음 / 변경 있음', () => {
+    expect(kind(compare([], undefined, false)).kind).toBe('new');
+    expect(kind(compare([sameRow({ compositionStatus: 'same' }), sameRow({ compositionStatus: 'incomingEmpty' })], [ov('same'), ov('incomingEmpty', 'brand')])).kind).toBe('unchanged');
+    expect(kind(compare([sameRow({ compositionStatus: 'fillEmpty' })])).kind).toBe('changed');
+    expect(kind(compare([sameRow()], [ov('differs')])).kind).toBe('changed');
+    expect(kind(compare([sameRow()])).counts.unknownItems).toBe(0);
+  });
+
+  it('응답 구조가 비정상이면 변경 없음이 아니라 확인 필요', () => {
+    const bad: unknown[] = [
+      {},
+      { hasExistingBom: true },
+      { hasExistingBom: true, rows: 'x' },
+      { hasExistingBom: true, rows: {} },
+      { hasExistingBom: true, rows: [], overview: 'x' },
+      { hasExistingBom: true, rows: [], overview: {} },
+      { hasExistingBom: 'yes', rows: [] },
+      { rows: [] },
+      'text',
+      42,
+    ];
+    for (const c of bad) {
+      const e = kind(c);
+      expect(e.kind).toBe('needsCheck');
+      expect(e.reason).toContain('해석할 수 없습니다');
+    }
+  });
+
+  it('신규는 기존 행·오더개요가 없음이 명확할 때만 — 자재 행이 남아 있는 모순된 응답은 변경 있음', () => {
+    const e = kind(compare([sameRow()], undefined, false));
+    expect(e.kind).toBe('changed');
+  });
+
+  it('미지의 값이 섞인 스타일은 selectNewTargets 에 포함되지 않고, 변경 있음으로 표에 남는다(저장 대상에서 조용히 사라지지 않음)', () => {
+    const entries = classifyBulkPrecheck([
+      { index: 0, styleNo: 'S-NEW', compare: compare([], undefined, false) },
+      { index: 1, styleNo: 'S-UNK', compare: compare([weird({ type: 'moved', existing: existing(), incoming: { itemName: 'A' } })]) },
+      { index: 2, styleNo: 'S-BAD', compare: weird({ rows: 'x' }) },
+    ]);
+    expect(entries.map((e) => e.kind)).toEqual(['new', 'changed', 'needsCheck']);
+    expect(selectNewTargets(entries)).toEqual([0]);
+    expect(selectChangedIndexes(entries)).toEqual([1]); // "비교하고 저장"으로 사람이 확인
+    expect(summarizePrecheck(entries)).toEqual({ new: 1, changed: 1, unchanged: 0, needsCheck: 1 });
   });
 });
