@@ -102,6 +102,8 @@ function incomingToNewItem(incoming: BomDiffIncomingRow): Record<string, unknown
     colorCode: incoming.colorCode ?? undefined,
     spec: incoming.spec ?? undefined,
     consumption: incoming.consumption ?? undefined,
+    // PR-248: 엑셀 혼용률 — 비어 있으면 보내지 않는다(서버 규칙: 기존 값을 지우거나 조용히 바꾸지 않음).
+    composition: incoming.composition?.trim() ? incoming.composition.trim() : undefined,
   };
 }
 

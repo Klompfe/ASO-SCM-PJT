@@ -11,6 +11,7 @@ import {
 } from '../api/salesOrders.service';
 import { SalesOrderBomCompareStep } from './SalesOrderBomCompareStep';
 import { CompositionSummary } from './CompositionSummary';
+import { CompositionBulkPanel } from './CompositionBulkPanel';
 import { summarizeCompositions, looksLikeAbbreviatedComposition } from '../utils/compositionReview';
 import { getErrorMessage } from '../utils/errorMessage';
 import {
@@ -1007,6 +1008,15 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                     <CompositionSummary
                       testIdSuffix={index}
                       summary={summarizeCompositions(result.bomItems, excludedBomIndexes.get(index) ?? new Set<number>())}
+                    />
+                    {/* PR-248: 선택 행 혼용률 일괄 입력(화면 상태만 변경, 저장은 기존 흐름). 이미 값이 있는 행은 건너뛴다. */}
+                    <CompositionBulkPanel
+                      testIdSuffix={index}
+                      items={result.bomItems}
+                      disabledIndexes={excludedBomIndexes.get(index) ?? new Set<number>()}
+                      onApply={(next) =>
+                        setResults((prev) => prev.map((r, ri) => (ri !== index ? r : { ...r, bomItems: next as typeof r.bomItems })))
+                      }
                     />
                   </div>
 

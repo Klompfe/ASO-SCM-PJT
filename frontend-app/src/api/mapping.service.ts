@@ -16,6 +16,8 @@ export interface ParsedBomItem {
   requiredQty?: number;
   colorOf?: string;
   spec?: string;
+  // PR-248: 엑셀 "혼용률/중량" 열에서 읽은 문구(없으면 필드 자체가 없음).
+  composition?: string;
 }
 
 export interface ParsedStyleResult {
@@ -25,6 +27,8 @@ export interface ParsedStyleResult {
   overview?: ParsedStyleOverview;
   bomItems?: ParsedBomItem[];
   parseError?: string;
+  // PR-248: 파서 안내(예: 혼용률 문구가 너무 길어 비움) — 오류가 아니다.
+  warnings?: string[];
 }
 
 export const parseMappingFile = (file: File): Promise<ParsedStyleResult[]> => {
@@ -63,6 +67,7 @@ export interface BomDiffIncomingRow {
   colorCode?: string | null;
   spec?: string | null;
   consumption?: number | null;
+  composition?: string | null;
 }
 
 export interface BomDiffRow {

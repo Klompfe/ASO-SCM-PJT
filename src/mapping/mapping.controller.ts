@@ -72,6 +72,8 @@ export class MappingController {
       overview: sheet.styleOverview ? { ...sheet.styleOverview, totalQtyCandidate: sheet.totalQtyCandidate } : sheet.styleOverview,
       bomItems: sheet.bomItems?.map((item: any, idx: number) => ({ id: idx + 1, ...item })),
       colorSizeQuantities: sheet.colorSizeQuantities,
+      // PR-248: 파서 안내(혼용률 문구 너무 길어 비움 등) — 오류가 아니다.
+      warnings: sheet.warnings,
       parseError: sheet.parseError,
     }));
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeCompositions, formatCompositionSummary, isCompositionTargetCategory, cleanComposition, looksLikeAbbreviatedComposition } from './compositionReview';
+import { summarizeCompositions, formatCompositionSummary, isCompositionTargetCategory, cleanComposition, looksLikeAbbreviatedComposition, applyBulkComposition, selectFabricRowIndexes, countNonFabricSelected, formatBulkResult } from './compositionReview';
 
 // PR-246: 합성 값만 사용.
 describe('compositionReview (PR-246)', () => {
@@ -74,5 +74,61 @@ describe('looksLikeAbbreviatedComposition (PR-247)', () => {
     const v = ' r/n/sp=56/40/4 ';
     looksLikeAbbreviatedComposition(v);
     expect(v).toBe(' r/n/sp=56/40/4 ');
+  });
+});
+
+// PR-248: 선택 행 일괄 입력(화면 상태만 변경) — 합성 값.
+describe('applyBulkComposition (PR-248)', () => {
+  const rows = () => [
+    { category: '겉감', itemName: 'A', composition: null as string | null | undefined },
+    { category: '안감', itemName: 'B', composition: 'POLYESTER 100%' },
+    { category: '겉감', itemName: 'C', composition: '  ' },
+    { category: '단추', itemName: 'D', composition: undefined },
+  ];
+
+  it('선택된 빈 행만 채우고, 값이 있는 행은 건너뛰며 개수를 센다', () => {
+    const r = applyBulkComposition(rows(), new Set([0, 1, 2]), 'COTTON 60% POLYESTER 40%');
+    expect(r.filled).toBe(2);
+    expect(r.skipped).toBe(1);
+    expect(r.rows.map((x) => x.composition)).toEqual(['COTTON 60% POLYESTER 40%', 'POLYESTER 100%', 'COTTON 60% POLYESTER 40%', undefined]);
+    expect(formatBulkResult(r)).toBe('2행 채움, 1행은 이미 값이 있어 건너뜀');
+  });
+
+  it('값은 입력한 그대로(앞뒤 공백만 제거) 들어간다 — 약어·소문자·기호 불변', () => {
+    const r = applyBulkComposition(rows(), new Set([0]), '  r/n/sp=56/40/4 ');
+    expect(r.rows[0].composition).toBe('r/n/sp=56/40/4');
+  });
+
+  it('값이 비어 있거나 선택이 없으면 아무것도 바꾸지 않는다', () => {
+    const base = rows();
+    for (const v of ['', '   ', null, undefined]) {
+      const r = applyBulkComposition(base, new Set([0, 2]), v);
+      expect(r).toEqual({ rows: base, filled: 0, skipped: 0 });
+    }
+    expect(applyBulkComposition(base, new Set(), 'X 100%')).toEqual({ rows: base, filled: 0, skipped: 0 });
+  });
+
+  it('선택되지 않은 행·원본 배열은 바뀌지 않는다', () => {
+    const base = rows();
+    const r = applyBulkComposition(base, new Set([0]), 'X 100%');
+    expect(base[0].composition).toBeNull();
+    expect(r.rows[2]).toBe(base[2]);
+    expect(r.rows[3]).toBe(base[3]);
+  });
+
+  it('selectFabricRowIndexes: PR-246 원단류 구분 목록 재사용(부자재 제외)', () => {
+    expect([...selectFabricRowIndexes(rows())]).toEqual([0, 1, 2]);
+  });
+
+  it('countNonFabricSelected: 선택된 행 중 부자재 수', () => {
+    expect(countNonFabricSelected(rows(), new Set([0, 3]))).toBe(1);
+    expect(countNonFabricSelected(rows(), new Set([0, 1, 2]))).toBe(0);
+  });
+
+  it('미기재 행 수 안내는 PR-246 summarizeCompositions 를 그대로 쓴다(채운 뒤 줄어든다)', () => {
+    const base = rows();
+    expect(summarizeCompositions(base).missingRows).toBe(2);
+    const filled = applyBulkComposition(base, new Set([0, 2]), 'X 100%').rows;
+    expect(summarizeCompositions(filled).missingRows).toBe(0);
   });
 });

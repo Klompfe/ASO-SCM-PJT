@@ -57,3 +57,60 @@ export function looksLikeAbbreviatedComposition(value: string | null | undefined
   if (v === '' || v.includes('%')) return false;
   return /[/=]/.test(v) && /\d/.test(v);
 }
+
+// PR-248: 한 스타일 안에서 선택한 행들에 같은 혼용률을 채우는 순수 로직(화면 상태만 바꾼다).
+export interface CompositionRowLike {
+  category?: string | null;
+  composition?: string | null;
+}
+
+export interface BulkCompositionResult<T> {
+  rows: T[];
+  filled: number;
+  skipped: number;
+}
+
+// 이미 값이 있는 행은 건너뛰고(덮어쓰지 않음), 값은 입력한 그대로(trim 만) 넣는다. 값이 비어 있거나
+// 선택이 없으면 아무것도 바꾸지 않는다. 원본 배열·행은 바꾸지 않는다.
+export function applyBulkComposition<T extends CompositionRowLike>(
+  rows: T[],
+  selectedIndexes: Set<number>,
+  value: string | null | undefined,
+): BulkCompositionResult<T> {
+  const v = cleanComposition(value);
+  if (v == null || selectedIndexes.size === 0) return { rows, filled: 0, skipped: 0 };
+  let filled = 0;
+  let skipped = 0;
+  const next = rows.map((row, i) => {
+    if (!selectedIndexes.has(i)) return row;
+    if (cleanComposition(row.composition) != null) {
+      skipped++;
+      return row;
+    }
+    filled++;
+    return { ...row, composition: v };
+  });
+  return { rows: next, filled, skipped };
+}
+
+// "원단류 행 선택" 빠른 버튼 — PR-246 의 원단류 구분 목록(COMPOSITION_TARGET_CATEGORIES)을 재사용한다.
+export function selectFabricRowIndexes(rows: CompositionRowLike[]): Set<number> {
+  const out = new Set<number>();
+  rows.forEach((r, i) => {
+    if (isCompositionTargetCategory(r.category)) out.add(i);
+  });
+  return out;
+}
+
+// 선택된 행 중 원단류가 아닌 행 수(확인 문구용).
+export function countNonFabricSelected(rows: CompositionRowLike[], selectedIndexes: Set<number>): number {
+  let n = 0;
+  selectedIndexes.forEach((i) => {
+    if (rows[i] && !isCompositionTargetCategory(rows[i].category)) n++;
+  });
+  return n;
+}
+
+export function formatBulkResult(r: { filled: number; skipped: number }): string {
+  return `${r.filled}행 채움, ${r.skipped}행은 이미 값이 있어 건너뜀`;
+}

@@ -24,3 +24,13 @@ export function CompositionSummary({ summary, testIdSuffix }: { summary: Summary
     </div>
   );
 }
+
+// PR-248: 매핑 미리보기용 "혼용률 미기재" 안내(경고만) — 원단류 행 중 비어 있는 행 수. 저장·승인을 막지 않는다.
+export function CompositionMissingNotice({ missingRows }: { missingRows: number }) {
+  if (missingRows <= 0) return null;
+  return (
+    <div className="mb-2 bg-yellow-50 border border-yellow-300 rounded px-2 py-1 text-yellow-800 text-xs" data-testid="composition-missing-notice">
+      ⚠ 혼용률 미기재 {missingRows}행 — 저장 후에도 자재·BOM 조회에서 입력할 수 있습니다
+    </div>
+  );
+}

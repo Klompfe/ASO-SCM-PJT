@@ -1,3 +1,6 @@
+import { CompositionMissingNotice } from './CompositionSummary';
+import { CompositionBulkPanel } from './CompositionBulkPanel';
+import { summarizeCompositions } from '../utils/compositionReview';
 import React, { useState, useEffect } from 'react';
 import { UPLOAD_KRW_NOTICE } from '../utils/currency';
 import { commitMapping, getBomDiff, reconcileBom, type BomReconcileResult } from '../api/mapping.service';
@@ -50,6 +53,10 @@ interface ViewProps {
   // PR-212: 파서가 수량 셀을 읽으며 낸 경고(예: 잘못된 셀, 색상 빈 칸, 중복 색상, 중국
   // 수량 무시) — 저장에는 영향 없음(해당 값들은 이미 저장 대상에서 제외됐다), 참고용.
   colorSizeQuantityWarnings?: string[];
+  // PR-248: 파서 안내(혼용률 문구 너무 길어 비움 등) — 참고용.
+  parserWarnings?: string[];
+  // PR-248: 선택 행 혼용률 일괄 입력 — 없으면 패널을 그리지 않는다(화면 상태만 바꾸고 저장은 기존 흐름).
+  onBomItemsChange?: (next: any[]) => void;
   saving: boolean;
   // 승인 결과. 있으면 "확인"을 눌러야만 모달이 닫힌다(경고를 놓치지 않게 — 예전엔 alert('저장 성공!')가 그 역할을 어설프게 했다).
   result: CommitOutcome | null;
@@ -60,7 +67,7 @@ interface ViewProps {
 }
 
 // 표시 전용(상태 없음) — 결과 유무에 따른 화면/버튼을 그대로 테스트할 수 있다.
-export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExists, styleOverview, bomItems, packagingRules = [], colorSizeQuantities = [], colorSizeQuantityWarnings = [], saving, result, error, onCommit, onClose, onConfirm }) => {
+export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExists, styleOverview, bomItems, packagingRules = [], colorSizeQuantities = [], colorSizeQuantityWarnings = [], parserWarnings = [], onBomItemsChange, saving, result, error, onCommit, onClose, onConfirm }) => {
   const quantityTable = buildColorSizeQuantityTable(colorSizeQuantities);
   return (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -157,6 +164,14 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
 
       {/* PR-244b: 업로드 단가는 통화를 추측하지 않고 KRW 로 저장된다는 안내(기능 변경 없음). */}
       <p className="text-xs text-gray-500 mb-1" data-testid="upload-currency-notice">{UPLOAD_KRW_NOTICE}</p>
+      {/* PR-248: 혼용률 미기재 안내(경고만, 승인을 막지 않음) + 선택 행 일괄 입력 */}
+      <CompositionMissingNotice missingRows={summarizeCompositions(bomItems).missingRows} />
+      {parserWarnings.length > 0 && (
+        <ul className="text-xs text-amber-700 mb-2 list-disc pl-5" data-testid="parser-warnings">
+          {parserWarnings.map((w, i) => <li key={i}>{w}</li>)}
+        </ul>
+      )}
+      {onBomItemsChange && <CompositionBulkPanel testIdSuffix="preview" items={bomItems} onApply={onBomItemsChange} />}
       <div className="overflow-x-auto">
         <table className="border text-sm">
           <thead className="bg-gray-100">
@@ -165,6 +180,7 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
               <th className="border p-2">자재명</th>
               <th className="border p-2">요척</th>
               <th className="border p-2">필요량</th>
+              <th className="border p-2">혼용률</th>
             </tr>
           </thead>
           <tbody>
@@ -197,6 +213,9 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
                         <span className="block text-xs text-gray-400">{Number(item.requiredQty).toLocaleString('ko-KR', { maximumFractionDigits: 4 })}</span>
                       </>
                     )}
+                  </td>
+                  <td className="border p-2 text-xs" data-testid={`preview-composition-${index}`}>
+                    {typeof item.composition === 'string' && item.composition.trim() !== '' ? item.composition : <span className="text-gray-400">미기재</span>}
                   </td>
                 </tr>
               );
@@ -495,6 +514,8 @@ export const MappingPreviewModal: React.FC<MappingPreviewModalProps> = ({
       packagingRules={packagingRules}
       colorSizeQuantities={data?.colorSizeQuantities?.rows}
       colorSizeQuantityWarnings={data?.colorSizeQuantities?.warnings}
+      parserWarnings={data?.warnings}
+      onBomItemsChange={setBomItems}
       saving={saving}
       result={result}
       error={error}

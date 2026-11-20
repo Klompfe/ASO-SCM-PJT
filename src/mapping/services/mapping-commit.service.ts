@@ -413,6 +413,7 @@ export class MappingCommitService {
       colorCode: item.colorCode ?? null,
       spec: item.spec ?? null,
       consumption: item.consumption ?? null,
+      composition: item.composition ?? null,
     }));
 
     const { rows, similarPairs } = classifyBomDiff(existingRows, incomingRows);
@@ -552,7 +553,15 @@ export class MappingCommitService {
         if (newItem.supplier !== undefined) bomItem.supplier = newItem.supplier || null;
         if (newItem.unitPrice !== undefined) bomItem.unitPrice = newItem.unitPrice ?? 0;
         if (newItem.remarks !== undefined) bomItem.remarks = newItem.remarks || 'N/A';
-        if (newItem.composition !== undefined) bomItem.composition = newItem.composition ?? null;
+        // PR-248: 엑셀 reconcile 의 OVERWRITE/REPLACE 도 PR-246 규칙을 따른다 — 기존 혼용률이 비어 있으면 채우고,
+        // 같으면 그대로, 다르면 유지(엑셀이 조용히 바꾸지 않음), 들어온 값이 비면 기존 값을 지우지 않는다.
+        if (newItem.composition !== undefined) {
+          const comp = resolveCompositionUpdate(bomItem.composition, newItem.composition, false);
+          if (comp.changed) bomItem.composition = comp.value as string;
+          else if (comp.keptDifferent) {
+            warnings.push(`${newItem.itemName} 혼용률이 기존 값과 달라 기존 값을 유지했습니다.`);
+          }
+        }
         if (newItem.hsCode !== undefined) bomItem.hsCode = newItem.hsCode ?? null;
         if (newItem.threadType !== undefined) bomItem.threadType = (newItem.threadType as any) ?? null;
         if (newItem.tapeType !== undefined) bomItem.tapeType = (newItem.tapeType as any) ?? null;

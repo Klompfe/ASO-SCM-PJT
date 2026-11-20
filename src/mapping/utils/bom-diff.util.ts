@@ -23,6 +23,8 @@ export interface BomDiffIncomingRow {
   colorCode?: string | null;
   spec?: string | null;
   consumption?: number | null;
+  // PR-248: 엑셀 혼용률(있을 때만) — 응답에 그대로 실어 화면이 reconcile 액션에 다시 담을 수 있게 한다.
+  composition?: string | null;
 }
 
 export type BomDiffRowType = 'SAME' | 'VALUE_DIFF' | 'ONLY_NEW' | 'ONLY_EXISTING';

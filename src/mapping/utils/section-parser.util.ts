@@ -1,6 +1,7 @@
 import { StandardMaterial } from '../interfaces/standard-material.interface';
 import { Logger, BadRequestException } from '@nestjs/common';
 import { CellMergeRange, ParsedWorkbookSheet } from './excel-parser.util';
+import { checkComposition } from '../../sales-orders/utils/vision-guardrails.util';
 import { parseStyleColorSizeQuantities, type ParseStyleColorSizeQuantitiesResult } from './style-color-size-quantity-parser.util';
 
 export interface ParsedSheetResult {
@@ -14,6 +15,8 @@ export interface ParsedSheetResult {
   // 후보값. styleOverview.totalQty는 그대로 유지한다(파서가 읽은 원래 값을 숨기지 않음) —
   // 이 값을 실제로 쓸지는 커밋 단계(mapping-commit.service.ts)의 결정이다.
   totalQtyCandidate?: number;
+  // PR-248: 파서가 값을 비우고 넘어간 경우의 안내(예: 혼용률 문구가 너무 길어 비움). 오류가 아니다.
+  warnings?: string[];
 }
 
 export class SectionParser {
@@ -24,8 +27,8 @@ export class SectionParser {
   static parseWorkbook(sheets: ParsedWorkbookSheet[]): ParsedSheetResult[] {
     return sheets.map((sheet) => {
       try {
-        const { styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate } = this.parse(sheet.rows, sheet.merges);
-        return { sheetName: sheet.sheetName, styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate };
+        const { styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate, warnings } = this.parse(sheet.rows, sheet.merges);
+        return { sheetName: sheet.sheetName, styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate, warnings: warnings.length > 0 ? warnings : undefined };
       } catch (e) {
         return { sheetName: sheet.sheetName, parseError: (e as Error).message };
       }
@@ -63,7 +66,8 @@ export class SectionParser {
         shipDate: rawData[9] ? rawData[9][25] : ''
         };
 
-        const bomItems = this.parseBomItems(rawData, 13, styleOverview.totalQty, merges);
+        const warnings: string[] = [];
+        const bomItems = this.parseBomItems(rawData, 13, styleOverview.totalQty, merges, warnings);
 
         // PR-212: 색상×사이즈 수량 블록은 BOM 파싱 위치(bomStartIndex=13)와 무관하게
         // 시트 상단에서 CLOOR/SIZE 헤더를 독립적으로 찾는다 — BOM 파싱에 영향 없음.
@@ -74,7 +78,7 @@ export class SectionParser {
             : undefined;
 
         console.log('[PARSER RESULT]', { overview: styleOverview, count: bomItems.length });
-        return { styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate };
+        return { styleOverview, bomItems, colorSizeQuantities, totalQtyCandidate, warnings };
     } catch (e) {
         this.logger.error('[PARSER CRASH DETAILED] Section parsing failed', e);
         throw e;
@@ -89,6 +93,7 @@ export class SectionParser {
     bomStartIndex: number,
     totalQty: number,
     merges: CellMergeRange[],
+    warnings: string[] = [],
   ): any[] {
     const headers = rawData[bomStartIndex].map(h => h?.trim().toUpperCase());
     const toNum = (val: string | undefined | null) => parseFloat(val || '0') || 0;
@@ -102,6 +107,9 @@ export class SectionParser {
     // 항상 문자열로 정규화한다(숫자→문자열, null/undefined→빈 문자열, 앞뒤 공백 제거).
     const toSafeString = (val: unknown): string => (val == null ? '' : String(val).trim());
     const consIndex = headers.indexOf("CON'S");
+    // PR-248: "혼용률/중량" 열 — 고정 열 번호가 아니라 헤더 텍스트에 '혼용률'이 들어 있는 열을 찾는다
+    // (이 열에는 혼용률 문구만 적힌다). 헤더가 없으면(-1) 아무것도 읽지 않는다(기존 동작 그대로).
+    const compositionIndex = headers.findIndex((h) => typeof h === 'string' && h.includes('혼용률'));
 
     // ITEM 컬럼(0열)이 여러 행에 걸쳐 병합된 경우, 그건 하나의 자재 항목이 소요량 보조정보를
     // 담기 위해 2행을 쓰는 원본 서식일 뿐이다(47개 시트 전수조사 결과 병합은 항상 정확히
@@ -145,14 +153,26 @@ export class SectionParser {
 
       if (!itemName || itemName === 'ITEMS') continue;
 
-      items.push({
+      const item: Record<string, unknown> = {
         category: row[0],
         itemName: itemName.toUpperCase(),
         consumption: toNum(row[consIndex]),
         requiredQty: toNum(row[consIndex]) * totalQty,
         colorOf: toSafeString(row[2]),
         spec: toSafeString(row[8]),
-      });
+      };
+
+      // PR-248: 값은 PR-247 의 checkComposition 과 같은 규칙(빈 값·자리표시자→null, 500자 초과→null+경고,
+      // 그 외 변환 없음 — trim 만). 숫자형 셀은 문자열로 안전 변환한다. 값이 없으면 필드를 아예 싣지 않는다
+      // (엑셀의 빈 칸이 기존 값을 지우지 않도록 undefined 로 남김).
+      if (compositionIndex >= 0) {
+        const rawCell = row[compositionIndex] as unknown;
+        const cell = typeof rawCell === 'number' && Number.isFinite(rawCell) ? String(rawCell) : rawCell;
+        const checked = checkComposition(cell, null);
+        if (checked.composition) item.composition = checked.composition;
+        for (const w of checked.warnings) warnings.push(`${itemName}: ${w.message}`);
+      }
+      items.push(item);
     }
 
     return items;

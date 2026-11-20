@@ -152,3 +152,21 @@ describe('buildReconcileActions (PR-198) — [적용]을 눌러야만 호출되�
     expect(buildReconcileActions(rows, new Map())).toEqual([]);
   });
 });
+
+// PR-248: 엑셀 혼용률이 reconcile 액션의 newItem 에 실리는지 — 비어 있으면 싣지 않는다(기존 값 보존).
+describe('buildReconcileActions — 혼용률 (PR-248)', () => {
+  const draft = (inc: Record<string, unknown>) =>
+    buildBomDiffDraftRows([{ type: 'VALUE_DIFF', existing: existing(), incoming: incoming(inc) } as BomDiffRow], []);
+
+  it('엑셀 혼용률이 있으면 trim 해서 newItem.composition 으로 보낸다(그대로)', () => {
+    const rows = draft({ composition: ' c/p=60/40 ' });
+    const actions = buildReconcileActions(rows, new Map([[rows[0].key, 'OVERWRITE']]));
+    expect((actions[0] as any).newItem.composition).toBe('c/p=60/40');
+  });
+
+  it.each([undefined, null, '', '   '])('엑셀 혼용률이 %p 이면 newItem 에 싣지 않는다', (value) => {
+    const rows = draft({ composition: value });
+    const actions = buildReconcileActions(rows, new Map([[rows[0].key, 'OVERWRITE']]));
+    expect((actions[0] as any).newItem.composition).toBeUndefined();
+  });
+});
