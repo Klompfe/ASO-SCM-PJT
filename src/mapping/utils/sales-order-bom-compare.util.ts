@@ -1,3 +1,4 @@
+import { classifyCompositionStatus, type CompositionStatus } from './composition-update.util';
 import { normalizeForFuzzyMatch, isSimilarMaterialName } from '../../boms/utils/bom-name-normalize.util';
 
 // PR-235(PILOT-23 후속): 작지 저장 전 "기존 자재와 비교" — 순수 함수(DB 접근 없음).
@@ -18,6 +19,8 @@ export interface SalesOrderBomCompareExistingRow {
   requiredQty: number;
   unit: string | null;
   remarks: string | null;
+  // PR-246: 기존 행의 혼용률(없으면 null).
+  composition?: string | null;
   hasManualOverride: boolean;
   hasConfirmedUnitPrice: boolean;
   hasSubtypeAssignment: boolean;
@@ -35,6 +38,7 @@ export interface SalesOrderBomCompareIncomingRow {
   spec?: string | null;
   consumption?: number | null;
   requiredQty?: number | null;
+  composition?: string | null;
 }
 
 export type SalesOrderBomCompareRowType = 'same' | 'similar' | 'new' | 'existingOnly';
@@ -44,6 +48,22 @@ export interface SalesOrderBomCompareRow {
   incomingIndex?: number;
   existing?: SalesOrderBomCompareExistingRow;
   incoming?: SalesOrderBomCompareIncomingRow;
+  // PR-246: 기존 행과 들어온 행이 둘 다 있을 때(same/similar)만 채워진다(선택 필드).
+  existingComposition?: string | null;
+  incomingComposition?: string | null;
+  compositionStatus?: CompositionStatus;
+}
+
+function withComposition(row: SalesOrderBomCompareRow): SalesOrderBomCompareRow {
+  if (!row.existing || !row.incoming) return row;
+  const existingComposition = row.existing.composition?.trim() || null;
+  const incomingComposition = row.incoming.composition?.trim() || null;
+  return {
+    ...row,
+    existingComposition,
+    incomingComposition,
+    compositionStatus: classifyCompositionStatus(existingComposition, incomingComposition),
+  };
 }
 
 // commit()이 실제로 쓰는 매칭 키(정규화 이름 + colorCode + spec, PR-233)와 동일 — 이
@@ -72,7 +92,7 @@ export function classifySalesOrderBomCompare(
     if (!match) return;
     matchedExistingIds.add(match.bomItemId);
     matchedIncoming.add(incomingIndex);
-    rows.push({ type: 'same', incomingIndex, existing: match, incoming });
+    rows.push(withComposition({ type: 'same', incomingIndex, existing: match, incoming }));
   });
 
   const unmatchedExisting = existingRows.filter((e) => !matchedExistingIds.has(e.bomItemId));
@@ -116,7 +136,7 @@ export function classifySalesOrderBomCompare(
   }
 
   for (const pair of similarPairs) {
-    rows.push({ type: 'similar', incomingIndex: pair.incomingIndex, existing: pair.existing, incoming: incomingRows[pair.incomingIndex] });
+    rows.push(withComposition({ type: 'similar', incomingIndex: pair.incomingIndex, existing: pair.existing, incoming: incomingRows[pair.incomingIndex] }));
   }
   for (const existing of unmatchedExisting) {
     if (!pairedExistingIds.has(existing.bomItemId)) rows.push({ type: 'existingOnly', existing });

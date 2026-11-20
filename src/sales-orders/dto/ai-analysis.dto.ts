@@ -1,8 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { ProductionType } from '../../styles/entities/style-overview.entity';
-import { CommitDecisionsDto } from '../../mapping/dto/commit-mapping.dto';
+import { CommitDecisionsDto, COMPOSITION_MAX_LENGTH } from '../../mapping/dto/commit-mapping.dto';
 
 // 작업지시서 한 건(=오더개요) 정보. AI 분석은 문서에서 읽지 못한 값은 null로 둔다.
 export class AiOverviewDto {
@@ -138,6 +138,16 @@ export class AiBomItemDto {
   @IsOptional()
   @IsString()
   englishName?: string | null;
+
+  // PR-246: 혼용률 — 저장 화면에서 사용자가 입력·확인한 문자열 그대로 저장한다(자재 행 단위,
+  // BomItem.composition). 인식이 채우는 것은 PR-247 이후이며 이 PR에서는 사용자 입력이 주 경로다.
+  // 숫자만 와도 문자열로 바꾸고 앞뒤 공백을 지운다(PR-236 안전망). 대소문자·번역 정규화 없음.
+  @ApiPropertyOptional({ description: '혼용률(입력·인식된 문자열 그대로, 자재 행 단위)', example: 'COTTON 60% POLYESTER 40%' })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value == null || typeof value === 'object' ? value : String(value).trim()))
+  @IsString()
+  @MaxLength(COMPOSITION_MAX_LENGTH)
+  composition?: string | null;
 
   // PR-234: 자재명에 섞여 들어오던 사용(작업) 위치 — AI가 직접 채우거나, 비어 있으면
   // 서버가 "(작업위치)"/"(위치)" 라벨이 붙은 구절을 itemName에서 분리해 채운다. 저장

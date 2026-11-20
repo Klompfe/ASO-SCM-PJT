@@ -108,6 +108,8 @@ export class SalesOrdersService {
         // PR-234: 자재명에서 분리된(또는 AI가 직접 채운) 영문 표기 — Item.englishName에
         // 반영된다(mapping-commit.service.ts, 이미 값이 있으면 덮어쓰지 않음).
         englishName: b.englishName ?? undefined,
+        // PR-246: 혼용률(사용자 입력·확인값 그대로) — 비어 있으면 보내지 않는다(기존 값을 지우지 않음).
+        composition: b.composition?.trim() ? b.composition.trim() : undefined,
         // PR-175: materialSubTypeCandidate(AI 후보)는 저장 대상이 아니다 — 검토
         // 화면에서 사람이 확인한 threadType/tapeType만 넘어온다.
         threadType: b.threadType ?? undefined,
@@ -189,6 +191,7 @@ export class SalesOrdersService {
         spec: b.spec ?? undefined,
         consumption: b.consumption ?? undefined,
         requiredQty: b.requiredQty ?? undefined,
+        composition: b.composition?.trim() ? b.composition.trim() : undefined,
       })),
     });
   }

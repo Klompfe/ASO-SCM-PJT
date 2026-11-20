@@ -12,7 +12,10 @@ export type CommitNoticeCode =
   | 'QTY_KEPT_MANUAL'
   | 'QTY_UPDATED'
   | 'QTY_NOT_IN_SHEET'
-  | 'TOTAL_QTY_MISMATCH';
+  | 'TOTAL_QTY_MISMATCH'
+  // PR-246
+  | 'COMPOSITION_FILLED'
+  | 'COMPOSITION_DIFF_KEPT';
 
 export interface CommitNotice {
   type: CommitNoticeType;
@@ -60,6 +63,8 @@ export const NOTICE_CODE_LABELS: Record<CommitNoticeCode, string> = {
   QTY_UPDATED: '색상×사이즈 수량 갱신',
   QTY_NOT_IN_SHEET: '시트에 없는 기존 수량',
   TOTAL_QTY_MISMATCH: '총수량 불일치',
+  COMPOSITION_FILLED: '혼용률 채움',
+  COMPOSITION_DIFF_KEPT: '혼용률 기존 값 유지',
 };
 
 export const noticeCodeLabel = (code: string): string => NOTICE_CODE_LABELS[code as CommitNoticeCode] ?? '알림';

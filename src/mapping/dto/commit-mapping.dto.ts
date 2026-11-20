@@ -2,12 +2,14 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { ProductionType } from '../../styles/entities/style-overview.entity';
@@ -17,6 +19,9 @@ import { ProductionType } from '../../styles/entities/style-overview.entity';
 // 안전망으로 한 번 더 받아낸다 — 숫자/불리언은 문자열로 바꾸고, null/undefined는
 // 그대로 둬 @IsOptional이 처리하게 한다. 객체·배열은 그대로 통과시켜(값을 바꾸지
 // 않음) @IsString이 계속 거부하게 한다(지시사항: "검증 자체를 지우지 않는다").
+// PR-246: 혼용률 길이 상한(컬럼은 길이 제한 없는 varchar라 DTO에서 비정상적으로 긴 입력만 막는다).
+export const COMPOSITION_MAX_LENGTH = 500;
+
 const toStringIfPrimitive = ({ value }: { value: unknown }): unknown => {
   if (value == null || typeof value === 'object') return value;
   return String(value).trim();
@@ -189,9 +194,13 @@ export class CommitBomItemDto {
   // PR-073: 수출 선적서류 자동생성용 혼용율/HS코드 — 둘 다 짝값이다(혼용율이 바뀌면
   // HS코드도 바뀐다). 지금 당장은 매핑 파이프라인(엑셀/AI분석)이 이 값을 채우지
   // 않으므로 optional로 두고, 실제 입력은 프론트 인라인 수정으로 이뤄진다.
+  // PR-246: 입력·인식된 문자열 그대로(대소문자·번역 정규화 없음). 숫자만 와도 문자열로 바꾸고
+  // 앞뒤 공백을 지운다(toStringIfPrimitive). 빈 문자열은 서버가 "값 없음"으로 취급한다.
   @ApiPropertyOptional({ example: 'WOOL 98%, POLYURETHANE 2%' })
   @IsOptional()
+  @Transform(toStringIfPrimitive)
   @IsString()
+  @MaxLength(COMPOSITION_MAX_LENGTH)
   composition?: string;
 
   @ApiPropertyOptional({ example: '6110.30' })
@@ -247,6 +256,20 @@ export class CommitDecisionIncomingDto {
   @IsOptional()
   @IsNumber()
   mergeIntoBomItemId?: number;
+
+  // PR-246: 기존 행에 저장된 혼용률이 있고 들어온 값이 다를 때, 사람이 "새 값으로 바꾸기"를
+  // 눌렀을 때만 true. 없거나 false면 서버는 기존 값을 유지한다(비어 있던 값을 채우는 것은 항상 허용).
+  @ApiPropertyOptional({ description: '혼용률 덮어쓰기 확인(기존 값이 있고 다를 때만 의미 있음)' })
+  @IsOptional()
+  @IsBoolean()
+  overwriteComposition?: boolean;
+
+  // PR-246: 기존 혼용률이 비어 있어 새 값으로 "채우는" 기본 동작을 사람이 해제한 행(true).
+  // true면 서버는 이 행의 혼용률을 건드리지 않는다(채움·교체 모두 안 함).
+  @ApiPropertyOptional({ description: '혼용률 채우기 해제(true면 이 행의 혼용률을 건드리지 않음)' })
+  @IsOptional()
+  @IsBoolean()
+  skipComposition?: boolean;
 }
 
 export class CommitDecisionExistingDto {

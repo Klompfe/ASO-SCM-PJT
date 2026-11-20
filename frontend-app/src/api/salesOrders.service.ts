@@ -71,6 +71,9 @@ export interface AiBomItem {
   // englishName은 Item.englishName, location은 remarks에 합쳐 저장된다.
   englishName?: string | null;
   location?: string | null;
+  // PR-246: 혼용률(자재 행 단위) — 저장 화면에서 사용자가 입력·확인한 문자열을 그대로 저장한다
+  // (대소문자·번역 정규화 없음). 인식이 채우는 것은 PR-247 이후라 지금은 사용자 입력이 주 경로.
+  composition?: string | null;
   // PR-175: AI 후보(읽기전용 참고) — 실/테이프 종류 한글 라벨 중 하나 또는 null.
   materialSubTypeCandidate?: string | null;
   // 사람이 검토 화면에서 확정한 최종값(저장 대상). AI가 직접 채우지 않는다.
@@ -120,7 +123,15 @@ export interface AiHandwrittenCandidate {
 // PR-235(PILOT-23 후속): 저장 전 비교 화면에서 고른 선택 — 없으면 commit()이 기존
 // 동작 그대로 움직인다. incoming의 index는 bomItems 배열의 인덱스와 같아야 한다.
 export interface SalesOrderBomCompareDecisions {
-  incoming?: { index: number; action: 'update' | 'mergeInto' | 'add'; mergeIntoBomItemId?: number }[];
+  // PR-246: overwriteComposition — 기존 혼용률이 있고 다를 때 "새 값으로 바꾸기"를 누른 행만 true.
+  // skipComposition — 기존 혼용률이 비어 있어 채우는 기본 동작을 해제한 행만 true.
+  incoming?: {
+    index: number;
+    action: 'update' | 'mergeInto' | 'add';
+    mergeIntoBomItemId?: number;
+    overwriteComposition?: boolean;
+    skipComposition?: boolean;
+  }[];
   existing?: { bomItemId: number; action: 'keep' | 'delete' }[];
 }
 
@@ -145,6 +156,7 @@ export interface SalesOrderBomCompareExistingRow {
   requiredQty: number;
   unit: string | null;
   remarks: string | null;
+  composition?: string | null;
   hasManualOverride: boolean;
   hasConfirmedUnitPrice: boolean;
   hasSubtypeAssignment: boolean;
@@ -162,7 +174,11 @@ export interface SalesOrderBomCompareIncomingRow {
   spec?: string | null;
   consumption?: number | null;
   requiredQty?: number | null;
+  composition?: string | null;
 }
+
+// PR-246: 기존 행과 들어온 행의 혼용률 비교 결과(same/similar 행에만 있음).
+export type CompositionStatus = 'same' | 'fillEmpty' | 'differs' | 'incomingEmpty';
 
 export type SalesOrderBomCompareRowType = 'same' | 'similar' | 'new' | 'existingOnly';
 
@@ -171,6 +187,9 @@ export interface SalesOrderBomCompareRow {
   incomingIndex?: number;
   existing?: SalesOrderBomCompareExistingRow;
   incoming?: SalesOrderBomCompareIncomingRow;
+  existingComposition?: string | null;
+  incomingComposition?: string | null;
+  compositionStatus?: CompositionStatus;
 }
 
 export interface SalesOrderBomCompareResponse {

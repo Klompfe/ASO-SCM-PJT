@@ -92,11 +92,54 @@ export function riskyDeleteRows(
   });
 }
 
+// PR-246: 혼용률 선택 — 행 key별 'overwrite'(기존 값이 있고 달라서 "새 값으로 바꾸기"를 누름) 또는
+// 'skip'(기존 값이 비어 있어 채우는 기본 동작을 해제). 없으면 기본(비어 있으면 채움 / 다르면 유지).
+export type CompositionChoice = 'overwrite' | 'skip';
+export type CompositionChoiceMap = Map<string, CompositionChoice>;
+
+// 혼용률 비교가 의미 있는 행: 기존 행과 들어온 행이 실제로 합쳐지는 경우 — same(자동 갱신) 또는
+// mergeInto로 합치기를 고른 similar. similar를 "새 자재로 추가"로 두면 기존 행을 건드리지 않는다.
+export function compositionTargetsExisting(
+  row: SalesOrderBomCompareRow,
+  incomingDecision: IncomingDecision | undefined,
+): boolean {
+  if (!row.existing || !row.incoming || !row.compositionStatus) return false;
+  if (row.type === 'same') return true;
+  return row.type === 'similar' && (incomingDecision ?? defaultIncomingDecisionFor(row)) === 'mergeInto';
+}
+
+// 눌렀다 다시 누르면 해제(되돌리기). 이 행에 맞지 않는 선택은 걸지 않는다.
+export function toggleCompositionChoice(
+  choices: CompositionChoiceMap,
+  key: string,
+  choice: CompositionChoice,
+): CompositionChoiceMap {
+  const next = new Map(choices);
+  if (next.get(key) === choice) next.delete(key);
+  else next.set(key, choice);
+  return next;
+}
+
+// 실제로 서버에 "교체"로 전달될 행 수(확인창 문구용) — differs 상태이고 overwrite를 고른 행만.
+export function countCompositionOverwrites(
+  draftRows: SalesOrderBomCompareDraftRow[],
+  decisions: SalesOrderBomCompareDecisionMap,
+  choices: CompositionChoiceMap,
+): number {
+  return draftRows.filter(
+    ({ key, row }) =>
+      choices.get(key) === 'overwrite' &&
+      row.compositionStatus === 'differs' &&
+      compositionTargetsExisting(row, decisions.incoming.get(key)),
+  ).length;
+}
+
 // decisions map → 서버가 받는 페이로드 형태. "update"/"keep"은 commit()의 기본
 // 동작과 완전히 같으므로(무동작) 보내지 않는다 — mergeInto/add/delete만 보낸다.
 export function buildCommitDecisionsPayload(
   draftRows: SalesOrderBomCompareDraftRow[],
   decisions: SalesOrderBomCompareDecisionMap,
+  compositionChoices: CompositionChoiceMap = new Map(),
 ): SalesOrderBomCompareDecisions | undefined {
   const incoming: SalesOrderBomCompareDecisions['incoming'] = [];
   const existing: SalesOrderBomCompareDecisions['existing'] = [];
@@ -104,10 +147,21 @@ export function buildCommitDecisionsPayload(
   for (const { key, row } of draftRows) {
     if ((row.type === 'same' || row.type === 'similar' || row.type === 'new') && row.incomingIndex != null) {
       const d = decisions.incoming.get(key) ?? defaultIncomingDecisionFor(row);
-      if (d === 'mergeInto' && row.existing) {
-        incoming!.push({ index: row.incomingIndex, action: 'mergeInto', mergeIntoBomItemId: row.existing.bomItemId });
+      // PR-246: 혼용률 선택 플래그 — 기존 행과 실제로 합쳐지는 행에서, 상태에 맞는 선택만 보낸다
+      // (differs일 때만 overwrite, fillEmpty일 때만 skip). 그 외에는 보내지 않아 서버 기본 규칙을 따른다.
+      const choice = compositionChoices.get(key);
+      const compositionFlags: { overwriteComposition?: boolean; skipComposition?: boolean } = {};
+      if (compositionTargetsExisting(row, d)) {
+        if (choice === 'overwrite' && row.compositionStatus === 'differs') compositionFlags.overwriteComposition = true;
+        if (choice === 'skip' && row.compositionStatus === 'fillEmpty') compositionFlags.skipComposition = true;
       }
-      // 'update'/'add'는 commit()의 기본 매칭이 이미 그렇게 하므로 보내지 않는다.
+      const hasFlags = Object.keys(compositionFlags).length > 0;
+      if (d === 'mergeInto' && row.existing) {
+        incoming!.push({ index: row.incomingIndex, action: 'mergeInto', mergeIntoBomItemId: row.existing.bomItemId, ...compositionFlags });
+      } else if (d === 'update' && hasFlags) {
+        incoming!.push({ index: row.incomingIndex, action: 'update', ...compositionFlags });
+      }
+      // 그 외 'update'/'add'는 commit()의 기본 매칭이 이미 그렇게 하므로 보내지 않는다.
     }
     if (row.type === 'existingOnly' && row.existing) {
       const d = decisions.existing.get(key) ?? defaultExistingDecisionFor(row);

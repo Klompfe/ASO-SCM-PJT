@@ -10,6 +10,7 @@ import { Item } from '../../items/entities/item.entity';
 import { MasterStyle } from '../../styles/entities/master-style.entity';
 import { PurchaseOrder, PurchaseOrderStatus } from '../../purchase-orders/entities/purchase-order.entity';
 import { CommitMappingDto } from '../dto/commit-mapping.dto';
+import { AiBomItemDto } from '../../sales-orders/dto/ai-analysis.dto';
 import { BomDiffRequestDto } from '../dto/bom-diff.dto';
 import { BomReconcileRequestDto } from '../dto/bom-reconcile.dto';
 import { SalesOrderBomCompareRequestDto } from '../../sales-orders/dto/sales-order-bom-compare.dto';
@@ -351,6 +352,51 @@ describe('MappingCommitService', () => {
   // PR-098: 같은 styleNo로 재커밋될 때 기존 StyleOverview/Bom을 통째로 교체·중복
   // 생성하지 않고 병합하는지 검증한다. LB6YSLM107Z(기존 BK 컬러 215장 + 신규 CR/BR
   // 컬러 추가) 실사례를 그대로 재현한다.
+  describe('composition(혼용률) DTO 검증 (PR-246)', () => {
+    const toDto = (composition: any) =>
+      plainToInstance(CommitMappingDto, { ...validPayload, bomItems: [{ ...validPayload.bomItems[0], composition }] });
+
+    it.each([
+      ['COTTON 60% POLYESTER 40%', 'COTTON 60% POLYESTER 40%'],
+      ['  COTTON 100%  ', 'COTTON 100%'],
+      [100, '100'],
+    ])('%p는 문자열 %p로 받는다(대소문자·내용 변경 없음)', async (raw, expected) => {
+      const dto = toDto(raw);
+      expect(await validate(dto)).toHaveLength(0);
+      expect((dto.bomItems[0] as any).composition).toBe(expected);
+    });
+
+    it('null/undefined는 그대로 통과한다', async () => {
+      for (const raw of [null, undefined]) expect(await validate(toDto(raw))).toHaveLength(0);
+    });
+
+    it('길이 상한(500자)을 넘으면 거부한다', async () => {
+      expect((await validate(toDto('A'.repeat(501)))).length).toBeGreaterThan(0);
+      expect(await validate(toDto('A'.repeat(500)))).toHaveLength(0);
+    });
+
+    it('객체·배열은 거부한다', async () => {
+      for (const raw of [{ a: 1 }, [1]]) expect((await validate(toDto(raw))).length).toBeGreaterThan(0);
+    });
+
+    it('decisions.incoming[].overwriteComposition은 불리언만 허용한다', async () => {
+      const ok = plainToInstance(CommitMappingDto, { ...validPayload, decisions: { incoming: [{ index: 0, action: 'update', overwriteComposition: true }] } });
+      expect(await validate(ok)).toHaveLength(0);
+      const bad = plainToInstance(CommitMappingDto, { ...validPayload, decisions: { incoming: [{ index: 0, action: 'update', overwriteComposition: 'yes' }] } });
+      expect((await validate(bad)).length).toBeGreaterThan(0);
+    });
+
+    it('AiBomItemDto도 composition을 받는다(없으면 통과, 숫자는 문자열 변환)', async () => {
+      const mk = (composition: any) => plainToInstance(AiBomItemDto, { category: null, itemName: 'FAB A', spec: null, colorCode: null, consumption: null, requiredQty: null, supplier: null, remarks: null, composition });
+      expect(await validate(mk(undefined))).toHaveLength(0);
+      expect(await validate(mk(null))).toHaveLength(0);
+      const dto = mk(' COTTON 100% ');
+      expect(await validate(dto)).toHaveLength(0);
+      expect(dto.composition).toBe('COTTON 100%');
+      expect(mk(5).composition).toBe('5');
+    });
+  });
+
   describe('commit (병합 — 같은 styleNo 재커밋)', () => {
     const existingBomItem: BomItem = {
       id: 501,
@@ -603,6 +649,120 @@ describe('MappingCommitService', () => {
         const bomItemSaveCalls = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
         const crSave = bomItemSaveCalls.find(([, data]: any) => data.colorCode === 'CR');
         expect(crSave![1]).toMatchObject({ sheetQty: null, sheetQtyUnit: null });
+      });
+    });
+
+    // PR-246: 혼용률 — 기존 행 재저장 규칙(서버 강제). 합성 값만 사용.
+    describe('혼용률 재저장 규칙 (PR-246)', () => {
+      const setExistingComposition = (composition: string | null) => {
+        mockQueryRunnerManager.find.mockImplementation((entity: any) => {
+          if (entity === Bom) return Promise.resolve([{ ...existingBom, items: [{ ...existingBomItem, composition }] }]);
+          if (entity === Item) return Promise.resolve([{ id: 10, name: '원단' }]);
+          return Promise.resolve([]);
+        });
+      };
+      const bkPayload = (composition: any, decision?: { overwriteComposition?: boolean }): CommitMappingDto => {
+        const payload = rebuildPayload();
+        payload.bomItems[0] = { ...payload.bomItems[0], composition };
+        if (decision) payload.decisions = { incoming: [{ index: 0, action: 'update', ...decision }] };
+        return payload;
+      };
+      const bkSaves = () =>
+        mockQueryRunnerManager.save.mock.calls
+          .filter(([entity]: any) => entity === BomItem)
+          .filter(([, data]: any) => data.colorCode === 'BK' || data.id === 501);
+
+      it('신규 행(신규 컬러)은 들어온 혼용률을 그대로 저장한다(대소문자·번역 변경 없음)', async () => {
+        const payload = rebuildPayload();
+        payload.bomItems[1] = { ...payload.bomItems[1], composition: '  Cotton 60% polyester 40%  ' };
+        await service.commit(payload);
+        const crSave = mockQueryRunnerManager.save.mock.calls.find(([e, d]: any) => e === BomItem && d.colorCode === 'CR');
+        expect(crSave![1].composition).toBe('Cotton 60% polyester 40%');
+      });
+
+      it('기존 행의 혼용률이 비어 있고 값이 들어오면 채운다(AUTO_APPLIED/COMPOSITION_FILLED)', async () => {
+        setExistingComposition(null);
+        const result = await service.commit(bkPayload('COTTON 60% POLYESTER 40%'));
+        expect(bkSaves()).toHaveLength(1);
+        expect(bkSaves()[0][1].composition).toBe('COTTON 60% POLYESTER 40%');
+        expect(result.notices).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'AUTO_APPLIED', code: 'COMPOSITION_FILLED' })]));
+      });
+
+      it('기존 값과 같으면 변화 없음(저장도 알림도 없다)', async () => {
+        setExistingComposition('COTTON 60% POLYESTER 40%');
+        const result = await service.commit(bkPayload(' COTTON 60% POLYESTER 40% '));
+        expect(bkSaves()).toHaveLength(0);
+        expect(result.notices.some((n) => n.code.startsWith('COMPOSITION'))).toBe(false);
+      });
+
+      it('기존 값과 다르면 기본은 유지하고 NEEDS_REVIEW/COMPOSITION_DIFF_KEPT 알림만 낸다', async () => {
+        setExistingComposition('COTTON 60% POLYESTER 40%');
+        const result = await service.commit(bkPayload('COTTON 100%'));
+        expect(bkSaves()).toHaveLength(0);
+        expect(result.notices).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'NEEDS_REVIEW', code: 'COMPOSITION_DIFF_KEPT' })]));
+      });
+
+      it('다르고 overwriteComposition=false여도 유지한다(명시적 true만 교체)', async () => {
+        setExistingComposition('COTTON 60% POLYESTER 40%');
+        await service.commit(bkPayload('COTTON 100%', { overwriteComposition: false }));
+        expect(bkSaves()).toHaveLength(0);
+      });
+
+      it('다르고 overwriteComposition=true이면 그 행만 새 값으로 교체한다', async () => {
+        setExistingComposition('COTTON 60% POLYESTER 40%');
+        const result = await service.commit(bkPayload('COTTON 100%', { overwriteComposition: true }));
+        expect(bkSaves()).toHaveLength(1);
+        expect(bkSaves()[0][1].composition).toBe('COTTON 100%');
+        expect(result.notices.some((n) => n.code === 'COMPOSITION_DIFF_KEPT')).toBe(false);
+      });
+
+      it('skipComposition=true이면 비어 있어도 채우지 않는다(사람이 "채우기"를 해제한 행)', async () => {
+        setExistingComposition(null);
+        const result = await service.commit(bkPayload('COTTON 100%', { skipComposition: true } as any));
+        expect(bkSaves()).toHaveLength(0);
+        expect(result.notices.some((n) => n.code.startsWith('COMPOSITION'))).toBe(false);
+      });
+
+      it.each([undefined, null, '', '   '])('들어온 혼용률이 %p(비어 있음)이면 기존 값을 지우지 않는다(overwrite=true여도)', async (empty) => {
+        setExistingComposition('COTTON 60% POLYESTER 40%');
+        await service.commit(bkPayload(empty, { overwriteComposition: true }));
+        expect(bkSaves()).toHaveLength(0);
+      });
+
+      it('mergeInto로 합쳐도 같은 규칙이 적용된다(다름→유지, overwrite=true→교체)', async () => {
+        setExistingComposition('COTTON 60% POLYESTER 40%');
+        const kept = bkPayload('COTTON 100%');
+        kept.decisions = { incoming: [{ index: 0, action: 'mergeInto', mergeIntoBomItemId: 501 }] };
+        await service.commit(kept);
+        expect(bkSaves()).toHaveLength(0);
+
+        mockQueryRunnerManager.save.mockClear();
+        const replaced = bkPayload('COTTON 100%');
+        replaced.decisions = { incoming: [{ index: 0, action: 'mergeInto', mergeIntoBomItemId: 501, overwriteComposition: true }] };
+        await service.commit(replaced);
+        expect(bkSaves()[0][1].composition).toBe('COTTON 100%');
+      });
+
+      it('혼용률을 보내지 않는 일괄 저장(엑셀) 경로는 기존 행을 저장하지 않는다(이전 동작 불변)', async () => {
+        setExistingComposition('COTTON 60% POLYESTER 40%');
+        const result = await service.commit(rebuildPayload());
+        expect(bkSaves()).toHaveLength(0);
+        expect(result.notices.some((n) => n.code.startsWith('COMPOSITION'))).toBe(false);
+      });
+
+      it('혼용률 덮어쓰기와 sheetQty 갱신이 함께 와도 수동 필요수량은 보존된다', async () => {
+        mockQueryRunnerManager.find.mockImplementation((entity: any) => {
+          if (entity === Bom) {
+            return Promise.resolve([{ ...existingBom, items: [{ ...existingBomItem, composition: 'COTTON 100%', manualRequiredQty: 499, manualRequiredQtyNote: '현장 확인' }] }]);
+          }
+          if (entity === Item) return Promise.resolve([{ id: 10, name: '원단' }]);
+          return Promise.resolve([]);
+        });
+        const payload = bkPayload('POLYESTER 100%', { overwriteComposition: true });
+        payload.bomItems[0] = { ...payload.bomItems[0], sheetQty: 760, sheetQtyUnit: 'Y' };
+        await service.commit(payload);
+        expect(bkSaves()).toHaveLength(1); // 한 번만 저장
+        expect(bkSaves()[0][1]).toMatchObject({ composition: 'POLYESTER 100%', sheetQty: 760, manualRequiredQty: 499, manualRequiredQtyNote: '현장 확인' });
       });
     });
 
@@ -1066,6 +1226,29 @@ describe('MappingCommitService', () => {
       const result = await service.compareSalesOrderBom(comparePayload);
       expect(result.hasExistingBom).toBe(true);
       expect(result.rows).toEqual([expect.objectContaining({ type: 'same', incomingIndex: 0 })]);
+    });
+
+    // PR-246: 혼용률 비교 상태 4종(읽기 전용 — 저장 호출 없음).
+    it.each([
+      ['COTTON 60% POLYESTER 40%', undefined, 'incomingEmpty'],
+      [null, 'COTTON 100%', 'fillEmpty'],
+      ['COTTON 100%', ' COTTON 100% ', 'same'],
+      ['COTTON 100%', 'COTTON 60% POLYESTER 40%', 'differs'],
+    ])('기존 혼용률 %p / 들어온 %p → compositionStatus=%s', async (existingValue, incomingValue, status) => {
+      mockDataSourceManager.find.mockImplementation((entity: any) =>
+        Promise.resolve(entity === Bom ? [{ ...existingBom, items: [{ ...(existingBom.items as any[])[0], composition: existingValue }] }] : []),
+      );
+      const result = await service.compareSalesOrderBom({
+        ...comparePayload,
+        bomItems: [{ ...comparePayload.bomItems[0], composition: incomingValue as any }],
+      });
+      expect(result.rows[0]).toMatchObject({
+        type: 'same',
+        compositionStatus: status,
+        existingComposition: existingValue == null ? null : existingValue,
+        incomingComposition: incomingValue == null ? null : String(incomingValue).trim(),
+      });
+      expect(mockQueryRunnerManager.save).not.toHaveBeenCalled();
     });
 
     it('기존 행의 연결 정보(발주/입고 건수, 삭제 가능 여부, 수동·확정값 보유)가 담긴다', async () => {

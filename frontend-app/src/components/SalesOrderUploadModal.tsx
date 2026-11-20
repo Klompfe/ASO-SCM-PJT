@@ -10,6 +10,8 @@ import {
   type SalesOrderBomCompareRow,
 } from '../api/salesOrders.service';
 import { SalesOrderBomCompareStep } from './SalesOrderBomCompareStep';
+import { CompositionSummary } from './CompositionSummary';
+import { summarizeCompositions } from '../utils/compositionReview';
 import { getErrorMessage } from '../utils/errorMessage';
 import {
   updateOverviewField as updateOverviewFieldPure,
@@ -1001,6 +1003,11 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                         />
                       </label>
                     </div>
+                    {/* PR-246: 자재 행 혼용률 요약(읽기 전용) — 제외 체크된 행은 뺀다. 비어 있어도 저장은 막지 않는다. */}
+                    <CompositionSummary
+                      testIdSuffix={index}
+                      summary={summarizeCompositions(result.bomItems, excludedBomIndexes.get(index) ?? new Set<number>())}
+                    />
                   </div>
 
                   {/* PR-223(PILOT-21 설계안): 작지 표 밖 손글씨 메모 후보 — 자동으로 BOM에
@@ -1154,7 +1161,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                           </p>
                           <div className="overflow-x-auto max-h-96 overflow-y-auto">
                             <table className="border text-sm">
-                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1 min-w-[48px]">제외</th><th className="border p-1 min-w-[72px]">구분</th><th className="border p-1 min-w-[140px]">자재명</th><th className="border p-1 min-w-[72px]">규격</th><th className="border p-1 min-w-[72px]" title="제품 1개당 들어가는 양입니다. 총수량이 아닙니다.">개당 소요량(요척)</th><th className="border p-1 min-w-[140px]" title="작지에 인쇄된 총 출고량(필요수량)입니다.">작지 출고량(총 필요 수량)</th><th className="border p-1 min-w-[150px]">발주수량(적용)</th><th className="border p-1 min-w-[96px]">공급사</th><th className="border p-1 min-w-[72px]">비고</th><th className="border p-1 min-w-[120px]">실/테이프 종류</th><th className="border p-1 min-w-[280px]">확인 필요</th></tr></thead>
+                              <thead className="bg-gray-100 sticky top-0"><tr><th className="border p-1 min-w-[48px]">제외</th><th className="border p-1 min-w-[72px]">구분</th><th className="border p-1 min-w-[140px]">자재명</th><th className="border p-1 min-w-[72px]">규격</th><th className="border p-1 min-w-[72px]" title="제품 1개당 들어가는 양입니다. 총수량이 아닙니다.">개당 소요량(요척)</th><th className="border p-1 min-w-[140px]" title="작지에 인쇄된 총 출고량(필요수량)입니다.">작지 출고량(총 필요 수량)</th><th className="border p-1 min-w-[150px]">발주수량(적용)</th><th className="border p-1 min-w-[96px]">공급사</th><th className="border p-1 min-w-[72px]">비고</th><th className="border p-1 min-w-[160px]" title="자재 행 단위로 저장됩니다. 입력한 문자열 그대로 저장합니다(대소문자·번역 변경 없음).">혼용률</th><th className="border p-1 min-w-[120px]">실/테이프 종류</th><th className="border p-1 min-w-[280px]">확인 필요</th></tr></thead>
                               <tbody>
                                 {result.bomItems.map((item, i) => {
                                   const candidate = item.materialSubTypeCandidate ?? null;
@@ -1417,6 +1424,16 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                         )}
                                       </td>
                                       <td className="border p-1">{item.remarks ?? '-'}</td>
+                                      <td className="border p-1">
+                                        <input
+                                          className="border rounded px-1 py-0.5 w-40 text-xs"
+                                          data-testid={`bom-composition-${index}-${i}`}
+                                          placeholder="혼용률 미기재"
+                                          value={item.composition ?? ''}
+                                          disabled={isExcluded}
+                                          onChange={(e) => updateBomItemField(index, i, 'composition', e.target.value === '' ? null : e.target.value)}
+                                        />
+                                      </td>
                                       <td className="border p-1">
                                         {candidate && resolved && !selectedValue && (
                                           <div className="mb-1 bg-yellow-50 border border-yellow-200 rounded px-1 py-0.5 text-xs text-yellow-800" data-testid={`subtype-candidate-${index}-${i}`}>

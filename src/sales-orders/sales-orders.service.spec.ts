@@ -235,6 +235,40 @@ describe('SalesOrdersService', () => {
     });
   });
 
+  // PR-246: 혼용률(자재 행 단위)이 commit()/compare 요청까지 전달되는지 — 합성 값.
+  describe('commitAnalysis/compareBom - 혼용률 전달 (PR-246)', () => {
+    const mockMasterStyleRepo = { findOne: jest.fn() };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };
+    const overview = { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: null, totalQty: 100, targetRdd: null, documentDate: null };
+    const result = (composition: any) =>
+      ({ overview, bomItems: [{ category: '겉감', itemName: 'FAB A', spec: null, colorCode: 'BK', consumption: 1, requiredQty: 100, supplier: null, remarks: null, composition }], sizeSpecs: [], workNotes: null }) as any;
+
+    beforeEach(() => {
+      mockDataSource.getRepository.mockImplementation((entity: any) =>
+        entity === Contract ? mockContractRepo : mockMasterStyleRepo,
+      );
+      mockMasterStyleRepo.findOne.mockResolvedValue({ styleNo: 'S1', overview: { totalQty: 100 } });
+      mockMappingCommitService.commit.mockResolvedValue({ success: true, notices: [], warnings: [] });
+      mockMappingCommitService.compareSalesOrderBom.mockResolvedValue({ hasExistingBom: false, rows: [] });
+      mockSalesOrderSpecsService.save.mockResolvedValue({ id: 1 });
+    });
+
+    it('composition이 있으면 문자열 그대로(앞뒤 공백만 제거) commit()에 넘긴다', async () => {
+      await service.commitAnalysis(result('  COTTON 60% POLYESTER 40% '));
+      expect(mockMappingCommitService.commit.mock.calls[0][0].bomItems[0].composition).toBe('COTTON 60% POLYESTER 40%');
+    });
+
+    it.each([undefined, null, '', '   '])('composition이 %p이면 undefined로 넘긴다(기존 값을 지우지 않음)', async (empty) => {
+      await service.commitAnalysis(result(empty));
+      expect(mockMappingCommitService.commit.mock.calls[0][0].bomItems[0].composition).toBeUndefined();
+    });
+
+    it('compareBom도 composition을 함께 넘긴다', async () => {
+      await service.compareBom(result('COTTON 100%'));
+      expect(mockMappingCommitService.compareSalesOrderBom.mock.calls[0][0].bomItems[0].composition).toBe('COTTON 100%');
+    });
+  });
+
   // PR-235(PILOT-23 후속): 저장 전 비교 화면의 선택(decisions)이 commit() 요청까지
   // 그대로 전달되는지 — 없으면 undefined로 넘어가 commit()의 기존 동작과 같다.
   describe('commitAnalysis - decisions 전달 (PR-235)', () => {

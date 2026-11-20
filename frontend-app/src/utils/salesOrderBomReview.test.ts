@@ -412,3 +412,21 @@ describe('suggestConsumptionFromSheetQty (PR-228)', () => {
     expect(suggestConsumptionFromSheetQty({ consumption: null, requiredQty: 499 }, 0)).toBeNull();
   });
 });
+
+// PR-246: 저장 요청 본문(buildCommitResult)에 혼용률이 문자열 그대로 실리는지 — 합성 값.
+describe('buildCommitResult — 혼용률 (PR-246)', () => {
+  it('composition은 저장 요청의 bomItems에 그대로 실린다(제외된 행은 빠진다)', () => {
+    const result = {
+      overview: {} as any,
+      bomItems: [
+        { category: '겉감', itemName: 'A', spec: null, colorCode: null, consumption: 1, requiredQty: 1, supplier: null, remarks: null, composition: 'Cotton 60% polyester 40%' },
+        { category: '겉감', itemName: 'B', spec: null, colorCode: null, consumption: 1, requiredQty: 1, supplier: null, remarks: null, composition: 'X 100%' },
+      ],
+      sizeSpecs: [],
+      workNotes: null,
+    } as any;
+    const out = buildCommitResult(result, new Set([1]));
+    expect(out.bomItems).toHaveLength(1);
+    expect(out.bomItems[0].composition).toBe('Cotton 60% polyester 40%');
+  });
+});

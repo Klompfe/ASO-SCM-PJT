@@ -5,6 +5,9 @@ import {
   summarizeDecisions,
   riskyDeleteRows,
   buildCommitDecisionsPayload,
+  toggleCompositionChoice,
+  countCompositionOverwrites,
+  compositionTargetsExisting,
 } from './salesOrderBomCompareReview';
 import type { SalesOrderBomCompareRow, SalesOrderBomCompareExistingRow } from '../api/salesOrders.service';
 
@@ -118,5 +121,77 @@ describe('salesOrderBomCompareReview (PR-235)', () => {
     const draft = buildDraftRows(rows);
     const decisions = buildDefaultDecisions(draft);
     expect(buildCommitDecisionsPayload(draft, decisions)).toBeUndefined();
+  });
+});
+
+// PR-246: 혼용률 선택(유지/바꾸기/되돌리기, 채우기 해제)과 페이로드 — 합성 값만 사용.
+describe('salesOrderBomCompareReview — 혼용률 (PR-246)', () => {
+  const same = (compositionStatus: any, incomingIndex = 0, bomItemId = 1): SalesOrderBomCompareRow => ({
+    type: 'same',
+    incomingIndex,
+    existing: existing({ bomItemId }),
+    incoming: { itemName: '자재A' },
+    existingComposition: compositionStatus === 'fillEmpty' ? null : 'COTTON 100%',
+    incomingComposition: compositionStatus === 'incomingEmpty' ? null : 'COTTON 60% POLYESTER 40%',
+    compositionStatus,
+  });
+
+  it('toggleCompositionChoice: 누르면 설정, 다시 누르면 해제(되돌리기), 다른 선택으로 바꿀 수 있다', () => {
+    let m = toggleCompositionChoice(new Map(), 'same-0', 'overwrite');
+    expect(m.get('same-0')).toBe('overwrite');
+    m = toggleCompositionChoice(m, 'same-0', 'overwrite');
+    expect(m.has('same-0')).toBe(false);
+    m = toggleCompositionChoice(m, 'same-0', 'skip');
+    expect(m.get('same-0')).toBe('skip');
+  });
+
+  it('기본(선택 없음)이면 혼용률 플래그를 보내지 않는다 — differs도 기본은 유지', () => {
+    const draft = buildDraftRows([same('differs')]);
+    expect(buildCommitDecisionsPayload(draft, buildDefaultDecisions(draft))).toBeUndefined();
+    expect(countCompositionOverwrites(draft, buildDefaultDecisions(draft), new Map())).toBe(0);
+  });
+
+  it('differs + overwrite 선택 → 그 행만 action:update + overwriteComposition:true', () => {
+    const draft = buildDraftRows([same('differs', 0, 1), same('differs', 1, 2)]);
+    const choices = toggleCompositionChoice(new Map(), draft[0].key, 'overwrite');
+    const payload = buildCommitDecisionsPayload(draft, buildDefaultDecisions(draft), choices);
+    expect(payload).toEqual({ incoming: [{ index: 0, action: 'update', overwriteComposition: true }] });
+    expect(countCompositionOverwrites(draft, buildDefaultDecisions(draft), choices)).toBe(1);
+  });
+
+  it('되돌리기(다시 누름) 후에는 플래그가 사라진다', () => {
+    const draft = buildDraftRows([same('differs')]);
+    let choices = toggleCompositionChoice(new Map(), draft[0].key, 'overwrite');
+    choices = toggleCompositionChoice(choices, draft[0].key, 'overwrite');
+    expect(buildCommitDecisionsPayload(draft, buildDefaultDecisions(draft), choices)).toBeUndefined();
+  });
+
+  it('fillEmpty + skip 선택 → skipComposition:true, 그 외 상태(same/incomingEmpty)에는 선택이 있어도 보내지 않는다', () => {
+    const draft = buildDraftRows([same('fillEmpty', 0, 1), same('same', 1, 2), same('incomingEmpty', 2, 3)]);
+    let choices = new Map();
+    for (const d of draft) choices = toggleCompositionChoice(choices, d.key, 'skip');
+    const payload = buildCommitDecisionsPayload(draft, buildDefaultDecisions(draft), choices);
+    expect(payload).toEqual({ incoming: [{ index: 0, action: 'update', skipComposition: true }] });
+  });
+
+  it('differs인데 skip을 골랐거나 fillEmpty인데 overwrite를 골라도 보내지 않는다(상태에 맞는 선택만)', () => {
+    const draft = buildDraftRows([same('differs', 0, 1), same('fillEmpty', 1, 2)]);
+    let choices = toggleCompositionChoice(new Map(), draft[0].key, 'skip');
+    choices = toggleCompositionChoice(choices, draft[1].key, 'overwrite');
+    expect(buildCommitDecisionsPayload(draft, buildDefaultDecisions(draft), choices)).toBeUndefined();
+  });
+
+  it('similar: 합치기(mergeInto)를 골랐을 때만 혼용률이 의미 있고 플래그가 mergeInto 항목에 실린다', () => {
+    const similar: SalesOrderBomCompareRow = { ...same('differs', 0, 7), type: 'similar' };
+    const draft = buildDraftRows([similar]);
+    const choices = toggleCompositionChoice(new Map(), draft[0].key, 'overwrite');
+    expect(compositionTargetsExisting(similar, undefined)).toBe(false);
+    expect(buildCommitDecisionsPayload(draft, buildDefaultDecisions(draft), choices)).toBeUndefined();
+    const merged = buildDefaultDecisions(draft);
+    merged.incoming.set(draft[0].key, 'mergeInto');
+    expect(buildCommitDecisionsPayload(draft, merged, choices)).toEqual({
+      incoming: [{ index: 0, action: 'mergeInto', mergeIntoBomItemId: 7, overwriteComposition: true }],
+    });
+    expect(countCompositionOverwrites(draft, merged, choices)).toBe(1);
   });
 });

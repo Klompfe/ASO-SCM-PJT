@@ -7,6 +7,10 @@ import {
   riskyDeleteRows,
   buildCommitDecisionsPayload,
   defaultExistingDecisionFor,
+  compositionTargetsExisting,
+  toggleCompositionChoice,
+  countCompositionOverwrites,
+  type CompositionChoiceMap,
   type SalesOrderBomCompareDecisionMap,
   type IncomingDecision,
   type ExistingDecision,
@@ -37,10 +41,13 @@ export function SalesOrderBomCompareStep({ styleNo, rows, saving, onCancel, onCo
   const draftRows = useMemo(() => buildDraftRows(rows), [rows]);
   const [decisions, setDecisions] = useState<SalesOrderBomCompareDecisionMap>(() => buildDefaultDecisions(draftRows));
   const [confirmedRiskyKeys, setConfirmedRiskyKeys] = useState<Set<string>>(new Set());
+  // PR-246: 행별 혼용률 선택(새 값으로 바꾸기 / 채우기 해제). 기본은 비어 있음 = 서버 기본 규칙.
+  const [compositionChoices, setCompositionChoices] = useState<CompositionChoiceMap>(new Map());
 
   const summary = summarizeDecisions(draftRows, decisions);
   const risky = riskyDeleteRows(draftRows, decisions);
   const riskyKeys = new Set(risky.map((r) => r.key));
+  const compositionOverwriteCount = countCompositionOverwrites(draftRows, decisions, compositionChoices);
 
   const setIncoming = (key: string, value: IncomingDecision) => {
     setDecisions((prev) => ({ incoming: new Map(prev.incoming).set(key, value), existing: prev.existing }));
@@ -67,15 +74,24 @@ export function SalesOrderBomCompareStep({ styleNo, rows, saving, onCancel, onCo
       );
       return;
     }
-    if (summary.delete > 0) {
+    if (summary.delete > 0 || compositionOverwriteCount > 0) {
       const deleteNames = draftRows
         .filter(({ key, row }) => row.type === 'existingOnly' && (decisions.existing.get(key) ?? defaultExistingDecisionFor(row)) === 'delete')
         .map(({ row }) => row.existing?.itemName ?? '')
         .filter(Boolean);
-      const proceed = window.confirm(`기존 자재 ${deleteNames.length}건이 삭제됩니다. 계속할까요?\n- ${deleteNames.join('\n- ')}`);
+      // 삭제만 있을 때는 기존 문구 그대로, 혼용률 교체가 있으면 그 줄을 앞에 덧붙인다.
+      const deleteMessage = `기존 자재 ${deleteNames.length}건이 삭제됩니다. 계속할까요?\n- ${deleteNames.join('\n- ')}`;
+      const compositionMessage = `혼용률 ${compositionOverwriteCount}행을 새 값으로 바꿉니다.`;
+      const proceed = window.confirm(
+        compositionOverwriteCount === 0
+          ? deleteMessage
+          : deleteNames.length === 0
+            ? `${compositionMessage} 계속할까요?`
+            : `${compositionMessage}\n${deleteMessage}`,
+      );
       if (!proceed) return;
     }
-    onConfirm(buildCommitDecisionsPayload(draftRows, decisions));
+    onConfirm(buildCommitDecisionsPayload(draftRows, decisions, compositionChoices));
   };
 
   return (
@@ -129,6 +145,14 @@ export function SalesOrderBomCompareStep({ styleNo, rows, saving, onCancel, onCo
                         <div className="text-xs text-gray-500">
                           필요수량 {row.existing.requiredQty} {row.existing.unit ?? ''}
                         </div>
+                        {compositionTargetsExisting(row, decisions.incoming.get(key)) && (
+                          <CompositionCell
+                            rowKey={key}
+                            row={row}
+                            choice={compositionChoices.get(key)}
+                            onToggle={(choice) => setCompositionChoices((prev) => toggleCompositionChoice(prev, key, choice))}
+                          />
+                        )}
                       </div>
                     ) : (
                       <span className="text-gray-400">—</span>
@@ -200,6 +224,62 @@ export function SalesOrderBomCompareStep({ styleNo, rows, saving, onCancel, onCo
           {saving ? '저장 중...' : '이 선택으로 저장'}
         </button>
       </div>
+    </div>
+  );
+}
+
+
+// PR-246: 매칭된 기존 행의 혼용률 상태 표시 — fillEmpty(기본 채움, 해제 가능) / differs(기본 유지,
+// "새 값으로 바꾸기" 작은 버튼, 되돌리기 가능) / same·incomingEmpty(변화 없음).
+export function CompositionCell({
+  rowKey,
+  row,
+  choice,
+  onToggle,
+}: {
+  rowKey: string;
+  row: SalesOrderBomCompareRow;
+  choice: 'overwrite' | 'skip' | undefined;
+  onToggle: (choice: 'overwrite' | 'skip') => void;
+}) {
+  const status = row.compositionStatus;
+  if (!status) return null;
+  const testId = `composition-status-${rowKey}`;
+  if (status === 'same' || status === 'incomingEmpty') {
+    return (
+      <div className="mt-1 text-xs text-gray-500" data-testid={testId}>
+        혼용률: 변화 없음{status === 'incomingEmpty' ? '(새 값 비어 있음 — 기존 값 유지)' : ''}
+      </div>
+    );
+  }
+  if (status === 'fillEmpty') {
+    const skipped = choice === 'skip';
+    return (
+      <div className="mt-1 text-xs text-green-700" data-testid={testId}>
+        {skipped ? '혼용률: 채우지 않음(해제됨)' : `기존 값이 비어 있어 새 값으로 채웁니다: ${row.incomingComposition}`}
+        <button
+          type="button"
+          onClick={() => onToggle('skip')}
+          className="ml-2 px-1.5 py-0.5 rounded border border-green-600 text-green-700 hover:bg-green-50"
+        >
+          {skipped ? '다시 채우기' : '채우지 않기'}
+        </button>
+      </div>
+    );
+  }
+  const overwrite = choice === 'overwrite';
+  return (
+    <div className="mt-1 text-xs" data-testid={testId}>
+      <div className="text-gray-700">기존 혼용률: <b>{row.existingComposition}</b></div>
+      <div className={overwrite ? 'text-orange-700' : 'text-gray-700'}>새 혼용률: <b>{row.incomingComposition}</b></div>
+      <div className="text-gray-500">{overwrite ? '새 값으로 바꿉니다' : '기존 값을 유지합니다(기본)'}</div>
+      <button
+        type="button"
+        onClick={() => onToggle('overwrite')}
+        className={`mt-0.5 px-1.5 py-0.5 rounded border ${overwrite ? 'border-gray-400 text-gray-700 hover:bg-gray-50' : 'border-orange-600 text-orange-700 hover:bg-orange-50'}`}
+      >
+        {overwrite ? '되돌리기' : '새 값으로 바꾸기'}
+      </button>
     </div>
   );
 }

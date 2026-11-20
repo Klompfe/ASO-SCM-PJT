@@ -27,6 +27,7 @@ import {
   type SalesOrderBomCompareIncomingRow,
   type SalesOrderBomCompareRow,
 } from '../utils/sales-order-bom-compare.util';
+import { cleanComposition, resolveCompositionUpdate } from '../utils/composition-update.util';
 import { normalizeForFuzzyMatch } from '../../boms/utils/bom-name-normalize.util';
 
 // PR-132: commit()이 사용자에게 알려야 하는 두 종류의 사실을 문자열 패턴이 아니라 구조로 구분한다.
@@ -43,6 +44,9 @@ export type CommitNoticeCode =
   | 'QTY_UPDATED'
   | 'QTY_NOT_IN_SHEET'
   | 'TOTAL_QTY_MISMATCH'
+  // PR-246: 기존 행 혼용률 — 비어 있어 채움(AUTO_APPLIED) / 값이 달라 기존 값 유지(NEEDS_REVIEW).
+  | 'COMPOSITION_FILLED'
+  | 'COMPOSITION_DIFF_KEPT'
   // PR-235: 저장 전 비교 화면에서 "삭제"로 고른 기존 BOM 행을 실제로 지웠다는 알림.
   | 'BOM_ITEM_DELETED';
 
@@ -250,7 +254,7 @@ export class MappingCommitService {
           if (!target) {
             throw new BadRequestException(`행 ${bomItemIndex}: BOM 행 #${decision.mergeIntoBomItemId}은(는) 스타일 ${styleNo}의 자재명세가 아닙니다.`);
           }
-          await this.applyIncomingToExistingBomItem(item, target, notices, queryRunner);
+          await this.applyIncomingToExistingBomItem(item, target, notices, queryRunner, decision.overwriteComposition === true, decision.skipComposition === true);
           continue;
         }
 
@@ -284,13 +288,13 @@ export class MappingCommitService {
         );
 
         if (existingBomItem) {
-          await this.applyIncomingToExistingBomItem(item, existingBomItem, notices, queryRunner);
+          await this.applyIncomingToExistingBomItem(item, existingBomItem, notices, queryRunner, decision?.overwriteComposition === true, decision?.skipComposition === true);
           continue;
         }
 
         // PR-100: 안감(조바)류인데 혼용률이 비어있으면 기본값을 채운다 — 조용히
         // 채우지 않고 warnings에 남겨 사용자가 알 수 있게 한다.
-        let composition = item.composition ?? null;
+        let composition = cleanComposition(item.composition);
         if (!composition && isLiningItem(item.category, item.itemName)) {
           composition = LINING_DEFAULT_COMPOSITION;
           notices.push({
@@ -461,6 +465,7 @@ export class MappingCommitService {
         requiredQty: Number(i.requiredQty),
         unit: i.material?.unit ?? null,
         remarks: i.remarks ?? null,
+        composition: i.composition ?? null,
         hasManualOverride: i.manualRequiredQty != null,
         hasConfirmedUnitPrice: Number(i.unitPrice) > 0,
         hasSubtypeAssignment: i.threadType != null || i.tapeType != null,
@@ -481,6 +486,7 @@ export class MappingCommitService {
       spec: item.spec ?? null,
       consumption: item.consumption ?? null,
       requiredQty: item.requiredQty ?? null,
+      composition: item.composition ?? null,
     }));
 
     const rows = classifySalesOrderBomCompare(existingRows, incomingRows);
@@ -645,6 +651,8 @@ export class MappingCommitService {
     existingBomItem: BomItem,
     notices: CommitNotice[],
     queryRunner: ReturnType<DataSource['createQueryRunner']>,
+    overwriteComposition = false,
+    skipComposition = false,
   ): Promise<void> {
     const newConsumption = item.consumption ?? 0;
     const newRequiredQty = item.requiredQty ?? 0;
@@ -660,12 +668,40 @@ export class MappingCommitService {
           `→ 새 값(요척 ${newConsumption}, 소요량 ${newRequiredQty}) — 자동 반영하지 않음, 확인 후 수동 변경 필요`,
       });
     }
+    let needsSave = false;
     const resolved = resolveSheetQty(item);
     if (resolved.sheetQty != null) {
       existingBomItem.sheetQty = resolved.sheetQty;
       existingBomItem.sheetQtyUnit = resolved.sheetQtyUnit;
-      await queryRunner.manager.save(BomItem, existingBomItem);
+      needsSave = true;
     }
+
+    // PR-246: 혼용률 — 비어 있음→채움 / 같음→변화 없음 / 다름→기존 값 유지(사람이 "새 값으로
+    // 바꾸기"를 눌러 overwriteComposition=true를 보낸 행만 교체) / 들어온 값이 비어 있음→기존 값을
+    // 지우지 않음. 화면이 틀려도 이 규칙은 서버가 강제한다.
+    const comp = skipComposition
+      ? resolveCompositionUpdate(existingBomItem.composition, null, false)
+      : resolveCompositionUpdate(existingBomItem.composition, item.composition, overwriteComposition);
+    if (comp.changed) {
+      const wasEmpty = comp.status === 'fillEmpty';
+      existingBomItem.composition = comp.value as string;
+      needsSave = true;
+      if (wasEmpty) {
+        notices.push({
+          type: 'AUTO_APPLIED',
+          code: 'COMPOSITION_FILLED',
+          message: `${item.itemName}(${existingBomItem.colorCode}/${existingBomItem.spec}) 혼용률이 비어 있어 새 값으로 채웠습니다.`,
+        });
+      }
+    } else if (comp.keptDifferent) {
+      notices.push({
+        type: 'NEEDS_REVIEW',
+        code: 'COMPOSITION_DIFF_KEPT',
+        message: `${item.itemName}(${existingBomItem.colorCode}/${existingBomItem.spec}) 혼용률이 기존 값과 달라 기존 값을 유지했습니다 — 바꾸려면 비교 화면의 "새 값으로 바꾸기"를 사용하세요.`,
+      });
+    }
+
+    if (needsSave) await queryRunner.manager.save(BomItem, existingBomItem);
   }
 
   // 기존 StyleOverview를 새 값으로 필드 단위 병합한다. factory는 예외: 기존 값이 이미

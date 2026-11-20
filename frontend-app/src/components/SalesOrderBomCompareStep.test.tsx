@@ -76,3 +76,46 @@ describe('SalesOrderBomCompareStep (PR-235)', () => {
     expect(html).toContain('저장 중...');
   });
 });
+
+// PR-246: 혼용률 상태 표시(정적 렌더 — 클릭 상태 전이는 salesOrderBomCompareReview.test.ts에서 검증).
+describe('SalesOrderBomCompareStep — 혼용률 (PR-246)', () => {
+  const render = (rows: SalesOrderBomCompareRow[]) =>
+    renderToStaticMarkup(createElement(SalesOrderBomCompareStep, { styleNo: null, rows, saving: false, onCancel: vi.fn(), onConfirm: vi.fn() }));
+  const sameRow = (compositionStatus: any, existingComposition: string | null, incomingComposition: string | null): SalesOrderBomCompareRow => ({
+    type: 'same', incomingIndex: 0, existing: existing(), incoming: { itemName: '자재A' }, existingComposition, incomingComposition, compositionStatus,
+  });
+
+  it('differs: 기존/새 값을 나란히 보여 주고 기본은 유지 + "새 값으로 바꾸기" 버튼', () => {
+    const html = render([sameRow('differs', 'COTTON 100%', 'COTTON 60% POLYESTER 40%')]);
+    expect(html).toContain('기존 혼용률');
+    expect(html).toContain('COTTON 100%');
+    expect(html).toContain('COTTON 60% POLYESTER 40%');
+    expect(html).toContain('기존 값을 유지합니다(기본)');
+    expect(html).toContain('새 값으로 바꾸기');
+  });
+
+  it('fillEmpty: 기본 적용 안내 + 해제 버튼', () => {
+    const html = render([sameRow('fillEmpty', null, 'COTTON 100%')]);
+    expect(html).toContain('기존 값이 비어 있어 새 값으로 채웁니다');
+    expect(html).toContain('채우지 않기');
+  });
+
+  it('same/incomingEmpty: 변화 없음 표시, 버튼 없음', () => {
+    for (const status of ['same', 'incomingEmpty']) {
+      const html = render([sameRow(status, 'COTTON 100%', status === 'same' ? 'COTTON 100%' : null)]);
+      expect(html).toContain('혼용률: 변화 없음');
+      expect(html).not.toContain('새 값으로 바꾸기');
+    }
+  });
+
+  it('혼용률 상태가 없는 응답(구버전/비매칭 행)은 혼용률 영역을 그리지 않는다', () => {
+    const html = render([{ type: 'same', incomingIndex: 0, existing: existing(), incoming: { itemName: '자재A' } }]);
+    expect(html).not.toContain('composition-status');
+  });
+
+  it('비슷한 이름(similar)은 기본이 "새 자재로 추가"라 혼용률 영역을 그리지 않는다', () => {
+    const html = render([{ ...sameRow('differs', 'A 100%', 'B 100%'), type: 'similar' }]);
+    expect(html).not.toContain('composition-status');
+  });
+});
+
