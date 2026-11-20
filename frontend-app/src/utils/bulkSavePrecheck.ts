@@ -176,9 +176,10 @@ export function nextChangedIndex(entries: PrecheckEntry[], savedIndexes: Readonl
 }
 
 // 저장 직전 재확인 — 점검 이후 상태가 바뀌어(다른 곳에서 등록됨 등) 더는 신규가 아니면 저장하지 않는다.
-export function isStillNew(fresh: SalesOrderBomCompareResponse | null | undefined): boolean {
-  if (!fresh) return false;
-  return !fresh.hasExistingBom && (fresh.overview?.length ?? 0) === 0;
+export function isStillNew(fresh: unknown): boolean {
+  // 응답이 해석 불가이거나 기존 자재 행·오더개요가 하나라도 있으면(또는 모순된 자재 행이 있으면) 신규가 아니다(fail-closed).
+  if (!isWellFormedCompare(fresh)) return false;
+  return fresh.hasExistingBom === false && fresh.rows.length === 0 && (fresh.overview?.length ?? 0) === 0;
 }
 
 // 동시 호출 수를 제한해 비동기 작업을 돌린다 — 한 항목의 실패가 전체를 막지 않는다(결과에 error 로 담김).

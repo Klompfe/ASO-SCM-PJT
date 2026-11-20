@@ -281,3 +281,18 @@ describe('classifyBulkPrecheck — 알 수 없는 값은 변경 있음, 비정�
     expect(summarizePrecheck(entries)).toEqual({ new: 1, changed: 1, unchanged: 0, needsCheck: 1 });
   });
 });
+
+describe('isStillNew — 저장 직전 재확인도 fail-closed (PR-250 보강)', () => {
+  it('비정상 응답은 신규가 아니다(저장하지 않음)', () => {
+    for (const fresh of [null, undefined, {}, 'x', { rows: [] }, { hasExistingBom: false }, { hasExistingBom: false, rows: 'x' }, { hasExistingBom: false, rows: [], overview: 'x' }, { hasExistingBom: 'no', rows: [] }]) {
+      expect(isStillNew(fresh as any)).toBe(false);
+    }
+  });
+
+  it('기존 행 목록이 비어 있지 않은 모순 응답은 신규가 아니다, 명확히 비어 있을 때만 신규', () => {
+    expect(isStillNew({ hasExistingBom: false, rows: [{ type: 'new' }] } as any)).toBe(false);
+    expect(isStillNew({ hasExistingBom: false, rows: [], overview: [] })).toBe(true);
+    expect(isStillNew({ hasExistingBom: false, rows: [] })).toBe(true);
+  });
+});
+
