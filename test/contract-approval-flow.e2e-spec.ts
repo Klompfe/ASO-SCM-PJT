@@ -114,7 +114,9 @@ describe('작업지시서 등록 → 계약 자동생성/승인 워크플로 (PR
     firstContractId = contracts[0].id;
   });
 
-  it('같은 styleNo로 작업지시서를 재등록하면 기존 계약을 덮어쓰지 않고 새 PENDING_APPROVAL 브랜치가 쌓여야 한다', async () => {
+  // PR-249: 같은 스타일에 승인 대기(PENDING_APPROVAL) 계약이 이미 있으면 새로 만들지 않고 그 계약을 갱신한다
+  // (예전 PR-066 은 재등록마다 대기 계약이 쌓였다). 기존 스타일의 오더개요는 다른 값이면 유지되므로 계약 스냅샷도 그대로다.
+  it('같은 styleNo로 작업지시서를 재등록하면 승인 대기 계약을 새로 만들지 않고 그 계약을 갱신한다(PR-249)', async () => {
     await request(app.getHttpServer())
       .post('/sales-orders/commit-analysis')
       .set('Authorization', `Bearer ${userToken}`)
@@ -128,14 +130,11 @@ describe('작업지시서 등록 → 계약 자동생성/승인 워크플로 (PR
       .expect(200);
 
     const contracts = res.body.data;
-    expect(contracts).toHaveLength(2);
-    expect(contracts.every((c: any) => c.status === 'PENDING_APPROVAL')).toBe(true);
-
-    const first = contracts.find((c: any) => c.id === firstContractId);
-    expect(Number(first.totalQty)).toBe(1000); // 첫 계약은 그대로(스냅샷이므로 재등록에 영향받지 않음)
-
-    secondContractId = contracts.find((c: any) => c.id !== firstContractId).id;
-    expect(Number(contracts.find((c: any) => c.id === secondContractId).totalQty)).toBe(2000);
+    expect(contracts).toHaveLength(1);
+    expect(contracts[0].id).toBe(firstContractId);
+    expect(contracts[0].status).toBe('PENDING_APPROVAL');
+    // 기존 오더개요 총수량(1000)은 다른 값(2000)이 와도 유지되므로 계약 스냅샷도 1000.
+    expect(Number(contracts[0].totalQty)).toBe(1000);
   });
 
   it('USER 권한으로 승인을 시도하면 403이어야 한다', async () => {
@@ -145,7 +144,7 @@ describe('작업지시서 등록 → 계약 자동생성/승인 워크플로 (PR
       .expect(403);
   });
 
-  it('MANAGER 권한으로 첫 번째 계약을 승인하면 APPROVED가 되고, 두 번째 계약은 그대로 PENDING이어야 한다', async () => {
+  it('MANAGER 권한으로 첫 번째 계약을 승인하면 APPROVED가 되고, 이후 재등록하면 새 PENDING 계약(두 번째)이 생기며 승인된 계약은 그대로여야 한다', async () => {
     const res = await request(app.getHttpServer())
       .patch(`/contracts/${firstContractId}/approve`)
       .set('Authorization', `Bearer ${managerToken}`)
@@ -155,13 +154,24 @@ describe('작업지시서 등록 → 계약 자동생성/승인 워크플로 (PR
     expect(res.body.data.approvedByUserId).toBeDefined();
     expect(res.body.data.approvedAt).toBeDefined();
 
+    // 승인된 계약만 있는 상태에서 재등록하면(대기 계약이 없으므로) 기존 동작대로 새 대기 계약이 생긴다.
+    await request(app.getHttpServer())
+      .post('/sales-orders/commit-analysis')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(buildWorkOrderPayload(styleNo, 1000))
+      .expect(201);
+
     const listRes = await request(app.getHttpServer())
       .get('/contracts')
       .query({ styleNo })
       .set('Authorization', `Bearer ${userToken}`)
       .expect(200);
-    const second = listRes.body.data.find((c: any) => c.id === secondContractId);
+    expect(listRes.body.data).toHaveLength(2);
+    const first = listRes.body.data.find((c: any) => c.id === firstContractId);
+    expect(first.status).toBe('APPROVED');
+    const second = listRes.body.data.find((c: any) => c.id !== firstContractId);
     expect(second.status).toBe('PENDING_APPROVAL');
+    secondContractId = second.id;
   });
 
   it('이미 APPROVED인 계약을 다시 승인 시도하면 400이어야 한다', async () => {

@@ -50,6 +50,7 @@ describe('SalesOrdersService', () => {
 
       expect(mockMappingCommitService.compareSalesOrderBom).toHaveBeenCalledWith({
         styleNo: 'S1',
+        overview: expect.objectContaining({ totalQty: 100, buyer: null }),
         bomItems: [{ itemName: '다데테이프(면)', englishName: 'EDGE TAPE', category: '부자재', colorCode: undefined, spec: undefined, consumption: 1, requiredQty: 100 }],
       });
     });
@@ -387,6 +388,7 @@ describe('SalesOrdersService', () => {
 
       expect(mockMappingCommitService.commit).toHaveBeenCalledWith(
         expect.objectContaining({ overviewData: expect.objectContaining({ cmtPrice: 7500 }) }),
+        expect.anything(),
       );
     });
 
@@ -402,6 +404,7 @@ describe('SalesOrdersService', () => {
 
       expect(mockMappingCommitService.commit).toHaveBeenCalledWith(
         expect.objectContaining({ overviewData: expect.objectContaining({ cmtPrice: undefined }) }),
+        expect.anything(),
       );
     });
   });
@@ -412,14 +415,19 @@ describe('SalesOrdersService', () => {
   // HANDWRITTEN_DRAFT로 표시하고 cmtPriceNote를 함께 저장한다.
   describe('commitAnalysis - 수기 CMT단가 초안 → Contract.cmtPriceConfidence/cmtPriceNote (PR-181)', () => {
     const mockMasterStyleRepo = { findOne: jest.fn() };
-    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)) };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)), findOne: jest.fn().mockResolvedValue(null) };
 
     beforeEach(() => {
       jest.clearAllMocks();
+      mockContractRepo.findOne.mockResolvedValue(null);
       mockDataSource.getRepository.mockImplementation((entity: any) =>
         entity === Contract ? mockContractRepo : mockMasterStyleRepo,
       );
-      mockMappingCommitService.commit.mockResolvedValue({ success: true, notices: [], warnings: [] });
+      // PR-249: 계약은 commit() 의 afterMerge(같은 트랜잭션)에서 만든다 — 모의 commit 이 훅을 실행한다.
+      mockMappingCommitService.commit.mockImplementation(async (_payload: any, opts?: any) => {
+        await opts?.afterMerge?.({ getRepository: (e: any) => mockDataSource.getRepository(e) });
+        return { success: true, notices: [], warnings: [] };
+      });
       mockSalesOrderSpecsService.save.mockResolvedValue({ id: 1 });
     });
 
@@ -476,6 +484,63 @@ describe('SalesOrdersService', () => {
       expect(mockContractRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ cmtPrice: null, cmtPriceConfidence: null, cmtPriceNote: null }),
       );
+    });
+  });
+
+  // PR-249: 기존 스타일 방어선 — 오더개요 가드 옵션·계약 갱신(대기 계약 재사용)·충돌 알림 전달.
+  describe('commitAnalysis - 오더개요 가드·승인 대기 계약 (PR-249)', () => {
+    const mockMasterStyleRepo = { findOne: jest.fn() };
+    const mockContractRepo = { create: jest.fn((x: any) => x), save: jest.fn((x: any) => Promise.resolve(x)), findOne: jest.fn() };
+    const overview = { styleNo: 'S1', styleName: null, itemType: null, brand: null, productionType: 'CMT', factory: '베트남', buyer: '미도컴퍼니', totalQty: 100, targetRdd: null, documentDate: null };
+    const run = (extra: Record<string, unknown> = {}) =>
+      service.commitAnalysis({ overview, bomItems: [], sizeSpecs: [], workNotes: null, ...extra } as any);
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockDataSource.getRepository.mockImplementation((entity: any) => (entity === Contract ? mockContractRepo : mockMasterStyleRepo));
+      mockMasterStyleRepo.findOne.mockResolvedValue({ styleNo: 'S1', overview: { totalQty: 100, factory: '베트남', buyer: '미도컴퍼니', productionType: 'CMT' } });
+      mockContractRepo.findOne.mockResolvedValue(null);
+      mockMappingCommitService.commit.mockImplementation(async (_p: any, opts?: any) => {
+        await opts?.afterMerge?.({ getRepository: (e: any) => mockDataSource.getRepository(e) });
+        return { success: true, notices: [], warnings: [], orderOverviewConflicts: [{ field: 'buyer', existing: 'A', incoming: 'B' }] };
+      });
+      mockSalesOrderSpecsService.save.mockResolvedValue({ id: 7 });
+    });
+
+    it('overwriteOrderFields 를 commit 옵션의 overviewGuard.overwrite 로 넘긴다(없으면 빈 집합)', async () => {
+      await run();
+      expect([...mockMappingCommitService.commit.mock.calls[0][1].overviewGuard.overwrite]).toEqual([]);
+      await run({ overwriteOrderFields: ['buyer', 'totalQty'] });
+      expect([...mockMappingCommitService.commit.mock.calls[1][1].overviewGuard.overwrite]).toEqual(['buyer', 'totalQty']);
+    });
+
+    it('commit 의 충돌 알림을 응답 orderOverviewConflicts 로 돌려준다', async () => {
+      const res: any = await run();
+      expect(res.orderOverviewConflicts).toEqual([{ field: 'buyer', existing: 'A', incoming: 'B' }]);
+    });
+
+    it('승인 대기 계약이 없으면 새로 만든다', async () => {
+      await run();
+      expect(mockContractRepo.create).toHaveBeenCalledWith(expect.objectContaining({ styleNo: 'S1', status: 'PENDING_APPROVAL' }));
+    });
+
+    it('승인 대기 계약이 있으면 새로 만들지 않고 그 계약을 갱신한다(가장 최근 1개를 조회)', async () => {
+      const pending = { id: 5, styleNo: 'S1', status: 'PENDING_APPROVAL', totalQty: 1 };
+      mockContractRepo.findOne.mockResolvedValue(pending);
+      await run();
+      expect(mockContractRepo.create).not.toHaveBeenCalled();
+      expect(mockContractRepo.findOne).toHaveBeenCalledWith({ where: { styleNo: 'S1', status: 'PENDING_APPROVAL' }, order: { id: 'DESC' } });
+      expect(mockContractRepo.save).toHaveBeenCalledWith(expect.objectContaining({ id: 5, totalQty: 100, triggeredBySalesOrderSpecId: 7 }));
+    });
+
+    it('계약 조회는 대기 상태만 대상으로 한다(승인된 계약은 조회·수정 대상이 아님)', async () => {
+      await run();
+      expect(mockContractRepo.findOne.mock.calls[0][0].where.status).toBe('PENDING_APPROVAL');
+    });
+
+    it('계약 갱신이 실패하면 commit(트랜잭션)이 실패로 전파된다(스타일 저장도 롤백)', async () => {
+      mockContractRepo.findOne.mockRejectedValue(new Error('db'));
+      await expect(run()).rejects.toThrow('db');
     });
   });
 });

@@ -142,6 +142,19 @@ export interface AiSalesOrderResult {
   workNotes: string | null;
   handwrittenCandidates?: AiHandwrittenCandidate[] | null;
   decisions?: SalesOrderBomCompareDecisions;
+  // PR-249: 기존 스타일의 오더개요 중 "새 값 사용"을 고른 항목(없으면 서버가 비어 있는 항목만 채우고 다른 값은 유지).
+  overwriteOrderFields?: string[];
+}
+
+// PR-249: 오더개요 항목별 비교(기존 스타일일 때만 응답에 있음).
+export type OrderOverviewStatus = 'same' | 'fillEmpty' | 'differs' | 'incomingEmpty';
+export interface OrderOverviewConflict {
+  field: string;
+  existing: string | number | null;
+  incoming: string | number | null;
+}
+export interface OrderOverviewCompareRow extends OrderOverviewConflict {
+  status: OrderOverviewStatus;
 }
 
 // PR-235: 저장 전 "기존 자재와 비교" 응답 — 기존 BOM이 있는 스타일에서만 rows가 채워진다.
@@ -195,6 +208,7 @@ export interface SalesOrderBomCompareRow {
 export interface SalesOrderBomCompareResponse {
   hasExistingBom: boolean;
   rows: SalesOrderBomCompareRow[];
+  overview?: OrderOverviewCompareRow[];
 }
 
 // PR-192: 백엔드가 240초 한도로 재시도·폴백을 끝내므로, 그보다 약간 긴 270초로 맞춰

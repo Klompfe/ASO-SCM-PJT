@@ -8,10 +8,13 @@ import {
   type AiSalesOrderResult,
   type AiUsageSummary,
   type SalesOrderBomCompareRow,
+  type OrderOverviewCompareRow,
+  type OrderOverviewConflict,
 } from '../api/salesOrders.service';
 import { SalesOrderBomCompareStep } from './SalesOrderBomCompareStep';
 import { CompositionSummary } from './CompositionSummary';
 import { CompositionBulkPanel } from './CompositionBulkPanel';
+import { hasOverviewDecision, formatOverviewConflictsNotice } from '../utils/orderOverviewReview';
 import { summarizeCompositions, looksLikeAbbreviatedComposition } from '../utils/compositionReview';
 import { getErrorMessage } from '../utils/errorMessage';
 import {
@@ -136,7 +139,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   // 이 상태가 채워져 비교 화면(SalesOrderBomCompareStep)이 뜬다. result는 비교에
   // 보낸 것과 같은(이미 제외 행 필터링된) 객체 — "이 선택으로 저장"을 누르면 같은
   // result에 decisions만 얹어 commitSalesOrderAnalysis를 호출한다.
-  const [compareState, setCompareState] = useState<{ index: number; result: AiSalesOrderResult; rows: SalesOrderBomCompareRow[] } | null>(null);
+  const [compareState, setCompareState] = useState<{ index: number; result: AiSalesOrderResult; rows: SalesOrderBomCompareRow[]; overview?: OrderOverviewCompareRow[] } | null>(null);
 
   useEffect(() => {
     if (!focusManualRow) return;
@@ -454,11 +457,13 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       // PR-235(PILOT-23 후속): 기존 BOM이 있는 스타일만 저장 전 비교 화면을 띄운다
       // (처음 저장하는 스타일은 비교 없이 바로 저장 — 지금 흐름 그대로).
       const compare = await compareSalesOrderBom(result);
-      if (compare.hasExistingBom) {
-        setCompareState({ index, result, rows: compare.rows });
+      // PR-249: 자재 행이 없어도 기존 스타일의 오더개요 값이 달라 사용자가 정해야 하는 항목이 있으면 비교 화면을 띄운다.
+      if (compare.hasExistingBom || hasOverviewDecision(compare.overview)) {
+        setCompareState({ index, result, rows: compare.rows, overview: compare.overview });
         return;
       }
-      await commitSalesOrderAnalysis(result);
+      const saved = await commitSalesOrderAnalysis(result);
+      notifyOverviewConflicts(result.overview.styleNo, saved);
       toast.success(`${result.overview.styleNo ?? `#${index + 1}`} 저장되었습니다.`);
       setSavedIndexes((prev) => new Set(prev).add(index));
       onSuccess();
@@ -471,12 +476,19 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
 
   // PR-235: 비교 화면에서 "이 선택으로 저장"을 눌렀을 때 — decisions만 얹어 같은
   // commitSalesOrderAnalysis를 호출한다(별도 API 아님, 기존 저장 경로 재사용).
-  const handleConfirmCompareSave = async (decisions: AiSalesOrderResult['decisions']) => {
+  // PR-249: 서버가 기존 값과 달라 유지한 오더개요 항목이 있으면 저장 결과 안내로 알린다(저장은 이미 끝났고 막지 않는다).
+  const notifyOverviewConflicts = (styleNo: string | null, saved: unknown) => {
+    const msg = formatOverviewConflictsNotice((saved as { orderOverviewConflicts?: OrderOverviewConflict[] } | null | undefined)?.orderOverviewConflicts);
+    if (msg) toast(`${styleNo ?? '스타일'}: ${msg}`, { duration: 12000 });
+  };
+
+  const handleConfirmCompareSave = async (decisions: AiSalesOrderResult['decisions'], overwriteOrderFields?: string[]) => {
     if (!compareState) return;
     const { index, result } = compareState;
     setSavingIndex(index);
     try {
-      await commitSalesOrderAnalysis({ ...result, decisions });
+      const saved = await commitSalesOrderAnalysis({ ...result, decisions, ...(overwriteOrderFields ? { overwriteOrderFields } : {}) });
+      notifyOverviewConflicts(result.overview.styleNo, saved);
       toast.success(`${result.overview.styleNo ?? `#${index + 1}`} 저장되었습니다.`);
       setSavedIndexes((prev) => new Set(prev).add(index));
       setCompareState(null);
@@ -537,6 +549,8 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setBulkProgress(0);
     let successCount = 0;
     const failures: { label: string; reason: string }[] = [];
+    // PR-249: 기존 스타일의 오더개요 값이 달라 서버가 유지한 항목 안내(저장은 막지 않음).
+    const conflictNotes: string[] = [];
 
     for (const { result: rawResult, index } of targets) {
       const result = buildCommitResult(rawResult, excludedBomIndexes.get(index) ?? new Set());
@@ -552,7 +566,9 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
         continue;
       }
       try {
-        await commitSalesOrderAnalysis(result);
+        const saved = await commitSalesOrderAnalysis(result);
+        const conflictMsg = formatOverviewConflictsNotice((saved as { orderOverviewConflicts?: OrderOverviewConflict[] } | null | undefined)?.orderOverviewConflicts);
+        if (conflictMsg) conflictNotes.push(`${label}: ${conflictMsg}`);
         setSavedIndexes((prev) => new Set(prev).add(index));
         successCount++;
       } catch (err) {
@@ -564,6 +580,9 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     }
 
     setBulkSaving(false);
+    if (conflictNotes.length > 0) {
+      toast(conflictNotes.join('\n'), { duration: 20000 });
+    }
     if (failures.length === 0) {
       toast.success(`일괄 저장 완료: ${successCount}건 성공`);
     } else {
@@ -624,6 +643,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
             <SalesOrderBomCompareStep
               styleNo={results[compareState.index]?.overview.styleNo ?? null}
               rows={compareState.rows}
+              overview={compareState.overview}
               saving={savingIndex === compareState.index}
               onCancel={() => setCompareState(null)}
               onConfirm={handleConfirmCompareSave}

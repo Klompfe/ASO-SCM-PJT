@@ -15,7 +15,9 @@ export type CommitNoticeCode =
   | 'TOTAL_QTY_MISMATCH'
   // PR-246
   | 'COMPOSITION_FILLED'
-  | 'COMPOSITION_DIFF_KEPT';
+  | 'COMPOSITION_DIFF_KEPT'
+  // PR-249
+  | 'ORDER_OVERVIEW_DIFF_KEPT';
 
 export interface CommitNotice {
   type: CommitNoticeType;
@@ -65,6 +67,7 @@ export const NOTICE_CODE_LABELS: Record<CommitNoticeCode, string> = {
   TOTAL_QTY_MISMATCH: '총수량 불일치',
   COMPOSITION_FILLED: '혼용률 채움',
   COMPOSITION_DIFF_KEPT: '혼용률 기존 값 유지',
+  ORDER_OVERVIEW_DIFF_KEPT: '오더개요 기존 값 유지',
 };
 
 export const noticeCodeLabel = (code: string): string => NOTICE_CODE_LABELS[code as CommitNoticeCode] ?? '알림';

@@ -1,8 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { ProductionType } from '../../styles/entities/style-overview.entity';
 import { CommitDecisionsDto, COMPOSITION_MAX_LENGTH } from '../../mapping/dto/commit-mapping.dto';
+import { ORDER_OVERVIEW_FIELDS } from '../../mapping/utils/order-overview-merge.util';
 
 // 작업지시서 한 건(=오더개요) 정보. AI 분석은 문서에서 읽지 못한 값은 null로 둔다.
 export class AiOverviewDto {
@@ -289,6 +290,14 @@ export class AiSalesOrderResultDto {
   @ValidateNested({ each: true })
   @Type(() => AiHandwrittenCandidateDto)
   handwrittenCandidates?: AiHandwrittenCandidateDto[] | null;
+
+  // PR-249: 기존 스타일의 오더개요 중 사용자가 비교 화면에서 항목별로 "새 값 사용"을 고른 필드. 없으면(일괄 저장
+  // 포함) 서버는 비어 있는 항목만 채우고 다른 값은 기존 값을 유지한다. 허용 목록 밖의 값은 400.
+  @ApiPropertyOptional({ description: '새 값으로 교체할 오더개요 항목(허용: totalQty/buyer/styleName/brand/itemType/productionType/targetRdd)', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsIn([...ORDER_OVERVIEW_FIELDS], { each: true })
+  overwriteOrderFields?: string[];
 
   // PR-235(PILOT-23 후속): 저장 전 비교 화면에서 고른 선택 — 없으면(기존 BOM이 없는
   // 스타일, 또는 비교 화면을 안 거친 호출) commitAnalysis가 평소처럼 넘긴다(그대로

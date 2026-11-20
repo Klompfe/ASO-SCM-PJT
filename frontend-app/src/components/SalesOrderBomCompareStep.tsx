@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { AiSalesOrderResult, SalesOrderBomCompareRow } from '../api/salesOrders.service';
+import type { AiSalesOrderResult, SalesOrderBomCompareRow, OrderOverviewCompareRow } from '../api/salesOrders.service';
+import {
+  orderOverviewLabel,
+  toggleOverviewUseNew,
+  buildOverwriteOrderFields,
+  countOverviewOverwrites,
+  buildCompareConfirmMessage,
+} from '../utils/orderOverviewReview';
 import {
   buildDraftRows,
   buildDefaultDecisions,
@@ -19,9 +26,11 @@ import {
 interface SalesOrderBomCompareStepProps {
   styleNo: string | null;
   rows: SalesOrderBomCompareRow[];
+  // PR-249: 기존 스타일의 오더개요 항목별 비교(없으면 오더개요 구역을 그리지 않는다).
+  overview?: OrderOverviewCompareRow[];
   saving: boolean;
   onCancel: () => void;
-  onConfirm: (decisions: AiSalesOrderResult['decisions']) => void;
+  onConfirm: (decisions: AiSalesOrderResult['decisions'], overwriteOrderFields?: string[]) => void;
 }
 
 const TYPE_BADGE: Record<SalesOrderBomCompareRow['type'], { label: string; className: string }> = {
@@ -37,17 +46,20 @@ const TYPE_BADGE: Record<SalesOrderBomCompareRow['type'], { label: string; class
 // (합치기는 사람이 선택) ③ 정규화 일치(same)는 기본 갱신. 삭제가 기본값이라 안전장치를
 // 그대로 둔다: 연결된 행은 선택 자체를 막고, 수동/확정값이 있는 행은 체크 확인 전에는
 // 삭제가 적용되지 않는다.
-export function SalesOrderBomCompareStep({ styleNo, rows, saving, onCancel, onConfirm }: SalesOrderBomCompareStepProps) {
+export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCancel, onConfirm }: SalesOrderBomCompareStepProps) {
   const draftRows = useMemo(() => buildDraftRows(rows), [rows]);
   const [decisions, setDecisions] = useState<SalesOrderBomCompareDecisionMap>(() => buildDefaultDecisions(draftRows));
   const [confirmedRiskyKeys, setConfirmedRiskyKeys] = useState<Set<string>>(new Set());
   // PR-246: 행별 혼용률 선택(새 값으로 바꾸기 / 채우기 해제). 기본은 비어 있음 = 서버 기본 규칙.
   const [compositionChoices, setCompositionChoices] = useState<CompositionChoiceMap>(new Map());
+  // PR-249: 오더개요 항목별 "새 값 사용" 선택(기본은 모두 기존 값 유지).
+  const [overviewUseNew, setOverviewUseNew] = useState<Set<string>>(new Set());
 
   const summary = summarizeDecisions(draftRows, decisions);
   const risky = riskyDeleteRows(draftRows, decisions);
   const riskyKeys = new Set(risky.map((r) => r.key));
   const compositionOverwriteCount = countCompositionOverwrites(draftRows, decisions, compositionChoices);
+  const overviewOverwriteCount = countOverviewOverwrites(overview, overviewUseNew);
 
   const setIncoming = (key: string, value: IncomingDecision) => {
     setDecisions((prev) => ({ incoming: new Map(prev.incoming).set(key, value), existing: prev.existing }));
@@ -74,24 +86,18 @@ export function SalesOrderBomCompareStep({ styleNo, rows, saving, onCancel, onCo
       );
       return;
     }
-    if (summary.delete > 0 || compositionOverwriteCount > 0) {
-      const deleteNames = draftRows
-        .filter(({ key, row }) => row.type === 'existingOnly' && (decisions.existing.get(key) ?? defaultExistingDecisionFor(row)) === 'delete')
-        .map(({ row }) => row.existing?.itemName ?? '')
-        .filter(Boolean);
-      // 삭제만 있을 때는 기존 문구 그대로, 혼용률 교체가 있으면 그 줄을 앞에 덧붙인다.
-      const deleteMessage = `기존 자재 ${deleteNames.length}건이 삭제됩니다. 계속할까요?\n- ${deleteNames.join('\n- ')}`;
-      const compositionMessage = `혼용률 ${compositionOverwriteCount}행을 새 값으로 바꿉니다.`;
-      const proceed = window.confirm(
-        compositionOverwriteCount === 0
-          ? deleteMessage
-          : deleteNames.length === 0
-            ? `${compositionMessage} 계속할까요?`
-            : `${compositionMessage}\n${deleteMessage}`,
-      );
-      if (!proceed) return;
-    }
-    onConfirm(buildCommitDecisionsPayload(draftRows, decisions, compositionChoices));
+    const deleteNames =
+      summary.delete > 0
+        ? draftRows
+            .filter(({ key, row }) => row.type === 'existingOnly' && (decisions.existing.get(key) ?? defaultExistingDecisionFor(row)) === 'delete')
+            .map(({ row }) => row.existing?.itemName ?? '')
+            .filter(Boolean)
+        : [];
+    // 삭제만 있을 때는 기존 문구 그대로, 오더개요·혼용률 교체가 있으면 그 줄을 앞에 덧붙인다(없으면 확인창 없음).
+    const confirmMessage = buildCompareConfirmMessage({ deleteNames, compositionOverwriteCount, overviewOverwriteCount });
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
+    const overwriteOrderFields = buildOverwriteOrderFields(overview, overviewUseNew);
+    onConfirm(buildCommitDecisionsPayload(draftRows, decisions, compositionChoices), overwriteOrderFields.length > 0 ? overwriteOrderFields : undefined);
   };
 
   return (
@@ -105,6 +111,14 @@ export function SalesOrderBomCompareStep({ styleNo, rows, saving, onCancel, onCo
           기본 선택은 "새 인식 우선"입니다(비슷한 이름은 새 자재로 추가, 기존에만 있는 자재는 삭제) — 수동 필요수량·확정 단가·종류 지정·요척·비고 같은 확정 값은 갱신/합치기에서 항상 기존 값을 유지합니다.
         </p>
       </div>
+
+      {overview && overview.some((r) => r.status !== 'incomingEmpty' || r.existing != null) && (
+        <OrderOverviewSection
+          rows={overview}
+          useNew={overviewUseNew}
+          onToggle={(field) => setOverviewUseNew((prev) => toggleOverviewUseNew(prev, field))}
+        />
+      )}
 
       <div className="overflow-x-auto border rounded">
         <table className="w-full text-sm">
@@ -280,6 +294,77 @@ export function CompositionCell({
       >
         {overwrite ? '되돌리기' : '새 값으로 바꾸기'}
       </button>
+    </div>
+  );
+}
+
+
+// PR-249: 오더개요 항목별 비교 — fillEmpty(비어 있어 채움) / differs(기존·새 값 나란히, 두 버튼, 기본 "기존 값 유지",
+// 되돌릴 수 있음) / same·incomingEmpty(변화 없음). 값은 가공하지 않고 그대로 보여 준다.
+export function OrderOverviewSection({
+  rows,
+  useNew,
+  onToggle,
+}: {
+  rows: OrderOverviewCompareRow[];
+  useNew: ReadonlySet<string>;
+  onToggle: (field: string) => void;
+}) {
+  const shown = rows.filter((r) => r.status !== 'incomingEmpty' || r.existing != null);
+  return (
+    <div className="border rounded p-3 bg-gray-50" data-testid="order-overview-compare">
+      <h5 className="text-sm font-semibold mb-1">오더개요 비교 (기존 스타일)</h5>
+      <p className="text-xs text-gray-500 mb-2">
+        비어 있는 항목은 새 값으로 채워지고, 값이 다른 항목은 기본으로 기존 값을 유지합니다. 바꾸려면 항목마다 "새 값 사용"을 눌러 주세요.
+      </p>
+      <table className="text-sm">
+        <tbody>
+          {shown.map((r) => {
+            const chosenNew = useNew.has(r.field);
+            return (
+              <tr key={r.field} className="align-top" data-testid={`order-overview-${r.field}`}>
+                <td className="pr-3 py-1 font-medium whitespace-nowrap">{orderOverviewLabel(r.field)}</td>
+                <td className="py-1">
+                  {r.status === 'same' && <span className="text-xs text-gray-500">변화 없음 ({String(r.existing)})</span>}
+                  {r.status === 'incomingEmpty' && (
+                    <span className="text-xs text-gray-500">변화 없음(새 값 비어 있음 — 기존 값 {String(r.existing)} 유지)</span>
+                  )}
+                  {r.status === 'fillEmpty' && <span className="text-xs text-green-700">비어 있어 새 값으로 채웁니다: {String(r.incoming)}</span>}
+                  {r.status === 'differs' && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span>
+                        기존 <b>{String(r.existing)}</b>
+                      </span>
+                      <span>→</span>
+                      <span>
+                        새 <b>{String(r.incoming)}</b>
+                      </span>
+                      <span className="inline-flex rounded border overflow-hidden">
+                        <button
+                          type="button"
+                          aria-pressed={!chosenNew}
+                          onClick={() => chosenNew && onToggle(r.field)}
+                          className={`px-2 py-0.5 ${!chosenNew ? 'bg-gray-700 text-white' : 'bg-white text-gray-700'}`}
+                        >
+                          기존 값 유지
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={chosenNew}
+                          onClick={() => !chosenNew && onToggle(r.field)}
+                          className={`px-2 py-0.5 border-l ${chosenNew ? 'bg-orange-600 text-white' : 'bg-white text-gray-700'}`}
+                        >
+                          새 값 사용
+                        </button>
+                      </span>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

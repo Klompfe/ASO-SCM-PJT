@@ -119,3 +119,45 @@ describe('SalesOrderBomCompareStep — 혼용률 (PR-246)', () => {
   });
 });
 
+// PR-249: 오더개요 항목별 비교 표시(정적 렌더 — 클릭 상태 전이·요청 본문은 orderOverviewReview.test.ts 순수 함수 테스트).
+describe('SalesOrderBomCompareStep — 오더개요 (PR-249)', () => {
+  const render = (overview?: any[], rows: SalesOrderBomCompareRow[] = []) =>
+    renderToStaticMarkup(createElement(SalesOrderBomCompareStep, { styleNo: null, rows, overview, saving: false, onCancel: vi.fn(), onConfirm: vi.fn() }));
+
+  it('differs: 기존·새 값을 나란히, 두 버튼, 기본은 "기존 값 유지"가 눌린 상태', () => {
+    const html = render([{ field: 'buyer', existing: 'Buyer A', incoming: 'Buyer B', status: 'differs' }]);
+    expect(html).toContain('오더개요 비교');
+    expect(html).toContain('Buyer A');
+    expect(html).toContain('Buyer B');
+    expect(html).toContain('기존 값 유지');
+    expect(html).toContain('새 값 사용');
+    expect(html).toMatch(/aria-pressed="true"[^>]*>기존 값 유지/);
+    expect(html).toMatch(/aria-pressed="false"[^>]*>새 값 사용/);
+  });
+
+  it('fillEmpty: 비어 있어 채운다는 안내(버튼 없음)', () => {
+    const html = render([{ field: 'brand', existing: null, incoming: 'Brand A', status: 'fillEmpty' }]);
+    expect(html).toContain('비어 있어 새 값으로 채웁니다: Brand A');
+    expect(html).not.toContain('aria-pressed'); // 선택 버튼 없음
+  });
+
+  it('same / incomingEmpty: 변화 없음 표시', () => {
+    const html = render([
+      { field: 'styleName', existing: 'Style A', incoming: 'Style A', status: 'same' },
+      { field: 'itemType', existing: 'JACKET', incoming: null, status: 'incomingEmpty' },
+    ]);
+    expect(html).toContain('변화 없음 (Style A)');
+    expect(html).toContain('기존 값 JACKET 유지');
+    expect(html).not.toContain('aria-pressed'); // 선택 버튼 없음
+  });
+
+  it('overview 응답이 없으면(구버전 서버·신규 스타일) 오더개요 구역을 그리지 않는다', () => {
+    expect(render(undefined)).not.toContain('order-overview-compare');
+  });
+
+  it('자재 행이 없어도(오더개요만 비교) 화면이 그려진다', () => {
+    const html = render([{ field: 'totalQty', existing: 100, incoming: 250, status: 'differs' }], []);
+    expect(html).toContain('order-overview-totalQty');
+  });
+});
+

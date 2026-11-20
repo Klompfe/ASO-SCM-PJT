@@ -652,6 +652,82 @@ describe('MappingCommitService', () => {
       });
     });
 
+    // PR-249: 오더개요 가드(기존 스타일) — 서버가 강제. 합성 값만 사용. 옵션 없는 호출(엑셀 HTTP)은 기존 동작 그대로.
+    describe('오더개요 가드 (PR-249)', () => {
+      const overviewPayload = (extra: Record<string, unknown> = {}): CommitMappingDto => ({
+        ...rebuildPayload(),
+        overviewData: { styleNo: 'LB6YSLM107Z', factory: '베트남', buyer: '다른바이어', totalQty: 999, brand: '브랜드A', ...extra } as any,
+      });
+      const guard = (overwrite: string[] = []) => ({ overviewGuard: { overwrite: new Set(overwrite) } });
+      const savedOverview = () =>
+        mockQueryRunnerManager.save.mock.calls.find(([arg]: any) => arg && typeof arg === 'object' && arg.overview)![0].overview;
+
+      it('가드: 비어 있는 항목(brand)은 채우고, 다른 값(buyer·totalQty)은 유지하며 충돌을 돌려준다', async () => {
+        const result = await service.commit(overviewPayload(), guard());
+        const ov = savedOverview();
+        expect(ov.brand).toBe('브랜드A');
+        expect(ov.buyer).toBe('미도컴퍼니');
+        expect(Number(ov.totalQty)).toBe(215);
+        expect(result.orderOverviewConflicts).toEqual([
+          { field: 'totalQty', existing: 215, incoming: 999 },
+          { field: 'buyer', existing: '미도컴퍼니', incoming: '다른바이어' },
+        ]);
+        expect(result.notices).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'NEEDS_REVIEW', code: 'ORDER_OVERVIEW_DIFF_KEPT' })]));
+      });
+
+      it('가드: 같은 값은 변화·충돌 없음, 들어온 값이 비어 있으면(빈 문자열·null·0) 기존 값을 보존한다', async () => {
+        const result = await service.commit(overviewPayload({ buyer: '미도컴퍼니', totalQty: 0, brand: '', styleName: null }), guard());
+        const ov = savedOverview();
+        expect(ov.buyer).toBe('미도컴퍼니');
+        expect(Number(ov.totalQty)).toBe(215);
+        expect(ov.brand).toBeNull();
+        expect(result.orderOverviewConflicts).toEqual([]);
+      });
+
+      it('가드: overwrite 로 지정한 항목만 교체하고, 지정하지 않은 다른 항목은 유지한다', async () => {
+        await service.commit(overviewPayload(), guard(['buyer']));
+        const ov = savedOverview();
+        expect(ov.buyer).toBe('다른바이어');
+        expect(Number(ov.totalQty)).toBe(215);
+      });
+
+      it('가드: 공장은 기존 보류 규칙 그대로(overwrite 에 있어도 교체하지 않는다)', async () => {
+        const result = await service.commit(overviewPayload({ factory: '삼정' }), guard(['factory']));
+        expect(savedOverview().factory).toBe('베트남');
+        expect(result.notices).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'FACTORY_MISMATCH' })]));
+      });
+
+      it('가드 없는 호출(엑셀 HTTP /mapping/commit)은 이전 동작 그대로 — 값이 있으면 덮어쓰고 충돌 필드가 응답에 없다', async () => {
+        const result = await service.commit(overviewPayload());
+        const ov = savedOverview();
+        expect(ov.buyer).toBe('다른바이어');
+        expect(Number(ov.totalQty)).toBe(999);
+        expect(result.orderOverviewConflicts).toBeUndefined();
+      });
+
+      it('가드는 자재 행 처리에 영향을 주지 않는다(신규 컬러 CR 추가, 기존 BK 미변경)', async () => {
+        await service.commit(overviewPayload(), guard());
+        const bomSaves = mockQueryRunnerManager.save.mock.calls.filter(([entity]: any) => entity === BomItem);
+        expect(bomSaves).toHaveLength(1);
+        expect(bomSaves[0][1]).toEqual(expect.objectContaining({ colorCode: 'CR' }));
+      });
+
+      it('afterMerge 는 병합 뒤 같은 트랜잭션에서 실행되고, 던지면 커밋하지 않고 롤백한다', async () => {
+        const order: string[] = [];
+        mockQueryRunner.commitTransaction.mockImplementation(async () => { order.push('commit'); });
+        const afterMerge = jest.fn(async () => { order.push('after'); });
+        await service.commit(overviewPayload(), { afterMerge });
+        expect(order).toEqual(['after', 'commit']);
+        expect(afterMerge).toHaveBeenCalledWith(mockQueryRunnerManager);
+
+        mockQueryRunner.commitTransaction.mockClear();
+        mockQueryRunner.rollbackTransaction.mockClear();
+        await expect(service.commit(overviewPayload(), { afterMerge: async () => { throw new Error('contract failed'); } })).rejects.toBeDefined();
+        expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
+        expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalled();
+      });
+    });
+
     // PR-246: 혼용률 — 기존 행 재저장 규칙(서버 강제). 합성 값만 사용.
     describe('혼용률 재저장 규칙 (PR-246)', () => {
       const setExistingComposition = (composition: string | null) => {

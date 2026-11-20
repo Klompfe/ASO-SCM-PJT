@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
+import { type OrderOverviewConflict } from '../mapping/utils/order-overview-merge.util';
 import { VisionService, type VisionGuardrailContext } from './vision.service';
 import { MasterStyle } from '../styles/entities/master-style.entity';
 import { Contract, ContractStatus } from '../styles/entities/contract.entity';
@@ -75,6 +76,8 @@ export class SalesOrdersService {
       throw new BadRequestException('Style No.를 읽지 못했습니다 — 저장 전에 직접 입력해 주세요.');
     }
 
+    // PR-249: 승인 대기 계약은 스타일 저장과 같은 트랜잭션에서(commit 의 afterMerge) 만든다/갱신한다.
+    let contract: Contract | undefined;
     const commitResult = await this.mappingCommitService.commit({
       styleNo,
       overviewData: {
@@ -124,16 +127,41 @@ export class SalesOrdersService {
       // 움직인다. bomItems와 같은 배열 순서(인덱스)를 기준으로 한다(위 bomItems가 그
       // 필터링된 배열 그대로이므로, 비교 화면에 보여준 인덱스와 일치한다).
       decisions: result.decisions,
+    }, {
+      // PR-249: 기존 스타일의 오더개요는 비어 있는 항목만 채우고, 다르면 유지 — 사용자가 비교 화면에서 항목별로
+      // 고른 필드(overwriteOrderFields)만 교체한다. 일괄 저장은 이 필드를 보내지 않는다.
+      overviewGuard: { overwrite: new Set(result.overwriteOrderFields ?? []) },
+      afterMerge: async (manager) => {
+        contract = await this.upsertPendingContract(manager, styleNo, result);
+      },
     });
 
-    // 수주(작업지시서) 등록(엑셀 매핑 경로는 해당 없음)은 계약을 자동으로 승인 대기 상태로
-    // 만든다(PR-066). 방금 커밋된 StyleOverview를 다시 읽어 그 시점 값을 스냅샷으로
-    // 고정한다 — result.overview를 그대로 쓰지 않는 이유는 cmtPrice/fobPrice처럼
-    // AI 분석 DTO에 없는 필드도 있고, 실제로 DB에 저장된 값(기본값 처리 등 포함)과
-    // 어긋나지 않게 하기 위해서다.
-    const style = await this.dataSource
-      .getRepository(MasterStyle)
-      .findOne({ where: { styleNo }, relations: ['overview'] });
+    // 계약(승인 대기)은 위 commit()의 afterMerge 에서 같은 트랜잭션으로 만들거나 갱신했다(upsertPendingContract).
+    const spec = await this.salesOrderSpecsService.save(styleNo, result.workNotes, result.sizeSpecs);
+
+    if (contract) {
+      contract.triggeredBySalesOrderSpecId = spec.id;
+      await this.dataSource.getRepository(Contract).save(contract);
+    }
+
+    // PR-098: 병합 중 자동 반영을 보류한 항목(기존 factory 충돌, 기존 BomItem과 수량/
+    // 요척 차이 등)을 업로드 화면이 사용자에게 보여줄 수 있게 그대로 얹어서 돌려준다.
+    // PR-249: 기존 값과 달라 유지한 오더개요 항목은 orderOverviewConflicts 로 따로 돌려준다.
+    return Object.assign(spec, {
+      warnings: commitResult.warnings,
+      orderOverviewConflicts: (commitResult.orderOverviewConflicts ?? []) as OrderOverviewConflict[],
+    });
+  }
+
+  // 수주(작업지시서) 등록(엑셀 매핑 경로는 해당 없음)은 계약을 자동으로 승인 대기 상태로 만든다(PR-066).
+  // 방금 병합된 StyleOverview를 다시 읽어 그 시점 값을 스냅샷으로 고정한다 — result.overview를 그대로 쓰지 않는
+  // 이유는 cmtPrice/fobPrice처럼 AI 분석 DTO에 없는 필드도 있고, 실제로 DB에 저장된 값(기본값 처리 등 포함)과
+  // 어긋나지 않게 하기 위해서다.
+  // PR-249: 같은 스타일에 승인 대기(PENDING_APPROVAL) 계약이 이미 있으면 새로 만들지 않고 가장 최근 1개를 갱신한다
+  // (나머지 대기 계약은 건드리지 않음). 승인·거절·대체된 계약은 수정하지 않는다 — 대기 계약이 없으면(승인된 계약만
+  // 있는 경우 포함) 기존 동작대로 새 대기 계약을 만든다.
+  private async upsertPendingContract(manager: EntityManager, styleNo: string, result: AiSalesOrderResultDto): Promise<Contract> {
+    const style = await manager.getRepository(MasterStyle).findOne({ where: { styleNo }, relations: ['overview'] });
     const overview = style?.overview;
 
     // PR-181: 미도 수기 CMT단가 초안 — 이 화면에서 cmtPrice는 AI가 채우는 값이 아니라
@@ -146,10 +174,8 @@ export class SalesOrdersService {
       overview?.cmtPrice != null &&
       Number(overview.cmtPrice) === Number(result.overview.cmtPrice);
 
-    const contractRepository = this.dataSource.getRepository(Contract);
-    const contract = contractRepository.create({
-      styleNo,
-      status: ContractStatus.PENDING_APPROVAL,
+    const contractRepository = manager.getRepository(Contract);
+    const fields = {
       totalQty: overview?.totalQty ?? null,
       targetRdd: overview?.targetRdd ?? null,
       factory: overview?.factory ?? null,
@@ -157,19 +183,19 @@ export class SalesOrdersService {
       productionType: overview?.productionType ?? null,
       cmtPrice: overview?.cmtPrice ?? null,
       fobPrice: overview?.fobPrice ?? null,
-      cmtPriceConfidence: isHandwrittenDraft ? 'HANDWRITTEN_DRAFT' : null,
+      cmtPriceConfidence: isHandwrittenDraft ? ('HANDWRITTEN_DRAFT' as const) : null,
       cmtPriceNote: isHandwrittenDraft ? (result.overview.cmtPriceNote ?? null) : null,
+    };
+    const pending = await contractRepository.findOne({
+      where: { styleNo, status: ContractStatus.PENDING_APPROVAL },
+      order: { id: 'DESC' },
     });
-    await contractRepository.save(contract);
-
-    const spec = await this.salesOrderSpecsService.save(styleNo, result.workNotes, result.sizeSpecs);
-
-    contract.triggeredBySalesOrderSpecId = spec.id;
-    await contractRepository.save(contract);
-
-    // PR-098: 병합 중 자동 반영을 보류한 항목(기존 factory 충돌, 기존 BomItem과 수량/
-    // 요척 차이 등)을 업로드 화면이 사용자에게 보여줄 수 있게 그대로 얹어서 돌려준다.
-    return Object.assign(spec, { warnings: commitResult.warnings });
+    if (pending) {
+      Object.assign(pending, fields);
+      return contractRepository.save(pending);
+    }
+    const contract = contractRepository.create({ styleNo, status: ContractStatus.PENDING_APPROVAL, ...fields });
+    return contractRepository.save(contract);
   }
 
   // PR-235(PILOT-23 후속): 저장 버튼을 누르기 전에 호출하는 읽기 전용 비교 — DB에
@@ -183,6 +209,16 @@ export class SalesOrdersService {
     }
     return this.mappingCommitService.compareSalesOrderBom({
       styleNo,
+      // PR-249: 오더개요 항목별 비교(읽기 전용)용 — 기존 스타일의 값과 이번에 들어온 값을 서버가 비교한다.
+      overview: {
+        totalQty: result.overview.totalQty,
+        buyer: result.overview.buyer,
+        styleName: result.overview.styleName,
+        brand: result.overview.brand,
+        itemType: result.overview.itemType,
+        productionType: result.overview.productionType,
+        targetRdd: result.overview.targetRdd,
+      },
       bomItems: result.bomItems.map((b) => ({
         itemName: b.itemName,
         englishName: b.englishName ?? undefined,

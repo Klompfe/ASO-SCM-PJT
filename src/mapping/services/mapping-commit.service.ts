@@ -28,6 +28,15 @@ import {
   type SalesOrderBomCompareRow,
 } from '../utils/sales-order-bom-compare.util';
 import { cleanComposition, resolveCompositionUpdate } from '../utils/composition-update.util';
+import {
+  ORDER_OVERVIEW_FIELDS,
+  ORDER_OVERVIEW_FIELD_LABELS,
+  classifyOrderOverviewField,
+  compareOrderOverview,
+  type OrderOverviewConflict,
+  type OrderOverviewField,
+  type OrderOverviewCompareRow,
+} from '../utils/order-overview-merge.util';
 import { normalizeForFuzzyMatch } from '../../boms/utils/bom-name-normalize.util';
 
 // PR-132: commit()이 사용자에게 알려야 하는 두 종류의 사실을 문자열 패턴이 아니라 구조로 구분한다.
@@ -48,7 +57,9 @@ export type CommitNoticeCode =
   | 'COMPOSITION_FILLED'
   | 'COMPOSITION_DIFF_KEPT'
   // PR-235: 저장 전 비교 화면에서 "삭제"로 고른 기존 BOM 행을 실제로 지웠다는 알림.
-  | 'BOM_ITEM_DELETED';
+  | 'BOM_ITEM_DELETED'
+  // PR-249: 기존 스타일의 오더개요 값이 달라 기존 값을 유지했다(비교 화면에서 항목별로 "새 값 사용"을 골라야 교체).
+  | 'ORDER_OVERVIEW_DIFF_KEPT';
 
 export interface CommitNotice {
   type: CommitNoticeType;
@@ -64,6 +75,16 @@ export interface CommitResult {
   // PR-098: 병합 중 자동 반영을 보류한 항목 등을 사람이 읽을 수 있는 문자열로 담는다. notices.message와 같은 내용이며(단일 원천),
   // 수주 등록(작업지시서 업로드, SalesOrdersService.commitAnalysis)와 기존 호출부/테스트가 문자열 배열을 그대로 쓰므로 형태를 바꾸지 않는다.
   warnings: string[];
+  // PR-249: 가드가 켜진 요청(작지 저장)에서 기존 값과 달라 유지한 오더개요 항목.
+  orderOverviewConflicts?: OrderOverviewConflict[];
+}
+
+// PR-249: commit() 호출 옵션 — HTTP /mapping/commit(엑셀)은 옵션 없이 기존 동작 그대로.
+export interface CommitOptions {
+  // 있으면 오더개요 병합 가드를 켠다(작지 저장 경로). overwrite 는 사용자가 "새 값 사용"을 고른 필드.
+  overviewGuard?: { overwrite: ReadonlySet<string> };
+  // 스타일·BOM 병합이 끝난 뒤, 같은 트랜잭션 안에서 실행된다(예: 승인 대기 계약 생성/갱신). 실패하면 전체 롤백.
+  afterMerge?: (manager: EntityManager) => Promise<void>;
 }
 
 // BOM 자재 병합 키를 만들 때 빈 값을 기존 저장 관례(빈 값→'N/A')와 동일하게 정규화한다
@@ -105,6 +126,8 @@ export interface BomDiffResponse {
 export interface SalesOrderBomCompareResponse {
   hasExistingBom: boolean;
   rows: SalesOrderBomCompareRow[];
+  // PR-249: 기존 스타일의 오더개요 항목별 비교(기존 스타일 + 요청에 overview 가 있을 때만).
+  overview?: OrderOverviewCompareRow[];
 }
 
 export interface BomReconcileResult {
@@ -135,11 +158,12 @@ export class MappingCommitService {
   // Bom은 해당 스타일의 최신 것을 재사용하며, BomItem은 (자재명, 색상, 규격) 키가
   // 일치하면 건드리지 않고(수량/요척 차이는 warnings에만 기록) 없으면 새로 추가한다.
   // 기존 BomItem을 지우는 동작은 이 메서드의 책임이 아니다(별도 명시적 삭제로만 가능).
-  async commit(payload: CommitMappingDto): Promise<CommitResult> {
+  async commit(payload: CommitMappingDto, options: CommitOptions = {}): Promise<CommitResult> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     const notices: CommitNotice[] = [];
+    const orderOverviewConflicts: OrderOverviewConflict[] = [];
 
     try {
       const { styleNo, overviewData, bomItems } = payload;
@@ -173,7 +197,13 @@ export class MappingCommitService {
             : 0;
 
       if (style.overview) {
-        this.mergeOverview(style.overview, overviewData, notices, quantitySum);
+        this.mergeOverview(
+          style.overview,
+          overviewData,
+          notices,
+          quantitySum,
+          options.overviewGuard ? { overwrite: options.overviewGuard.overwrite, conflicts: orderOverviewConflicts } : undefined,
+        );
       } else {
         style.overview = queryRunner.manager.create(StyleOverview, {
           factory: overviewData.factory,
@@ -363,8 +393,16 @@ export class MappingCommitService {
         });
       }
 
+      if (options.afterMerge) await options.afterMerge(queryRunner.manager);
+
       await queryRunner.commitTransaction();
-      return { success: true, styleNo, notices, warnings: notices.map((n) => n.message) };
+      return {
+        success: true,
+        styleNo,
+        notices,
+        warnings: notices.map((n) => n.message),
+        ...(options.overviewGuard ? { orderOverviewConflicts } : {}),
+      };
     } catch (err) {
       await queryRunner.rollbackTransaction();
       if (err instanceof BadRequestException || err instanceof NotFoundException) throw err;
@@ -427,13 +465,21 @@ export class MappingCommitService {
   // 쓰지 않고 별도 분류 함수(sales-order-bom-compare.util.ts)를 쓴다.
   async compareSalesOrderBom(payload: SalesOrderBomCompareRequestDto): Promise<SalesOrderBomCompareResponse> {
     const { styleNo, bomItems } = payload;
+    // PR-249: 오더개요 항목별 비교(읽기 전용) — 기존 스타일에 오더개요가 있을 때만.
+    let overviewRows: OrderOverviewCompareRow[] | undefined;
+    if (payload.overview) {
+      const existingStyle = await this.dataSource.manager.findOne(MasterStyle, { where: { styleNo }, relations: ['overview'] });
+      if (existingStyle?.overview) {
+        overviewRows = compareOrderOverview(existingStyle.overview as unknown as Record<string, unknown>, payload.overview);
+      }
+    }
     const existingBoms = await this.dataSource.manager.find(Bom, {
       where: { style: { styleNo } },
       relations: ['items', 'items.material'],
     });
     const bom = pickActiveBom(existingBoms);
     if (!bom || (bom.items ?? []).length === 0) {
-      return { hasExistingBom: false, rows: [] };
+      return { hasExistingBom: false, rows: [], ...(overviewRows ? { overview: overviewRows } : {}) };
     }
 
     const materialIds = [...new Set((bom.items ?? []).map((i) => i.material?.id).filter((v): v is number => v != null))];
@@ -491,7 +537,7 @@ export class MappingCommitService {
     }));
 
     const rows = classifySalesOrderBomCompare(existingRows, incomingRows);
-    return { hasExistingBom: true, rows };
+    return { hasExistingBom: true, rows, ...(overviewRows ? { overview: overviewRows } : {}) };
   }
 
   // PR-198: bom-diff 비교 화면에서 사람이 행별로 고른 동작을 적용한다(all-or-nothing —
@@ -718,11 +764,37 @@ export class MappingCommitService {
   // 검토 없이 "국가 단위 기본값" 위에 "구체적 공장명"이 실수로 덮어써지는 걸 막기 위함).
   // 나머지 필드는 이번 요청 값이 있으면(null/undefined가 아니면) 덮어쓰고, 없으면
   // 기존 값을 그대로 둔다.
+  // PR-249: 오더개요 병합 가드(순수 규칙은 order-overview-merge.util.ts).
+  private guardedMergeOrderFields(
+    overview: StyleOverview,
+    overviewData: CommitMappingDto['overviewData'],
+    notices: CommitNotice[],
+    guard: { overwrite: ReadonlySet<string>; conflicts: OrderOverviewConflict[] },
+  ): void {
+    const target = overview as unknown as Record<string, unknown>;
+    const incomingData = overviewData as unknown as Record<string, unknown>;
+    for (const field of ORDER_OVERVIEW_FIELDS) {
+      const row = classifyOrderOverviewField(field, target[field], incomingData[field]);
+      const apply = row.status === 'fillEmpty' || (row.status === 'differs' && guard.overwrite.has(field));
+      if (apply) {
+        target[field] = field === 'targetRdd' ? new Date(String(incomingData[field])) : incomingData[field];
+      } else if (row.status === 'differs') {
+        guard.conflicts.push({ field, existing: row.existing, incoming: row.incoming });
+        notices.push({
+          type: 'NEEDS_REVIEW',
+          code: 'ORDER_OVERVIEW_DIFF_KEPT',
+          message: `오더개요 ${ORDER_OVERVIEW_FIELD_LABELS[field as OrderOverviewField]}: 기존 '${row.existing}' → 새 값 '${row.incoming}' — 기존 값을 유지했습니다(개별 저장의 비교 화면에서 항목별로 바꿀 수 있습니다).`,
+        });
+      }
+    }
+  }
+
   private mergeOverview(
     overview: StyleOverview,
     overviewData: CommitMappingDto['overviewData'],
     notices: CommitNotice[],
     quantitySum = 0,
+    guard?: { overwrite: ReadonlySet<string>; conflicts: OrderOverviewConflict[] },
   ): void {
     if (overviewData.factory) {
       if (overview.factory && overview.factory !== overviewData.factory) {
@@ -751,7 +823,11 @@ export class MappingCommitService {
     const oldTotalQty = Number(overview.totalQty);
     const incomingTotalQtyValid = Number.isFinite(overviewData.totalQty) && overviewData.totalQty > 0;
 
-    if (incomingTotalQtyValid) {
+    if (guard) {
+      // PR-249: 가드 모드 — 총수량·바이어·스타일명·브랜드·품목·임가공·납기는 비어 있으면 채우고, 같으면 그대로,
+      // 다르면 유지(충돌 알림), 들어온 값이 비면 보존. 사용자가 항목별로 고른 필드만 교체한다.
+      this.guardedMergeOrderFields(overview, overviewData, notices, guard);
+    } else if (incomingTotalQtyValid) {
       overview.totalQty = overviewData.totalQty;
     } else if (!existingPositive && Number.isFinite(overviewData.totalQtyCandidate) && (overviewData.totalQtyCandidate as number) > 0) {
       overview.totalQty = overviewData.totalQtyCandidate as number;
@@ -764,13 +840,15 @@ export class MappingCommitService {
         message: `기존 총수량 ${oldTotalQty} ↔ 색상×사이즈 합계 ${quantitySum} — 다릅니다(참고용, 자동 반영하지 않음).`,
       });
     }
-    if (overviewData.buyer) overview.buyer = overviewData.buyer;
     if (overviewData.shipDate) overview.firstShipDate = new Date(overviewData.shipDate);
-    if (overviewData.styleName != null) overview.styleName = overviewData.styleName;
-    if (overviewData.brand != null) overview.brand = overviewData.brand;
-    if (overviewData.itemType != null) overview.itemType = overviewData.itemType;
-    if (overviewData.productionType != null) overview.productionType = overviewData.productionType;
-    if (overviewData.targetRdd) overview.targetRdd = new Date(overviewData.targetRdd);
+    if (!guard) {
+      if (overviewData.buyer) overview.buyer = overviewData.buyer;
+      if (overviewData.styleName != null) overview.styleName = overviewData.styleName;
+      if (overviewData.brand != null) overview.brand = overviewData.brand;
+      if (overviewData.itemType != null) overview.itemType = overviewData.itemType;
+      if (overviewData.productionType != null) overview.productionType = overviewData.productionType;
+      if (overviewData.targetRdd) overview.targetRdd = new Date(overviewData.targetRdd);
+    }
 
     // PR-168: 미도 전용 수기 CMT단가 — factory와 같은 이유로 재커밋 시 기존 값을
     // 조용히 덮어쓰지 않는다(사람이 한 번 확인해 저장한 단가를 재분석 결과로 실수로
