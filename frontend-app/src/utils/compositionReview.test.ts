@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeCompositions, formatCompositionSummary, isCompositionTargetCategory, cleanComposition } from './compositionReview';
+import { summarizeCompositions, formatCompositionSummary, isCompositionTargetCategory, cleanComposition, looksLikeAbbreviatedComposition } from './compositionReview';
 
 // PR-246: 합성 값만 사용.
 describe('compositionReview (PR-246)', () => {
@@ -57,5 +57,22 @@ describe('compositionReview (PR-246)', () => {
     expect(s.groups).toEqual([]);
     expect(formatCompositionSummary(s)).toBe('');
     expect(s.missingRows).toBe(1);
+  });
+});
+
+// PR-247: 약어형 안내 판정(안내만, 값 불변).
+describe('looksLikeAbbreviatedComposition (PR-247)', () => {
+  it.each(['R/N/SP=56/40/4', 'C/P=60/40', 'c/p=60/40', ' C/P 60/40 ', 'A=1'])('약어형 %p → true', (v) => {
+    expect(looksLikeAbbreviatedComposition(v)).toBe(true);
+  });
+
+  it.each(['COTTON 60% POLYESTER 40%', 'C/P=60%/40%', 'POLYESTER 100%', '', '   ', null, undefined, 'COTTON', 'A/B', '면 폴리에스터'])('약어형 아님 %p → false', (v) => {
+    expect(looksLikeAbbreviatedComposition(v as any)).toBe(false);
+  });
+
+  it('판정 함수는 값을 바꾸지 않는다(입력 문자열 그대로, 부작용 없음)', () => {
+    const v = ' r/n/sp=56/40/4 ';
+    looksLikeAbbreviatedComposition(v);
+    expect(v).toBe(' r/n/sp=56/40/4 ');
   });
 });

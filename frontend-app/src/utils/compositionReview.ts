@@ -49,3 +49,11 @@ export function summarizeCompositions(
 export function formatCompositionSummary(summary: CompositionSummary): string {
   return summary.groups.map((g) => `${g.value} (${g.rowCount}행)`).join(' / ');
 }
+
+// PR-247: 값이 `%` 없이 `/`·`=` 와 숫자가 섞인 약어형(예: R/N/SP=56/40/4, C/P=60/40)으로 보이는지 —
+// 저장 화면에서 "수입서류에 쓸 표기를 확인해 주세요" 안내를 띄우는 용도일 뿐이다. 값은 절대 바꾸지 않는다.
+export function looksLikeAbbreviatedComposition(value: string | null | undefined): boolean {
+  const v = (value ?? '').trim();
+  if (v === '' || v.includes('%')) return false;
+  return /[/=]/.test(v) && /\d/.test(v);
+}

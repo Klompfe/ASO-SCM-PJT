@@ -11,7 +11,7 @@ import {
 } from '../api/salesOrders.service';
 import { SalesOrderBomCompareStep } from './SalesOrderBomCompareStep';
 import { CompositionSummary } from './CompositionSummary';
-import { summarizeCompositions } from '../utils/compositionReview';
+import { summarizeCompositions, looksLikeAbbreviatedComposition } from '../utils/compositionReview';
 import { getErrorMessage } from '../utils/errorMessage';
 import {
   updateOverviewField as updateOverviewFieldPure,
@@ -1433,6 +1433,11 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                                           disabled={isExcluded}
                                           onChange={(e) => updateBomItemField(index, i, 'composition', e.target.value === '' ? null : e.target.value)}
                                         />
+                                        {looksLikeAbbreviatedComposition(item.composition) && (
+                                          <div className="mt-0.5 text-[10px] text-amber-700" data-testid={`bom-composition-abbr-hint-${index}-${i}`}>
+                                            약어 표기로 보입니다. 수입서류에 쓸 표기를 확인해 주세요
+                                          </div>
+                                        )}
                                       </td>
                                       <td className="border p-1">
                                         {candidate && resolved && !selectedValue && (

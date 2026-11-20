@@ -482,3 +482,33 @@ export function checkYocheokMismatchBundle(
     message: `같은 자재 ${n}개 색상 행의 출고량 합 ${sum} 이(가) 요척 × 수량 = ${expected.toFixed(2)} 와 다릅니다 — 색상별 출고량 또는 요척·수량을 확인해 주세요`,
   };
 }
+
+// PR-247: 작지에서 읽은 혼용률(composition) 후처리 — 값을 "가공하지 않는다". 하는 일은
+// ① 문자열이 아니면 null ② 앞뒤 공백 제거 ③ 비어 있거나 자리표시자(-, —, N/A, NA, 없음, 해당없음,
+// NULL — 대소문자 무관)면 null ④ 길이 상한 초과면 잘라 내지 않고 null + 경고 ⑤ 원단류가 아닌 구분
+// 행에 값이 있으면 그대로 두고 경고만. 대소문자·약어·번역·기호 변환은 하지 않는다(사용자 결정).
+export const COMPOSITION_MAX_LENGTH_VISION = 500;
+const COMPOSITION_PLACEHOLDERS = new Set(['-', '—', 'n/a', 'na', '없음', '해당없음', 'null']);
+// 프런트(compositionReview.ts)의 COMPOSITION_TARGET_CATEGORIES 와 같은 원단류 목록.
+const COMPOSITION_FABRIC_CATEGORIES = new Set(['겉감', '안감', '배색', '배색감', '퀼팅안감', '폴리트윌안감']);
+
+export function checkComposition(
+  raw: unknown,
+  category: string | null | undefined,
+): { composition: string | null; warnings: VisionWarning[] } {
+  if (typeof raw !== 'string') return { composition: null, warnings: [] };
+  const trimmed = raw.trim();
+  if (trimmed === '' || COMPOSITION_PLACEHOLDERS.has(trimmed.toLowerCase())) return { composition: null, warnings: [] };
+  if (trimmed.length > COMPOSITION_MAX_LENGTH_VISION) {
+    return {
+      composition: null,
+      warnings: [{ code: 'COMPOSITION_TOO_LONG', message: `혼용률 문구가 너무 길어(${trimmed.length}자) 비워 두었습니다 — 작지에서 직접 확인해 입력해 주세요` }],
+    };
+  }
+  const warnings: VisionWarning[] = [];
+  const cat = (category ?? '').trim();
+  if (cat !== '' && !COMPOSITION_FABRIC_CATEGORIES.has(cat)) {
+    warnings.push({ code: 'COMPOSITION_ON_NON_FABRIC', message: `부자재(${cat}) 행에 혼용률이 읽혔습니다 — 원본과 대조해 맞는 행인지 확인해 주세요` });
+  }
+  return { composition: trimmed, warnings };
+}

@@ -22,6 +22,7 @@ import {
   groupBomItemsForYocheok,
   checkYocheokMismatchBundle,
   cleanupRecognizedMaterialName,
+  checkComposition,
   type VisionWarning,
 } from './utils/vision-guardrails.util';
 import { suggestCategoryCorrection, applyCategoryCorrection } from './utils/term-autocorrect.util';
@@ -113,6 +114,8 @@ export const RESPONSE_SCHEMA = {
             // 위치가 섞이지 않도록 별도 필드로 받는다. 서버도 itemName에서 같은 내용을
             // 다시 분리하는 안전망을 두므로(vision-guardrails.util.ts), 모델이 이 필드를
             // 못 채워도 괜찮다.
+            // PR-247: 추가만(required에 넣지 않음 — 필수로 두면 모델이 없는 값을 지어낼 수 있다).
+            composition: { type: SchemaType.STRING, nullable: true, description: '작지에 적힌 이 자재 행의 혼용률 문구를 보이는 그대로(약어·기호·대소문자 그대로, 번역·계산·보정 금지). 없거나 읽기 어려우면 null — 추측 금지' },
             englishName: { type: SchemaType.STRING, nullable: true, description: '자재명에 함께 적힌 영문 표기(확신 없으면 null, 추측 금지)' },
             location: { type: SchemaType.STRING, nullable: true, description: '자재명에 함께 적힌 사용(작업) 위치(확신 없으면 null, 추측 금지)' },
             materialSubTypeCandidate: {
@@ -192,6 +195,8 @@ itemName에는 자재 이름만 넣으세요 — 영문 표기(예: EDGE TAPE)�
 requiredQty(출고량)는 그 행에 인쇄된 숫자를 계산하지 말고 그대로 옮기세요(요척×수량으로 다시 계산하지 마세요). 같은 자재가 색상별로 행이 나뉘어 있으면 각 색상 행의 출고량을 각각 그대로 읽으세요(다른 색상 행의 값을 합치거나 복사하지 마세요). requiredQtyUnit은 출고량 칸 옆/안에 인쇄된 단위(Y/M/EA/KG 등)를 원문 그대로 옮기고, 단위가 안 보이면 null로 두세요(추측하지 마세요). "합계"/"TOTAL" 같은 합산 행은 개별 자재 행이 아니므로 bomItems에 넣지 마세요. **requiredQty는 반드시 그 행의 "출고량(요구수량)" 칸에 있는 값만 읽으세요 — 스타일 총수량, 주문수량, 장수처럼 다른 칸(보통 문서 상단이나 다른 표)에 적힌 숫자를 출고량 대신 넣지 마세요.** 출고량 칸이 비어 있거나 안 보이면 다른 칸의 숫자로 대신 채우지 말고 null로 두세요.
 
 출고량 칸에 값이 여러 줄로 적혀 있으면(LOT1, LOT2 같은 글자 표기, 또는 ①·②·③처럼 동그라미 번호로 구분된 줄 — 둘 다 같은 뜻의 LOT 구분자입니다), 각 줄의 숫자를 모두 읽어 requiredQtyLots에 담고(예: [317.54, 442.54]), requiredQty는 그 합계로 하세요(직접 더해서 넣어도 되고, 모르면 서버가 다시 합산합니다). 숫자에 소수점이 있으면 소수 둘째 자리까지 그대로 읽으세요 — 반올림해서 정수로 줄이지 마세요. 한 줄만 있으면 requiredQtyLots는 생략하고 requiredQty에만 그 값을 넣으세요. 읽기 불확실한 줄이 있어도 건너뛰지 말고 보이는 숫자만 담되, 숫자 자체가 안 보이면 그 줄은 비우세요(추측 금지). LOT 줄마다 단위가 서로 다르면(예: 한 줄은 Y, 다른 줄은 M) 합산하지 말고 requiredQtyLots는 null로 두고, requiredQty에는 가장 위 줄(첫 LOT)의 값만 넣고 requiredQtyUnit도 그 줄의 단위로 하세요.
+
+composition(혼용률): 작지에 인쇄·기재된 혼용률 문구(혼용률/Composition/Fiber content 등으로 표기된 칸)만 읽으세요. 읽은 문자열을 보이는 그대로 적으세요 — 약어(예: C/P=60/40)를 풀어 쓰지 말고, 영어나 한글로 바꾸지 말고, 대소문자·기호·공백·순서를 바꾸지 말고, 비율을 계산하거나 보정하거나 합계를 맞추지 마세요. 혼용률이 보이지 않거나 읽기 어려우면 반드시 null로 두고, 자재명·다른 행·일반 상식으로 혼용률을 만들어 채우지 마세요. 혼용률이 그 자재 행(겉감/안감 등)에 대응해서 적혀 있을 때만 그 행의 composition에 넣고, 한 곳의 혼용률을 다른 자재 행에 복사하지 마세요. 부자재(지퍼·단추·라벨·택·폴리백 등) 행에는 넣지 마세요.
 
 materialSubTypeCandidate: 실(THREAD)이나 테이프류 자재 행에서만, 자재명 또는 규격란 텍스트에 "코아사"/"오바사"/"스쿠이사"/"지누이도"/"다데"/"암홀" 같은 글자가 그대로(또는 거의 그대로) 포함되어 있어 종류를 명확히 특정할 수 있을 때만 채우세요(스쿠이사는 오바사로, 다른 이름들은 가장 가까운 항목으로 매핑). 실/테이프가 아닌 자재이거나, 그런 단서가 없거나, 여러 후보 중 어느 것인지 확신할 수 없으면 반드시 null로 두고 절대 추측하지 마세요.
 
@@ -557,6 +562,11 @@ export class VisionService {
           item.itemName = nameCleanup.itemName;
           warnings.push({ code: 'MATERIAL_NAME_CLEANED', message: `자재명에서 영문 표기/작업 위치를 분리했습니다(원문: ${rawName})` });
         }
+        // PR-247: 혼용률은 공백 제거·빈 값/자리표시자 null·길이 상한 외에는 어떤 변환도 하지 않는다.
+        const compositionCheck = checkComposition((item as { composition?: unknown }).composition, item.category);
+        item.composition = compositionCheck.composition;
+        warnings.push(...compositionCheck.warnings);
+
         if (!item.englishName && nameCleanup.englishName) item.englishName = nameCleanup.englishName;
         if (!item.location && nameCleanup.locationNote) item.location = nameCleanup.locationNote;
 
