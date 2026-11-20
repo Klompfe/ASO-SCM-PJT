@@ -21,6 +21,8 @@ export interface SalesOrderBomCompareExistingRow {
   remarks: string | null;
   // PR-246: 기존 행의 혼용률(없으면 null).
   composition?: string | null;
+  // PR-250: 기존 행의 작지 수량(sheetQty) — 사전 점검이 "수량이 바뀌는지"를 판단하는 데 쓴다(읽기 전용 정보).
+  sheetQty?: number | null;
   hasManualOverride: boolean;
   hasConfirmedUnitPrice: boolean;
   hasSubtypeAssignment: boolean;

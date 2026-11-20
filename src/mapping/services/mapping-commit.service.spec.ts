@@ -1327,6 +1327,16 @@ describe('MappingCommitService', () => {
       expect(mockQueryRunnerManager.save).not.toHaveBeenCalled();
     });
 
+    // PR-250: 사전 점검이 "작지 수량이 바뀌는지" 판단할 수 있도록 기존 행의 sheetQty 를 읽기 전용으로 돌려준다.
+    it.each([[760, 760], [null, null], [undefined, null]])('기존 행 sheetQty %p → 응답 %p (읽기 전용, 저장 호출 없음)', async (stored, expected) => {
+      mockDataSourceManager.find.mockImplementation((entity: any) =>
+        Promise.resolve(entity === Bom ? [{ ...existingBom, items: [{ ...(existingBom.items as any[])[0], sheetQty: stored }] }] : []),
+      );
+      const result = await service.compareSalesOrderBom(comparePayload);
+      expect(result.rows[0].existing?.sheetQty).toBe(expected);
+      expect(mockQueryRunnerManager.save).not.toHaveBeenCalled();
+    });
+
     it('기존 행의 연결 정보(발주/입고 건수, 삭제 가능 여부, 수동·확정값 보유)가 담긴다', async () => {
       mockDataSourceManager.find.mockImplementation((entity: any) => {
         if (entity === Bom) return Promise.resolve([existingBom]);

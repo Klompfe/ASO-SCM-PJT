@@ -170,6 +170,8 @@ export interface SalesOrderBomCompareExistingRow {
   unit: string | null;
   remarks: string | null;
   composition?: string | null;
+  // PR-250: 기존 행의 작지 수량(사전 점검용).
+  sheetQty?: number | null;
   hasManualOverride: boolean;
   hasConfirmedUnitPrice: boolean;
   hasSubtypeAssignment: boolean;

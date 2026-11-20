@@ -513,6 +513,7 @@ export class MappingCommitService {
         unit: i.material?.unit ?? null,
         remarks: i.remarks ?? null,
         composition: i.composition ?? null,
+        sheetQty: i.sheetQty != null ? Number(i.sheetQty) : null,
         hasManualOverride: i.manualRequiredQty != null,
         hasConfirmedUnitPrice: Number(i.unitPrice) > 0,
         hasSubtypeAssignment: i.threadType != null || i.tapeType != null,

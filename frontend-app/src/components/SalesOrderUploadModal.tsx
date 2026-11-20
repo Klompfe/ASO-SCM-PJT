@@ -10,10 +10,20 @@ import {
   type SalesOrderBomCompareRow,
   type OrderOverviewCompareRow,
   type OrderOverviewConflict,
+  type SalesOrderBomCompareResponse,
 } from '../api/salesOrders.service';
 import { SalesOrderBomCompareStep } from './SalesOrderBomCompareStep';
 import { CompositionSummary } from './CompositionSummary';
 import { CompositionBulkPanel } from './CompositionBulkPanel';
+import { BulkSavePrecheckPanel } from './BulkSavePrecheckPanel';
+import {
+  classifyBulkPrecheck,
+  findDuplicateStyleNos,
+  runWithConcurrency,
+  selectNewTargets,
+  isStillNew,
+  type PrecheckEntry,
+} from '../utils/bulkSavePrecheck';
 import { hasOverviewDecision, formatOverviewConflictsNotice } from '../utils/orderOverviewReview';
 import { summarizeCompositions, looksLikeAbbreviatedComposition } from '../utils/compositionReview';
 import { getErrorMessage } from '../utils/errorMessage';
@@ -53,7 +63,6 @@ import {
   applyKeepOnlyThisRow,
   findWarning,
   collectFormatConfirmItems,
-  collectUnverifiedStyleItems,
   splitStyleNoForDisplay,
   getSaveGateInfo,
 } from '../utils/visionGuardrails';
@@ -139,6 +148,9 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   // 이 상태가 채워져 비교 화면(SalesOrderBomCompareStep)이 뜬다. result는 비교에
   // 보낸 것과 같은(이미 제외 행 필터링된) 객체 — "이 선택으로 저장"을 누르면 같은
   // result에 decisions만 얹어 commitSalesOrderAnalysis를 호출한다.
+  // PR-250: 일괄 저장 사전 점검 표 상태(메모리 전용 — 저장소에 보관하지 않는다).
+  const [precheck, setPrecheck] = useState<{ entries: PrecheckEntry[]; running: boolean; progress: { done: number; total: number } } | null>(null);
+  const [precheckNotes, setPrecheckNotes] = useState<Map<number, string>>(new Map());
   const [compareState, setCompareState] = useState<{ index: number; result: AiSalesOrderResult; rows: SalesOrderBomCompareRow[]; overview?: OrderOverviewCompareRow[] } | null>(null);
 
   useEffect(() => {
@@ -503,35 +515,83 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   // Style No.를 못 읽은 항목은 백엔드가 거부하므로(SalesOrdersService.commitAnalysis) 제외하고,
   // 병렬 실행하면 서로 다른 스타일이 같은 자재명을 참조할 때 mapping-commit의 "없으면 새로
   // 생성" 로직이 경합할 수 있어(PR-052와 동일한 이유) 순차 실행한다.
+  // PR-250: "일괄저장"은 곧바로 저장하지 않고 사전 점검 표를 연다 — 스타일마다 읽기 전용 compare 로
+  // 신규/변경 없음/변경 있음/확인 필요로 분류한다. 일괄 저장(saveNewFromPrecheck)은 신규만 저장하며,
+  // 변경 있음은 개별 비교 화면(openCompareFromPrecheck)에서 확인해야 저장된다. 표를 닫으면 아무것도 저장되지 않는다.
   const handleBulkSave = async () => {
     if (isMock) {
       toast.error('목업 데이터는 저장할 수 없습니다.');
       return;
     }
-    const candidateTargets = results
-      .map((result, index) => ({ result, index }))
-      .filter(({ result, index }) => !!result.overview.styleNo && !savedIndexes.has(index));
-
-    if (candidateTargets.length === 0) {
-      toast.error('일괄 저장할 대상이 없습니다(Style No. 인식 실패 또는 이미 저장됨은 제외됩니다).');
+    const candidates = results.map((raw, index) => ({ raw, index })).filter(({ index }) => !savedIndexes.has(index));
+    if (candidates.length === 0) {
+      toast.error('일괄 저장할 대상이 없습니다(이미 저장됨은 제외됩니다).');
       return;
     }
+    // 저장 전에 이미 걸리는 조건(개별 저장·기존 일괄 저장과 같은 규칙)은 점검 호출 없이 "확인 필요"로 분류한다.
+    const base = candidates.map(({ raw, index }) => {
+      const built = buildCommitResult(raw, excludedBomIndexes.get(index) ?? new Set());
+      const styleNo = raw.overview.styleNo ?? null;
+      let blockedReason: string | null = null;
+      if (!styleNo) blockedReason = '스타일번호를 읽지 못했습니다 — 직접 입력한 뒤 개별로 저장해 주세요';
+      else if (shouldBlockSaveForStyleNo(raw.overview)) blockedReason = '스타일번호 끝 글자가 숫자로 읽혔습니다 — 원본과 대조해 영문자로 고친 뒤 저장해 주세요';
+      else if (!verifiedStyleNo.has(index)) blockedReason = '스타일번호를 원본과 대조했는지 체크하지 않았습니다';
+      else if (hasBlankMaterialName(built.bomItems)) blockedReason = '자재명이 빈 행이 있습니다 — 자재명을 채우거나 그 행을 제외해 주세요';
+      return { index, styleNo, blockedReason, built };
+    });
+    const duplicates = findDuplicateStyleNos(base);
+    const toCompare = base.filter((b) => !b.blockedReason && b.styleNo && !duplicates.has(b.styleNo));
 
-    // PR-200c: 대조하지 않은 항목은 안내하고 그 항목만 빼고 저장한다(나머지는 그대로 진행).
-    const unverified = collectUnverifiedStyleItems(
-      candidateTargets.map(({ result, index }) => ({ index, styleNo: result.overview.styleNo })),
-      verifiedStyleNo,
+    setPrecheckNotes(new Map());
+    setPrecheck({ entries: [], running: true, progress: { done: 0, total: toCompare.length } });
+    let done = 0;
+    // 동시 호출 3개로 제한 — 한 스타일의 실패는 그 스타일만 "확인 필요"로 둔다(전체를 막지 않음).
+    const outcomes = await runWithConcurrency(toCompare, 3, async (item) => {
+      try {
+        return await compareSalesOrderBom(item.built);
+      } finally {
+        done++;
+        setPrecheck((prev) => (prev ? { ...prev, progress: { done, total: toCompare.length } } : prev));
+      }
+    });
+    const compareByIndex = new Map<number, { compare: SalesOrderBomCompareResponse | null; failed: boolean }>();
+    toCompare.forEach((item, i) => {
+      const o = outcomes[i];
+      compareByIndex.set(item.index, o.ok ? { compare: o.value, failed: false } : { compare: null, failed: true });
+    });
+    const entries = classifyBulkPrecheck(
+      base.map((b) => {
+        const c = compareByIndex.get(b.index);
+        return { index: b.index, styleNo: b.styleNo, blockedReason: b.blockedReason, compare: c?.compare ?? null, compareFailed: c?.failed ?? false };
+      }),
     );
-    if (unverified.length > 0) {
-      toast.error(
-        `스타일번호를 원본과 대조하지 않은 항목은 저장하지 않습니다: ${unverified.map((u) => u.styleNo ?? `#${u.index + 1}`).join(', ')}`,
-      );
-    }
-    const unverifiedIndexes = new Set(unverified.map((u) => u.index));
-    const targets = candidateTargets.filter(({ index }) => !unverifiedIndexes.has(index));
+    setPrecheck({ entries, running: false, progress: { done: toCompare.length, total: toCompare.length } });
+  };
 
+  // PR-250: 변경 있음 스타일을 개별 비교 화면(PR-235/246/249)으로 연다 — 확인·저장을 마치면 표로 돌아온다.
+  const openCompareFromPrecheck = async (index: number) => {
+    const built = buildCommitResult(results[index], excludedBomIndexes.get(index) ?? new Set());
+    setSavingIndex(index);
+    try {
+      const compare = await compareSalesOrderBom(built);
+      if (compare.hasExistingBom || hasOverviewDecision(compare.overview)) {
+        setCompareState({ index, result: built, rows: compare.rows, overview: compare.overview });
+      } else {
+        toast('이 스타일은 이제 변경할 내용이 없습니다. 표를 다시 점검해 주세요.');
+      }
+    } catch (e) {
+      toast.error(getErrorMessage(e, '비교 정보를 불러오지 못했습니다.'));
+    } finally {
+      setSavingIndex(null);
+    }
+  };
+
+  const saveNewFromPrecheck = async () => {
+    if (!precheck) return;
+    const newIndexes = selectNewTargets(precheck.entries, savedIndexes);
+    const targets = newIndexes.map((index) => ({ result: results[index], index }));
     if (targets.length === 0) {
-      toast.error('대조 확인이 끝난 저장 대상이 없습니다.');
+      toast.error('저장할 신규 스타일이 없습니다.');
       return;
     }
 
@@ -548,6 +608,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
     setBulkSaving(true);
     setBulkProgress(0);
     let successCount = 0;
+    let skippedCount = 0;
     const failures: { label: string; reason: string }[] = [];
     // PR-249: 기존 스타일의 오더개요 값이 달라 서버가 유지한 항목 안내(저장은 막지 않음).
     const conflictNotes: string[] = [];
@@ -566,6 +627,14 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
         continue;
       }
       try {
+        // PR-250: 저장 직전에 한 번 더 확인 — 점검 이후 다른 곳에서 등록되는 등 더는 신규가 아니면 저장하지 않는다.
+        const fresh = await compareSalesOrderBom(result);
+        if (!isStillNew(fresh)) {
+          setPrecheckNotes((prev) => new Map(prev).set(index, '상태가 바뀌어 건너뜀 — 이제 기존 스타일입니다. 표를 다시 점검해 주세요.'));
+          skippedCount++;
+          setBulkProgress((p) => p + 1);
+          continue;
+        }
         const saved = await commitSalesOrderAnalysis(result);
         const conflictMsg = formatOverviewConflictsNotice((saved as { orderOverviewConflicts?: OrderOverviewConflict[] } | null | undefined)?.orderOverviewConflicts);
         if (conflictMsg) conflictNotes.push(`${label}: ${conflictMsg}`);
@@ -575,6 +644,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
         const reason = getErrorMessage(err, '알 수 없는 오류');
         console.error(`[일괄 저장 실패] ${label}:`, err);
         failures.push({ label, reason });
+        setPrecheckNotes((prev) => new Map(prev).set(index, `저장 실패: ${reason}`));
       }
       setBulkProgress((p) => p + 1);
     }
@@ -584,7 +654,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
       toast(conflictNotes.join('\n'), { duration: 20000 });
     }
     if (failures.length === 0) {
-      toast.success(`일괄 저장 완료: ${successCount}건 성공`);
+      toast.success(`일괄 저장 완료: ${successCount}건 성공${skippedCount > 0 ? `, ${skippedCount}건은 상태가 바뀌어 건너뜀` : ''}`);
     } else {
       const reasonGroups = new Map<string, string[]>();
       for (const f of failures) {
@@ -605,6 +675,8 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
   };
 
   const handleClose = () => {
+    setPrecheck(null);
+    setPrecheckNotes(new Map());
     setFile(null);
     setResults([]);
     setStep(1);
@@ -650,6 +722,20 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
             />
           )}
 
+          {precheck && !compareState && (
+            <BulkSavePrecheckPanel
+              entries={precheck.entries}
+              running={precheck.running}
+              progress={precheck.progress}
+              savedIndexes={savedIndexes}
+              notes={precheckNotes}
+              saving={bulkSaving || savingIndex != null}
+              onSaveNew={saveNewFromPrecheck}
+              onOpenCompare={openCompareFromPrecheck}
+              onClose={() => setPrecheck(null)}
+            />
+          )}
+
           {step === 1 && !compareState && (
             <div className="space-y-4">
               <label
@@ -686,7 +772,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
             </div>
           )}
 
-          {step === 2 && !compareState && (
+          {step === 2 && !compareState && !precheck && (
             <div className="space-y-6">
               {isMock && (
                 <div className="bg-red-50 border-2 border-red-400 text-red-800 rounded-lg p-3 text-sm font-semibold">
