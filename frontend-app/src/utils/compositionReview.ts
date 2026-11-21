@@ -4,14 +4,24 @@ import type { AiBomItem } from '../api/salesOrders.service';
 // (대소문자 변환·번역·정규화 없음, 앞뒤 공백 제거만).
 
 // 오더개요 요약·"미기재" 경고의 대상 행(원단류). 작지의 소재 표 행은 구분이 "겉감"으로, 안감·배색
-// 계열은 각각 해당 구분으로 들어온다. 단추·라벨 같은 부자재는 혼용률이 없는 게 정상이라 경고
-// 대상에서 뺀다(값을 입력한 행은 구분과 상관없이 요약에 포함된다).
-export const COMPOSITION_TARGET_CATEGORIES: ReadonlySet<string> = new Set([
-  '겉감', '안감', '배색', '배색감', '퀼팅안감', '폴리트윌안감',
-]);
+// 계열은 각각 해당 구분으로 들어온다. 엑셀(MATERIAL LIST)은 ITEM 칸 원문이 구분이 되므로 영문 별칭
+// (OUT SHELL, LINING, COMBINATION)도 인식한다(PR-254). 단추·라벨 같은 부자재는 혼용률이 없는 게 정상이라
+// 경고 대상에서 뺀다(값을 입력한 행은 구분과 상관없이 요약에 포함된다).
+// 서버(vision-guardrails.util.ts)의 COMPOSITION_FABRIC_ALIASES 와 같은 목록 — 백엔드 테스트가 두 목록을 대조한다.
+export const COMPOSITION_FABRIC_ALIASES: readonly string[] = ['겉감', 'OUT SHELL', 'SHELL', 'OUTER SHELL', '안감', 'LINING', '퀼팅안감', '폴리트윌안감', '배색', '배색감', 'COMBINATION'];
 
-export const isCompositionTargetCategory = (category: string | null | undefined): boolean =>
-  COMPOSITION_TARGET_CATEGORIES.has((category ?? '').trim());
+// 공백·하이픈·밑줄 제거 + 대문자 비교 키.
+const normalizeCategoryKey = (s: string): string => s.replace(/[\s\-_]+/g, '').toUpperCase();
+const COMPOSITION_FABRIC_KEYS: ReadonlySet<string> = new Set(COMPOSITION_FABRIC_ALIASES.map(normalizeCategoryKey));
+
+// 칸을 줄바꿈·연속 공백(2칸 이상) 조각으로 나눠 어느 한 조각이 별칭과 정확히 일치하면 원단류(부분 일치 없음).
+export const isCompositionTargetCategory = (category: string | null | undefined): boolean => {
+  if (typeof category !== 'string') return false;
+  return category.split(/\r?\n|\s{2,}/).some((seg) => {
+    const key = normalizeCategoryKey(seg);
+    return key !== '' && COMPOSITION_FABRIC_KEYS.has(key);
+  });
+};
 
 export const cleanComposition = (v: string | null | undefined): string | null => {
   const s = (v ?? '').trim();
@@ -93,7 +103,7 @@ export function applyBulkComposition<T extends CompositionRowLike>(
   return { rows: next, filled, skipped };
 }
 
-// "원단류 행 선택" 빠른 버튼 — PR-246 의 원단류 구분 목록(COMPOSITION_TARGET_CATEGORIES)을 재사용한다.
+// "원단류 행 선택" 빠른 버튼 — PR-246 의 원단류 판정(isCompositionTargetCategory, PR-254 영문 별칭 포함)을 재사용한다.
 export function selectFabricRowIndexes(rows: CompositionRowLike[]): Set<number> {
   const out = new Set<number>();
   rows.forEach((r, i) => {

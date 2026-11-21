@@ -489,8 +489,25 @@ export function checkYocheokMismatchBundle(
 // 행에 값이 있으면 그대로 두고 경고만. 대소문자·약어·번역·기호 변환은 하지 않는다(사용자 결정).
 export const COMPOSITION_MAX_LENGTH_VISION = 500;
 const COMPOSITION_PLACEHOLDERS = new Set(['-', '—', 'n/a', 'na', '없음', '해당없음', 'null']);
-// 프런트(compositionReview.ts)의 COMPOSITION_TARGET_CATEGORIES 와 같은 원단류 목록.
-const COMPOSITION_FABRIC_CATEGORIES = new Set(['겉감', '안감', '배색', '배색감', '퀼팅안감', '폴리트윌안감']);
+// 프런트(compositionReview.ts)의 COMPOSITION_FABRIC_ALIASES 와 같은 원단류 목록(테스트가 두 목록을 대조한다).
+// PR-254: 영문 별칭(OUT SHELL, LINING, COMBINATION …)을 포함. 비교는 "정확히 일치"만 — 부분 일치 없음(INTERLINING 은 LINING 이 아님).
+export const COMPOSITION_FABRIC_ALIASES: readonly string[] = ['겉감', 'OUT SHELL', 'SHELL', 'OUTER SHELL', '안감', 'LINING', '퀼팅안감', '폴리트윌안감', '배색', '배색감', 'COMBINATION'];
+
+// 공백·하이픈·밑줄을 모두 제거하고 대문자로 맞춘 비교 키(예: "OUT-SHELL" = "out shell" = "OUTSHELL").
+const normalizeCategoryKey = (s: string): string => s.replace(/[\s\-_]+/g, '').toUpperCase();
+const COMPOSITION_FABRIC_KEYS = new Set(COMPOSITION_FABRIC_ALIASES.map(normalizeCategoryKey));
+
+// 엑셀의 ITEM 칸은 "겉감<줄바꿈>OUT-SHELL" 처럼 여러 줄이거나 연속 공백으로 한글·영문이 나뉘어 있다. 그래서 칸을
+// 줄바꿈·연속 공백(2칸 이상) 단위 조각으로 나눠, 어느 한 조각이 별칭과 정확히 일치하면 원단류로 본다. 저장된 구분 원문은 바꾸지 않는다.
+export function isCompositionFabricCategory(category: string | null | undefined): boolean {
+  if (typeof category !== 'string') return false;
+  return category
+    .split(/\r?\n|\s{2,}/)
+    .some((seg) => {
+      const key = normalizeCategoryKey(seg);
+      return key !== '' && COMPOSITION_FABRIC_KEYS.has(key);
+    });
+}
 
 export function checkComposition(
   raw: unknown,
@@ -507,7 +524,7 @@ export function checkComposition(
   }
   const warnings: VisionWarning[] = [];
   const cat = (category ?? '').trim();
-  if (cat !== '' && !COMPOSITION_FABRIC_CATEGORIES.has(cat)) {
+  if (cat !== '' && !isCompositionFabricCategory(cat)) {
     warnings.push({ code: 'COMPOSITION_ON_NON_FABRIC', message: `부자재(${cat}) 행에 혼용률이 읽혔습니다 — 원본과 대조해 맞는 행인지 확인해 주세요` });
   }
   return { composition: trimmed, warnings };

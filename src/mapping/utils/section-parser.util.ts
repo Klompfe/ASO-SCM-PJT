@@ -19,6 +19,10 @@ export interface ParsedSheetResult {
   warnings?: string[];
 }
 
+// PR-254: 기존 고정 머리글 줄(0 기반 13). 'ITEMS' 를 못 찾을 때의 기본값이자 후보 중 가까운 쪽을 고르는 기준.
+const LEGACY_BOM_HEADER_INDEX = 13;
+const BOM_HEADER_SEARCH_LIMIT = 30;
+
 export class SectionParser {
   private static readonly logger = new Logger('SectionParser');
 
@@ -67,7 +71,9 @@ export class SectionParser {
         };
 
         const warnings: string[] = [];
-        const bomItems = this.parseBomItems(rawData, 13, styleOverview.totalQty, merges, warnings);
+        // PR-254: BOM 머리글 줄은 고정 13 이 아니라 'ITEMS' 칸을 찾아 정한다(못 찾으면 기존 13).
+        const bomHeader = this.findBomHeaderRow(rawData, warnings);
+        const bomItems = this.parseBomItems(rawData, bomHeader.index, styleOverview.totalQty, merges, warnings, bomHeader.found);
 
         // PR-212: 색상×사이즈 수량 블록은 BOM 파싱 위치(bomStartIndex=13)와 무관하게
         // 시트 상단에서 CLOOR/SIZE 헤더를 독립적으로 찾는다 — BOM 파싱에 영향 없음.
@@ -85,6 +91,30 @@ export class SectionParser {
     }
   }
 
+  // PR-254: BOM 머리글('ITEMS') 줄 탐지. 앞쪽 BOM_HEADER_SEARCH_LIMIT 줄의 0열(ITEM 열)에서 앞뒤 공백 제거·대소문자
+  // 무시로 정확히 'ITEMS' 인 칸을 찾는다. 후보 1개 → 그 줄(13 이 아니면 정보성 안내), 0개 → 기존 고정 13 + 경고,
+  // 2개 이상 → 기존 위치(13)에 가장 가까운 후보(같은 거리면 위쪽) + 경고. 열 위치는 건드리지 않는다.
+  private static findBomHeaderRow(rawData: string[][], warnings: string[]): { index: number; found: boolean } {
+    const candidates: number[] = [];
+    const limit = Math.min(rawData.length, BOM_HEADER_SEARCH_LIMIT);
+    for (let i = 0; i < limit; i++) {
+      const cell = rawData[i]?.[0];
+      if (cell != null && String(cell).trim().toUpperCase() === 'ITEMS') candidates.push(i);
+    }
+    if (candidates.length === 0) {
+      warnings.push(`[BOM_HEADER_NOT_FOUND] BOM 머리글(ITEMS)을 찾지 못해 기본 위치(${LEGACY_BOM_HEADER_INDEX + 1}번째 줄)로 읽었습니다 — 결과를 확인하세요`);
+      return { index: LEGACY_BOM_HEADER_INDEX, found: false };
+    }
+    let index = candidates[0];
+    if (candidates.length > 1) {
+      index = candidates.reduce((best, c) => (Math.abs(c - LEGACY_BOM_HEADER_INDEX) < Math.abs(best - LEGACY_BOM_HEADER_INDEX) ? c : best));
+      warnings.push(`[BOM_HEADER_AMBIGUOUS] BOM 머리글(ITEMS) 후보가 ${candidates.length}개(${candidates.map((c) => c + 1).join(', ')}번째 줄)라 기본 위치에 가장 가까운 ${index + 1}번째 줄로 읽었습니다 — 결과를 확인하세요`);
+    } else if (index !== LEGACY_BOM_HEADER_INDEX) {
+      warnings.push(`[BOM_HEADER_SHIFTED] BOM 머리글 위치가 기본(${LEGACY_BOM_HEADER_INDEX + 1}번째 줄)과 달라 ${index + 1}번째 줄로 읽었습니다`);
+    }
+    return { index, found: true };
+  }
+
   // bomStartIndex: BOM 섹션의 상위 헤더 행(예: "ITEMS","QTY","COLOR OF",...)의 절대 행 인덱스.
   // 그 다음 행(bomStartIndex+1)은 서브헤더("OUT SHELL","COLOR USED","SPEC","CON'S",...),
   // 실제 데이터는 bomStartIndex+2부터 시작한다.
@@ -94,8 +124,19 @@ export class SectionParser {
     totalQty: number,
     merges: CellMergeRange[],
     warnings: string[] = [],
+    headerFound = false,
   ): any[] {
-    const headers = rawData[bomStartIndex].map(h => h?.trim().toUpperCase());
+    const headerRowCells = rawData[bomStartIndex] ?? [];
+    // PR-254: 머리글을 찾은 경우 실제 서식은 ITEMS 줄(혼용률 등) 바로 아래 서브헤더 줄에 CON'S 가 있으므로
+    // 두 줄을 모두 본다(ITEMS 줄 우선). 못 찾은 기존 경로(고정 13)는 그 줄 하나만 본다 — 기존 동작 그대로.
+    const cellText = (h: unknown) => (typeof h === 'string' ? h.trim().toUpperCase() : undefined);
+    const headers = headerRowCells.map(cellText);
+    const subHeaders = headerFound ? (rawData[bomStartIndex + 1] ?? []).map(cellText) : [];
+    const findCol = (pred: (h: string) => boolean): number => {
+      const a = headers.findIndex((h) => typeof h === 'string' && pred(h));
+      if (a >= 0) return a;
+      return subHeaders.findIndex((h) => typeof h === 'string' && pred(h));
+    };
     const toNum = (val: string | undefined | null) => parseFloat(val || '0') || 0;
     // PR-236: xlsx가 수식 셀을 "캐시된 계산 결과의 원래 타입"으로 돌려준다 — 예를 들어
     // 사이즈 라벨 칸(C4)이 엑셀에서 숫자로 입력돼 있으면, 그 칸을 참조하는 수식
@@ -106,10 +147,10 @@ export class SectionParser {
     // 넘어가면 "bomItems.N.colorOf must be a string"으로 저장 자체가 거부된다 —
     // 항상 문자열로 정규화한다(숫자→문자열, null/undefined→빈 문자열, 앞뒤 공백 제거).
     const toSafeString = (val: unknown): string => (val == null ? '' : String(val).trim());
-    const consIndex = headers.indexOf("CON'S");
+    const consIndex = findCol((h) => h === "CON'S");
     // PR-248: "혼용률/중량" 열 — 고정 열 번호가 아니라 헤더 텍스트에 '혼용률'이 들어 있는 열을 찾는다
     // (이 열에는 혼용률 문구만 적힌다). 헤더가 없으면(-1) 아무것도 읽지 않는다(기존 동작 그대로).
-    const compositionIndex = headers.findIndex((h) => typeof h === 'string' && h.includes('혼용률'));
+    const compositionIndex = findCol((h) => h.includes('혼용률'));
 
     // ITEM 컬럼(0열)이 여러 행에 걸쳐 병합된 경우, 그건 하나의 자재 항목이 소요량 보조정보를
     // 담기 위해 2행을 쓰는 원본 서식일 뿐이다(47개 시트 전수조사 결과 병합은 항상 정확히

@@ -132,3 +132,26 @@ describe('applyBulkComposition (PR-248)', () => {
     expect(summarizeCompositions(filled).missingRows).toBe(0);
   });
 });
+
+describe('isCompositionTargetCategory — 영문 별칭 (PR-254)', () => {
+  it.each([
+    ['OUT SHELL', true], ['  out shell ', true], ['OUT-SHELL', true], ['겉감\r\nOUT-SHELL', true], ['겉감                  OUT-SHELL', true],
+    ['SHELL', true], ['OUTER SHELL', true], ['LINING', true], ['쉬 폰\r\nLINING', true], ['안 감', true], ['COMBINATION', true], ['배 색\r\nCOMBINATION', true],
+    ['INTERLINING', false], ['심 지\r\nINTERLINING\r\n(M-100)', false], ['EDGE TAPE', false], ['PAD', false], ['SEWING THREAD', false], ['배색 스쿠이사   45S/3H   THREAD', false],
+    ['', false], [undefined, false],
+  ])('%j → %s', (category, expected) => {
+    expect(isCompositionTargetCategory(category as string | undefined)).toBe(expected);
+  });
+
+  it('원단류 선택·미기재 집계가 영문 구분 행에도 적용된다(저장된 구분 원문은 그대로)', () => {
+    const rows = [
+      { category: '겉감\r\nOUT-SHELL', composition: '' },
+      { category: '쉬 폰\r\nLINING', composition: 'POLYESTER 100%' },
+      { category: '심 지\r\nINTERLINING', composition: '' },
+      { category: 'EDGE TAPE', composition: '' },
+    ];
+    expect([...selectFabricRowIndexes(rows)]).toEqual([0, 1]);
+    expect(summarizeCompositions(rows as never).missingRows).toBe(1);
+    expect(rows[0].category).toBe('겉감\r\nOUT-SHELL');
+  });
+});

@@ -113,6 +113,20 @@ describe('SectionParser - 실제 원본 엑셀 전 시트 회귀 테스트', () 
     expect(priceTag).toHaveLength(1);
   });
 
+  it('PR-254: 모든 유효 시트에서 첫 자재 행(겉감, OUT-SHELL)이 읽히고 머리글 위치 안내가 남는다(개수만 검증)', () => {
+    let withShell = 0;
+    let shifted = 0;
+    for (const name of validSheetNames) {
+      const { rows, merges } = readSheet(name);
+      const { bomItems, warnings } = SectionParser.parse(rows, merges);
+      if (bomItems.some((b: any) => /OUT-SHELL/i.test(b.itemName))) withShell++;
+      if (warnings.some((w) => w.includes('BOM_HEADER_SHIFTED'))) shifted++;
+      expect(warnings.some((w) => w.includes('BOM_HEADER_NOT_FOUND'))).toBe(false);
+    }
+    expect(withShell).toBe(validSheetNames.length);
+    expect(shifted).toBe(validSheetNames.length); // 샘플은 전 시트가 ITEMS 13번째 줄(0 기반 12)로 기본(14번째와 다름)
+  });
+
   it('헤더 레이아웃이 어긋나 totalQty를 숫자로 읽지 못하면 조용히 넘어가지 않고 예외를 던져야 한다', () => {
     // 실제 시트 데이터를 그대로 쓰되, QTY 값이 있어야 할 자리(index 8)를 비워
     // "레이블만 있고 값이 없는" 깨진 레이아웃을 재현한다.
