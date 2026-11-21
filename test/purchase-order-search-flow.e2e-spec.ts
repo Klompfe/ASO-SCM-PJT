@@ -58,7 +58,7 @@ describe('발주 등록 화면 검색 선택 (PR-126)', () => {
         if (i === 1) hiddenItemId = id;
       }
       supplierId = (await post('/suppliers').send({ name: '검색공급 Alpha' }).expect(201)).body.data.id;
-    });
+    }, 30000); // 순차 HTTP 105회 — 병렬 부하에서 jest 기본 5초 초과 (PR-253)
 
     it('버그 재현: 예전처럼 최초 100개만 불러오면(limit 100) 오래된 품목(PS-001)은 목록에 없어 선택할 수 없다', async () => {
       const res = (await get('/items?limit=100&type=RAW_MATERIAL').expect(200)).body.data;

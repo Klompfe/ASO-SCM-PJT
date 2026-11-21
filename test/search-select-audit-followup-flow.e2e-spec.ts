@@ -54,7 +54,7 @@ describe('조회 UI 감사 후속: keyword 검색 + 페이지네이션 (PR-127)'
       for (let i = 0; i < 105; i++) {
         await post('/work-orders').send({ itemId: filler.id, targetQuantity: 1 }).expect(201);
       }
-    });
+    }, 30000); // 순차 HTTP 105회 — 병렬 부하에서 jest 기본 5초 초과 (PR-253)
 
     it('버그 재현: page 1 / limit 100 목록에는 가장 오래된 작업지시가 없다(기존 select로는 선택 불가)', async () => {
       const res = (await get('/work-orders?page=1&limit=100').expect(200)).body.data;
