@@ -31,7 +31,7 @@ import {
 } from '../utils/excelBulkApprove';
 import { describeApprovalFailure, buildFailureCopyText, applyApprovalOutcomes, buildClearListConfirmMessage, type ApprovalFailureReason } from '../utils/uploadReviewStatus';
 import { saveUploadReview, loadUploadReview, clearUploadReview } from '../utils/uploadReviewStorage';
-import { extractNotices, type StyleCommitResult } from '../utils/commitNotices';
+import { extractNotices, formatExcelOverviewKeptNotice, type StyleCommitResult } from '../utils/commitNotices';
 import { BulkApproveResult } from './CommitResultPanel';
 import { fetchItemPage } from '../utils/listQueries';
 import { EMPTY_PAGE_META, pageToRecoverTo, type PageMeta } from '../utils/pagination';
@@ -920,7 +920,11 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
     );
     for (const { style, outcome } of entries) {
       if (outcome.kind === 'approved') {
-        successResults.push({ styleNo: style.styleNo, notices: extractNotices(outcome.result) });
+        const notices = extractNotices(outcome.result);
+        successResults.push({ styleNo: style.styleNo, notices });
+        // PR-252: 기존 오더개요와 달라 유지한 항목이 있으면 알린다(승인은 이미 끝났고 막지 않는다).
+        const keptMsg = formatExcelOverviewKeptNotice(notices);
+        if (keptMsg) toast(`${style.styleNo}: ${keptMsg}`, { duration: 12000 });
       } else if (outcome.kind === 'failed') {
         // 원본 에러(응답 본문 전체)는 콘솔에 남겨 서버 로그와 대조 진단할 수 있게 한다.
         console.error(`[일괄 승인 실패] ${style.styleNo}:`, outcome.error);
@@ -1038,6 +1042,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
         setFailuresBySheet((prev) => applyApprovalOutcomes([], prev, outcomes).failuresBySheet);
         setExistsMap((prev) => ({ ...prev, [styleNo]: true }));
         toast.success(`${styleNo} 승인 완료`);
+        const keptMsg = formatExcelOverviewKeptNotice(extractNotices(outcome.result));
+        if (keptMsg) toast(`${styleNo}: ${keptMsg}`, { duration: 12000 });
       } else if (outcome.kind === 'registered') {
         // 그 사이 이미 등록됨 — 승인하지 않고 "이미 등록됨"으로 표시(실패 기록은 지운다, 목록에는 남음).
         setExistsMap((prev) => ({ ...prev, [styleNo]: true }));

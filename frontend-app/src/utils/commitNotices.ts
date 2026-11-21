@@ -72,6 +72,14 @@ export const NOTICE_CODE_LABELS: Record<CommitNoticeCode, string> = {
 
 export const noticeCodeLabel = (code: string): string => NOTICE_CODE_LABELS[code as CommitNoticeCode] ?? '알림';
 
+// PR-252: 엑셀 승인 결과 — 기존 오더개요와 달라 유지한 항목 수 안내(승인은 막지 않는다). 없으면 null.
+// 작지 경로(orderOverviewReview.formatOverviewConflictsNotice)와 같은 문장 형태, 바꾸는 곳만 다르다(오더 수정 화면).
+export function formatExcelOverviewKeptNotice(notices: CommitNotice[] | null | undefined): string | null {
+  const n = (notices ?? []).filter((x) => x.code === 'ORDER_OVERVIEW_DIFF_KEPT').length;
+  if (n === 0) return null;
+  return `오더개요 ${n}개 항목이 기존과 달라 유지했습니다(오더 수정 화면에서 바꿀 수 있습니다)`;
+}
+
 // 개별 승인 결과의 한 줄 안내
 export function commitResultHeadline(notices: CommitNotice[]): string {
   const { needsReview } = groupNotices(notices);

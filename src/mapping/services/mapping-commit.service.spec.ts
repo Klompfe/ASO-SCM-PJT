@@ -728,6 +728,62 @@ describe('MappingCommitService', () => {
       });
     });
 
+    // PR-252: 엑셀 승인 경로 — 총수량은 기존(PR-211/212) 규칙, 나머지 오더개요 항목은 PR-249 가드. 합성 값만 사용.
+    describe('엑셀 승인 오더개요 가드 (PR-252, legacyFields=totalQty)', () => {
+      const excelPayload = (extra: Record<string, unknown> = {}): CommitMappingDto => ({
+        ...rebuildPayload(),
+        overviewData: { styleNo: 'LB6YSLM107Z', factory: '베트남', buyer: '다른바이어', totalQty: 999, ...extra } as any,
+      });
+      const excelGuard = () => ({
+        overviewGuard: { overwrite: new Set<string>(), legacyFields: new Set(['totalQty']), keptHint: '(스타일 관리에서 바꿀 수 있습니다).' },
+      });
+      const savedOverview = () =>
+        mockQueryRunnerManager.save.mock.calls.find(([arg]: any) => arg && typeof arg === 'object' && arg.overview)![0].overview;
+
+      it('바이어가 다르면 기존 값 유지 + 충돌 응답(총수량은 충돌 목록에 없다), 총수량은 엑셀 값으로 갱신(PR-212 기존 동작)', async () => {
+        const result = await service.commit(excelPayload(), excelGuard());
+        const ov = savedOverview();
+        expect(ov.buyer).toBe('미도컴퍼니');
+        expect(Number(ov.totalQty)).toBe(999);
+        expect(result.orderOverviewConflicts).toEqual([{ field: 'buyer', existing: '미도컴퍼니', incoming: '다른바이어' }]);
+      });
+
+      it('유지 알림 문구는 호출자가 준 안내(keptHint)로 끝난다', async () => {
+        const result = await service.commit(excelPayload(), excelGuard());
+        const kept = result.notices.find((n) => n.code === 'ORDER_OVERVIEW_DIFF_KEPT');
+        expect(kept?.message).toContain('스타일 관리에서 바꿀 수 있습니다');
+        expect(kept?.message).not.toContain('개별 저장의 비교 화면');
+      });
+
+      it('같은 바이어는 충돌 없음, 들어온 값이 비어 있으면(빈 문자열) 기존 값 보존', async () => {
+        const result = await service.commit(excelPayload({ buyer: '' }), excelGuard());
+        expect(savedOverview().buyer).toBe('미도컴퍼니');
+        expect(result.orderOverviewConflicts).toEqual([]);
+      });
+
+      it('총수량 0(못 읽음)은 기존 값을 지우지 않는다(PR-211)', async () => {
+        await service.commit(excelPayload({ totalQty: 0, buyer: '미도컴퍼니' }), excelGuard());
+        expect(Number(savedOverview().totalQty)).toBe(215);
+      });
+
+      it('총수량 후보(totalQtyCandidate)는 기존 양수 값을 덮어쓰지 않는다(PR-212)', async () => {
+        await service.commit(excelPayload({ totalQty: 0, totalQtyCandidate: 700, buyer: '미도컴퍼니' }), excelGuard());
+        expect(Number(savedOverview().totalQty)).toBe(215);
+      });
+
+      it('공장은 기존 보류 규칙 그대로(다르면 바꾸지 않고 FACTORY_MISMATCH 알림)', async () => {
+        const result = await service.commit(excelPayload({ factory: '삼정' }), excelGuard());
+        expect(savedOverview().factory).toBe('베트남');
+        expect(result.notices).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'FACTORY_MISMATCH' })]));
+      });
+
+      it('옵션 없는 호출(작지 외 다른 호출자가 있다면)의 동작은 불변 — 값이 있으면 덮어쓴다', async () => {
+        const result = await service.commit(excelPayload());
+        expect(savedOverview().buyer).toBe('다른바이어');
+        expect(result.orderOverviewConflicts).toBeUndefined();
+      });
+    });
+
     // PR-246: 혼용률 — 기존 행 재저장 규칙(서버 강제). 합성 값만 사용.
     describe('혼용률 재저장 규칙 (PR-246)', () => {
       const setExistingComposition = (composition: string | null) => {

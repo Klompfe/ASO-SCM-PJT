@@ -82,7 +82,9 @@ export interface CommitResult {
 // PR-249: commit() 호출 옵션 — HTTP /mapping/commit(엑셀)은 옵션 없이 기존 동작 그대로.
 export interface CommitOptions {
   // 있으면 오더개요 병합 가드를 켠다(작지 저장 경로). overwrite 는 사용자가 "새 값 사용"을 고른 필드.
-  overviewGuard?: { overwrite: ReadonlySet<string> };
+  // legacyFields: 가드에서 빼고 기존(옛) 규칙을 그대로 쓸 필드 — 엑셀 승인 경로의 총수량(PR-211/212: 엑셀이 총수량의 기준).
+  // keptHint: 유지 알림 문구 끝에 붙는 "어디서 바꿀 수 있는지" 안내(없으면 작지 저장 경로 문구).
+  overviewGuard?: { overwrite: ReadonlySet<string>; legacyFields?: ReadonlySet<string>; keptHint?: string };
   // 스타일·BOM 병합이 끝난 뒤, 같은 트랜잭션 안에서 실행된다(예: 승인 대기 계약 생성/갱신). 실패하면 전체 롤백.
   afterMerge?: (manager: EntityManager) => Promise<void>;
 }
@@ -202,7 +204,14 @@ export class MappingCommitService {
           overviewData,
           notices,
           quantitySum,
-          options.overviewGuard ? { overwrite: options.overviewGuard.overwrite, conflicts: orderOverviewConflicts } : undefined,
+          options.overviewGuard
+            ? {
+                overwrite: options.overviewGuard.overwrite,
+                conflicts: orderOverviewConflicts,
+                legacyFields: options.overviewGuard.legacyFields,
+                keptHint: options.overviewGuard.keptHint,
+              }
+            : undefined,
         );
       } else {
         style.overview = queryRunner.manager.create(StyleOverview, {
@@ -770,11 +779,12 @@ export class MappingCommitService {
     overview: StyleOverview,
     overviewData: CommitMappingDto['overviewData'],
     notices: CommitNotice[],
-    guard: { overwrite: ReadonlySet<string>; conflicts: OrderOverviewConflict[] },
+    guard: { overwrite: ReadonlySet<string>; conflicts: OrderOverviewConflict[]; legacyFields?: ReadonlySet<string>; keptHint?: string },
   ): void {
     const target = overview as unknown as Record<string, unknown>;
     const incomingData = overviewData as unknown as Record<string, unknown>;
     for (const field of ORDER_OVERVIEW_FIELDS) {
+      if (guard.legacyFields?.has(field)) continue; // 별도 규칙이 있는 필드는 mergeOverview 의 기존 분기가 처리
       const row = classifyOrderOverviewField(field, target[field], incomingData[field]);
       const apply = row.status === 'fillEmpty' || (row.status === 'differs' && guard.overwrite.has(field));
       if (apply) {
@@ -784,7 +794,7 @@ export class MappingCommitService {
         notices.push({
           type: 'NEEDS_REVIEW',
           code: 'ORDER_OVERVIEW_DIFF_KEPT',
-          message: `오더개요 ${ORDER_OVERVIEW_FIELD_LABELS[field as OrderOverviewField]}: 기존 '${row.existing}' → 새 값 '${row.incoming}' — 기존 값을 유지했습니다(개별 저장의 비교 화면에서 항목별로 바꿀 수 있습니다).`,
+          message: `오더개요 ${ORDER_OVERVIEW_FIELD_LABELS[field as OrderOverviewField]}: 기존 '${row.existing}' → 새 값 '${row.incoming}' — 기존 값을 유지했습니다${guard.keptHint ?? '(개별 저장의 비교 화면에서 항목별로 바꿀 수 있습니다).'}`,
         });
       }
     }
@@ -795,7 +805,7 @@ export class MappingCommitService {
     overviewData: CommitMappingDto['overviewData'],
     notices: CommitNotice[],
     quantitySum = 0,
-    guard?: { overwrite: ReadonlySet<string>; conflicts: OrderOverviewConflict[] },
+    guard?: { overwrite: ReadonlySet<string>; conflicts: OrderOverviewConflict[]; legacyFields?: ReadonlySet<string>; keptHint?: string },
   ): void {
     if (overviewData.factory) {
       if (overview.factory && overview.factory !== overviewData.factory) {
@@ -825,13 +835,17 @@ export class MappingCommitService {
     const incomingTotalQtyValid = Number.isFinite(overviewData.totalQty) && overviewData.totalQty > 0;
 
     if (guard) {
+      // PR-252: legacyFields(엑셀 경로의 총수량)는 가드에서 빠지므로 아래 기존 총수량 분기를 그대로 탄다.
       // PR-249: 가드 모드 — 총수량·바이어·스타일명·브랜드·품목·임가공·납기는 비어 있으면 채우고, 같으면 그대로,
       // 다르면 유지(충돌 알림), 들어온 값이 비면 보존. 사용자가 항목별로 고른 필드만 교체한다.
       this.guardedMergeOrderFields(overview, overviewData, notices, guard);
-    } else if (incomingTotalQtyValid) {
-      overview.totalQty = overviewData.totalQty;
-    } else if (!existingPositive && Number.isFinite(overviewData.totalQtyCandidate) && (overviewData.totalQtyCandidate as number) > 0) {
-      overview.totalQty = overviewData.totalQtyCandidate as number;
+    }
+    if (!guard || guard.legacyFields?.has('totalQty')) {
+      if (incomingTotalQtyValid) {
+        overview.totalQty = overviewData.totalQty;
+      } else if (!existingPositive && Number.isFinite(overviewData.totalQtyCandidate) && (overviewData.totalQtyCandidate as number) > 0) {
+        overview.totalQty = overviewData.totalQtyCandidate as number;
+      }
     }
 
     if (existingPositive && !incomingTotalQtyValid && quantitySum > 0 && oldTotalQty !== quantitySum) {

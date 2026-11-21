@@ -6,7 +6,7 @@ vi.mock('../api/mapping.service', () => ({ commitMapping: vi.fn() }));
 
 import { BulkApproveResult, CommitResultPanel, NoticeList } from './CommitResultPanel';
 import { MappingPreviewModalView } from './MappingPreviewModal';
-import type { CommitNotice } from '../utils/commitNotices';
+import { formatExcelOverviewKeptNotice, type CommitNotice } from '../utils/commitNotices';
 
 const factory: CommitNotice = { type: 'NEEDS_REVIEW', code: 'FACTORY_MISMATCH', message: "기존 factory 값 '베트남' → 새 값 '삼정' — 자동 반영하지 않음, 확인 후 수동 변경 필요" };
 const diff: CommitNotice = { type: 'NEEDS_REVIEW', code: 'BOM_ITEM_VALUE_DIFF', message: '원단(BK/56) 기존 값(요척 1.47, 소요량 1029) → 새 값(요척 1.6, 소요량 1120) — 자동 반영하지 않음, 확인 후 수동 변경 필요' };
@@ -174,5 +174,26 @@ describe('일괄승인 결과 요약 (PR-132)', () => {
     expect(clean).toContain('2개 스타일 승인 완료, 확인이 필요한 차이는 없습니다.');
     expect(clean).toContain('bg-green-50');
     expect(clean).not.toContain('bg-yellow-50');
+  });
+});
+
+// PR-252: 엑셀 승인 — 기존 오더개요와 달라 유지한 항목 안내(합성 값, 승인은 막지 않는다).
+describe('엑셀 승인 오더개요 유지 안내 (PR-252)', () => {
+  const kept = (field: string): CommitNotice => ({ type: 'NEEDS_REVIEW', code: 'ORDER_OVERVIEW_DIFF_KEPT', message: `오더개요 ${field}: 기존 'A' → 새 값 'B' — 기존 값을 유지했습니다(오더개요 수정 화면(스타일 관리)에서 바꿀 수 있습니다).` });
+
+  it('formatExcelOverviewKeptNotice: 유지 항목 수를 센다(없거나 다른 알림만 있으면 null)', () => {
+    expect(formatExcelOverviewKeptNotice([kept('바이어'), kept('브랜드'), factory])).toBe('오더개요 2개 항목이 기존과 달라 유지했습니다(오더 수정 화면에서 바꿀 수 있습니다)');
+    expect(formatExcelOverviewKeptNotice([factory, lining])).toBeNull();
+    expect(formatExcelOverviewKeptNotice([])).toBeNull();
+    expect(formatExcelOverviewKeptNotice(undefined)).toBeNull();
+  });
+
+  it('결과 패널: 유지 항목이 있으면 안내 문구가 보이고, 없으면 문구 자체가 없다', () => {
+    const withKept = renderToStaticMarkup(createElement(CommitResultPanel, { styleNo: 'S-1', notices: [kept('바이어')] }));
+    expect(withKept).toContain('overview-kept-summary');
+    expect(withKept).toContain('오더개요 1개 항목이 기존과 달라 유지했습니다');
+    const without = renderToStaticMarkup(createElement(CommitResultPanel, { styleNo: 'S-1', notices: [factory] }));
+    expect(without).not.toContain('overview-kept-summary');
+    expect(without).not.toContain('기존과 달라 유지했습니다');
   });
 });

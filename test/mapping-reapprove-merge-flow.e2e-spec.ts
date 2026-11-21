@@ -18,7 +18,7 @@ import { BomItem } from '../src/boms/entities/bom-item.entity';
 
 // PR-130: "이미 등록됨" 스타일의 재승인 안내 문구(MappingPreviewModal)가 실제 commit() 동작과 같은지 실 DB로 못 박는다.
 // 문구의 약속: (1) 자재가 중복으로 쌓이지 않는다 (2) 새로 나온 자재만 추가 (3) 기존 자재는 삭제되지 않는다
-// (4) 스타일 정보는 값이 있는 항목만 갱신·빈 항목은 유지·공장은 기존 값이 있으면 유지 (5) 같은 자재의 요척/필요량이 달라도 자동 반영되지 않는다.
+// (4) 스타일 정보: 총수량·선적일은 값이 있는 항목만 갱신·빈 항목은 유지, 바이어 등은 다르면 기존 유지(PR-252)·공장은 기존 값이 있으면 유지 (5) 같은 자재의 요척/필요량이 달라도 자동 반영되지 않는다.
 describe('이미 등록된 스타일 재승인 = 병합 (PR-130)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
@@ -109,10 +109,11 @@ describe('이미 등록된 스타일 재승인 = 병합 (PR-130)', () => {
       expect(secondResult.warnings.some((w: string) => w.includes('MRG-원단'))).toBe(false);
     });
 
-    it('(4) 스타일 정보: 값이 있는 항목(수량/바이어)은 갱신, 비어 있는 항목(선적일/스타일명)은 기존 유지, 공장은 기존 값 유지 + 경고', async () => {
+    it('(4) 스타일 정보: 총수량은 값이 있으면 갱신, 바이어는 다르면 기존 유지 + 충돌 응답(PR-252), 비어 있는 항목(선적일/스타일명)은 기존 유지, 공장은 기존 값 유지 + 경고', async () => {
       const ov = await overview();
-      expect(Number(ov.totalQty)).toBe(900); // 새 값으로 갱신
-      expect(ov.buyer).toBe('바이어B'); // 새 값으로 갱신
+      expect(Number(ov.totalQty)).toBe(900); // 새 값으로 갱신(PR-211/212: 엑셀이 총수량의 기준)
+      expect(ov.buyer).toBe('바이어A'); // PR-252: 다른 값은 조용히 덮어쓰지 않는다(이전에는 '바이어B'로 갱신)
+      expect(secondResult.orderOverviewConflicts).toEqual([{ field: 'buyer', existing: '바이어A', incoming: '바이어B' }]);
       expect(ov.styleName).toBe('원래 스타일명'); // 비어 있어 기존 유지
       expect(new Date(ov.firstShipDate as any).toISOString().slice(0, 10)).toBe('2026-01-16'); // 비어 있어 기존 유지
       expect(ov.factory).toBe('베트남'); // 공장은 기존 값이 있으면 바뀌지 않는다

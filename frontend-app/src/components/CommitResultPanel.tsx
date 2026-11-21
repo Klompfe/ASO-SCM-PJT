@@ -2,6 +2,7 @@ import React from 'react';
 import {
   bulkSummaryText,
   commitResultHeadline,
+  formatExcelOverviewKeptNotice,
   groupNotices,
   noticeCodeLabel,
   sortBulkResults,
@@ -49,11 +50,15 @@ export const NoticeList: React.FC<{ notices: CommitNotice[] }> = ({ notices }) =
 // 개별 승인 결과: 한 줄 안내 + 알림 목록
 export const CommitResultPanel: React.FC<{ styleNo: string; notices: CommitNotice[] }> = ({ styleNo, notices }) => {
   const { needsReview } = groupNotices(notices);
+  const overviewKept = formatExcelOverviewKeptNotice(notices);
   return (
     <div className="space-y-3" data-testid="commit-result">
       <p className={`text-sm font-medium ${needsReview.length > 0 ? 'text-yellow-800' : 'text-green-700'}`} data-testid="commit-result-headline">
         <span className="font-mono">{styleNo}</span> — {commitResultHeadline(notices)}
       </p>
+      {overviewKept && (
+        <p className="text-sm text-yellow-800" data-testid="overview-kept-summary">{overviewKept}</p>
+      )}
       <NoticeList notices={notices} />
     </div>
   );

@@ -26,7 +26,15 @@ export class MappingCommitController {
   @Post('commit')
   @UseFilters(BomItemValidationErrorFilter)
   async commit(@Body() payload: CommitMappingDto) {
-    return await this.mappingCommitService.commit(payload);
+    // PR-252: 기존 스타일의 오더개요는 조용히 덮어쓰지 않는다(PR-249 규칙을 같은 코드로 적용) — 총수량만 PR-211/212 규칙(엑셀 값이 기준)을 그대로 쓴다.
+    // 신규 스타일은 가드 대상이 아니라 전부 저장된다. 다른 값은 기존 유지 + orderOverviewConflicts 응답.
+    return await this.mappingCommitService.commit(payload, {
+      overviewGuard: {
+        overwrite: new Set<string>(),
+        legacyFields: new Set<string>(['totalQty']),
+        keptHint: '(오더개요 수정 화면(스타일 관리)에서 바꿀 수 있습니다).',
+      },
+    });
   }
 
   // PR-198: 저장 전 "기존 BOM과 비교"(읽기 전용, 저장 안 함) — 화면이 저장 버튼을 누르면
