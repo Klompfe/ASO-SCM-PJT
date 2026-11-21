@@ -182,7 +182,7 @@ describe('엑셀 승인 오더개요 유지 안내 (PR-252)', () => {
   const kept = (field: string): CommitNotice => ({ type: 'NEEDS_REVIEW', code: 'ORDER_OVERVIEW_DIFF_KEPT', message: `오더개요 ${field}: 기존 'A' → 새 값 'B' — 기존 값을 유지했습니다(오더개요 수정 화면(스타일 관리)에서 바꿀 수 있습니다).` });
 
   it('formatExcelOverviewKeptNotice: 유지 항목 수를 센다(없거나 다른 알림만 있으면 null)', () => {
-    expect(formatExcelOverviewKeptNotice([kept('바이어'), kept('브랜드'), factory])).toBe('오더개요 2개 항목이 기존과 달라 유지했습니다(오더 수정 화면에서 바꿀 수 있습니다)');
+    expect(formatExcelOverviewKeptNotice([kept('바이어'), kept('브랜드'), factory])).toBe('오더개요 2개 항목이 기존과 달라 유지했습니다(스타일 관리에서 바꿀 수 있습니다)');
     expect(formatExcelOverviewKeptNotice([factory, lining])).toBeNull();
     expect(formatExcelOverviewKeptNotice([])).toBeNull();
     expect(formatExcelOverviewKeptNotice(undefined)).toBeNull();
