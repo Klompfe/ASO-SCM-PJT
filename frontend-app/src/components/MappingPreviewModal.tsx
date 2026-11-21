@@ -1,4 +1,4 @@
-import { CompositionMissingNotice } from './CompositionSummary';
+import { CompositionMissingNotice, OuterFabricNotice } from './CompositionSummary';
 import { CompositionBulkPanel } from './CompositionBulkPanel';
 import { summarizeCompositions } from '../utils/compositionReview';
 import React, { useState, useEffect } from 'react';
@@ -165,6 +165,7 @@ export const MappingPreviewModalView: React.FC<ViewProps> = ({ data, alreadyExis
       {/* PR-244b: 업로드 단가는 통화를 추측하지 않고 KRW 로 저장된다는 안내(기능 변경 없음). */}
       <p className="text-xs text-gray-500 mb-1" data-testid="upload-currency-notice">{UPLOAD_KRW_NOTICE}</p>
       {/* PR-248: 혼용률 미기재 안내(경고만, 승인을 막지 않음) + 선택 행 일괄 입력 */}
+      <OuterFabricNotice status={summarizeCompositions(bomItems).outer} testIdSuffix="preview" />
       <CompositionMissingNotice missingRows={summarizeCompositions(bomItems).missingRows} />
       {parserWarnings.length > 0 && (
         <ul className="text-xs text-amber-700 mb-2 list-disc pl-5" data-testid="parser-warnings">

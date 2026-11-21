@@ -108,6 +108,11 @@ export function appendBomItemFromCandidate(
 // PR-225: "＋ 자재 행 직접 추가" — 빈 자재 행 1개(기존 입력칸과 동일한 필드, 전부
 // 비어 있음). PR-222 발주수량(적용)·자재명 마스터 대조 등 기존 행과 똑같은 계산·
 // 검증을 받는다(별도 저장 경로를 만들지 않음 — appendBomItem 재사용).
+// PR-255: "겉감 행 추가" — 구분이 '겉감' 으로 고정된 빈 행(자재명·혼용률은 사람이 입력, 요척은 비어 있음).
+export function createOuterFabricBomItem(): AiBomItem {
+  return { ...createEmptyBomItem(), category: '겉감' };
+}
+
 export function createEmptyBomItem(): AiBomItem {
   return {
     category: null, itemName: '', spec: null, colorCode: null, consumption: null,

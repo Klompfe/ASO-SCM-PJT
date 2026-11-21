@@ -489,24 +489,29 @@ export function checkYocheokMismatchBundle(
 // 행에 값이 있으면 그대로 두고 경고만. 대소문자·약어·번역·기호 변환은 하지 않는다(사용자 결정).
 export const COMPOSITION_MAX_LENGTH_VISION = 500;
 const COMPOSITION_PLACEHOLDERS = new Set(['-', '—', 'n/a', 'na', '없음', '해당없음', 'null']);
-// 프런트(compositionReview.ts)의 COMPOSITION_FABRIC_ALIASES 와 같은 원단류 목록(테스트가 두 목록을 대조한다).
-// PR-254: 영문 별칭(OUT SHELL, LINING, COMBINATION …)을 포함. 비교는 "정확히 일치"만 — 부분 일치 없음(INTERLINING 은 LINING 이 아님).
+// 프런트(compositionReview.ts)의 같은 이름 상수와 같은 목록(테스트가 대조한다). 비교는 "단어 경계 정확 일치"만 — 부분 일치 없음.
 export const COMPOSITION_FABRIC_ALIASES: readonly string[] = ['겉감', 'OUT SHELL', 'SHELL', 'OUTER SHELL', '안감', 'LINING', '퀼팅안감', '폴리트윌안감', '배색', '배색감', 'COMBINATION'];
+export const COMPOSITION_OUTER_ALIASES: readonly string[] = ['겉감', 'OUT SHELL', 'SHELL', 'OUTER SHELL'];
+export const COMPOSITION_NON_FABRIC_WORDS: readonly string[] = ['THREAD', 'TAPE', 'ZIPPER', 'BUTTON', 'LABEL', 'TAG', 'PAD', 'HOOK', '단추', '테이프', '지퍼', '라벨', '실'];
 
-// 공백·하이픈·밑줄을 모두 제거하고 대문자로 맞춘 비교 키(예: "OUT-SHELL" = "out shell" = "OUTSHELL").
-const normalizeCategoryKey = (s: string): string => s.replace(/[\s\-_]+/g, '').toUpperCase();
-const COMPOSITION_FABRIC_KEYS = new Set(COMPOSITION_FABRIC_ALIASES.map(normalizeCategoryKey));
+// 엑셀의 ITEM 칸은 "겉감<줄바꿈>OUT-SHELL", "겉감 OUT-SHELL" 처럼 한글·영문이 섞여 있다. 칸을 공백·줄바꿈·하이픈·괄호·슬래시
+// 등으로 쪼갠 단어 목록에서 별칭이 단어 경계로 나타날 때만 원단류로 본다(LINING 은 INTERLINING 안에서 인식되지 않는다).
+// 한글이 공백으로 떨어진 표기("안 감")는 이웃 단어를 최대 3개까지 이어 붙여 비교한다. 저장된 구분 원문은 바꾸지 않는다.
+const tokenizeCategory = (s: string): string[] => s.toUpperCase().split(/[\s\-_/,()[\]<>.:;·]+/).filter((t) => t !== '');
+const aliasKey = (s: string): string => tokenizeCategory(s).join('');
+const COMPOSITION_FABRIC_KEYS = new Set(COMPOSITION_FABRIC_ALIASES.map(aliasKey));
+const COMPOSITION_NON_FABRIC_WORD_SET = new Set(COMPOSITION_NON_FABRIC_WORDS.map((w) => w.toUpperCase()));
 
-// 엑셀의 ITEM 칸은 "겉감<줄바꿈>OUT-SHELL" 처럼 여러 줄이거나 연속 공백으로 한글·영문이 나뉘어 있다. 그래서 칸을
-// 줄바꿈·연속 공백(2칸 이상) 단위 조각으로 나눠, 어느 한 조각이 별칭과 정확히 일치하면 원단류로 본다. 저장된 구분 원문은 바꾸지 않는다.
 export function isCompositionFabricCategory(category: string | null | undefined): boolean {
   if (typeof category !== 'string') return false;
-  return category
-    .split(/\r?\n|\s{2,}/)
-    .some((seg) => {
-      const key = normalizeCategoryKey(seg);
-      return key !== '' && COMPOSITION_FABRIC_KEYS.has(key);
-    });
+  const tokens = tokenizeCategory(category);
+  if (tokens.some((t) => COMPOSITION_NON_FABRIC_WORD_SET.has(t))) return false;
+  for (let i = 0; i < tokens.length; i++) {
+    for (let len = 1; len <= 3 && i + len <= tokens.length; len++) {
+      if (COMPOSITION_FABRIC_KEYS.has(tokens.slice(i, i + len).join(''))) return true;
+    }
+  }
+  return false;
 }
 
 export function checkComposition(

@@ -44,6 +44,8 @@ import { normalizeCurrency, withCurrencyLabel } from '../utils/currency';
 import { CurrencySelect } from './CurrencySelect';
 import { buildColorQtyMap, resolveAppliedQuantity, APPLIED_BASIS_LABEL, isExtremeConsumptionMismatch, type AppliedQuantityResult } from '../utils/appliedQuantity';
 import { UNIT_CHANGE_CONFIRM_TEXT, isUnitChanged, resolveLiveQtyReason, describeLiveQtyReason, describeSnapshotNote, isBlockedUnitForLengthBasedMaterial, BLOCKED_PACKAGING_UNIT_MESSAGE } from '../utils/bomQtyReason';
+import { outerFabricStatus } from '../utils/compositionReview';
+import { OuterFabricNotice } from './CompositionSummary';
 import {
   defaultManualQtyInputMode,
   resolveManualQtyInput,
@@ -1298,6 +1300,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
               </button>
             )}
           </div>
+          {/* PR-255: 겉감 혼용률 상태(읽기 전용, 같은 판정 함수). 편집·저장 동작은 바꾸지 않는다. */}
+          {bom && <OuterFabricNotice status={outerFabricStatus(bom.items)} testIdSuffix="bom" />}
           {bomError && <div className="p-4 bg-yellow-50 text-yellow-800 rounded-lg">{bomError}</div>}
           {editing && (
             <PurchaseOrderEditModal

@@ -430,3 +430,23 @@ describe('buildCommitResult — 혼용률 (PR-246)', () => {
     expect(out.bomItems[0].composition).toBe('Cotton 60% polyester 40%');
   });
 });
+
+// PR-255: "겉감 행 추가" — 구분 겉감으로 고정된 빈 행이 기존 appendBomItem 경로로 추가되고 저장 요청 본문에 실린다.
+import { createOuterFabricBomItem as _createOuter, appendBomItem as _append, buildCommitBomItems as _build, hasBlankMaterialName as _blank } from './salesOrderBomReview';
+describe('겉감 행 추가 (PR-255)', () => {
+  it('구분이 겉감이고 자재명·요척은 비어 있다', () => {
+    expect(_createOuter()).toMatchObject({ category: '겉감', itemName: '', consumption: null, requiredQty: null });
+  });
+  it('추가 후 자재명·혼용률을 채우면 저장 본문에 그대로 실린다', () => {
+    const base = { bomItems: [{ category: '안감', itemName: 'L', consumption: 1 }] } as never;
+    const { results, newBomIndex } = _append([base], 0, { ..._createOuter(), itemName: '합성원단', composition: 'COTTON 100%' });
+    expect(newBomIndex).toBe(1);
+    const body = _build(results[0].bomItems, new Set());
+    expect(body[1]).toMatchObject({ category: '겉감', itemName: '합성원단', composition: 'COTTON 100%' });
+  });
+  it('자재명이 비어 있으면 기존 규칙대로 저장 전 안내 대상(hasBlankMaterialName), 제외하면 본문에서 빠진다', () => {
+    const { results } = _append([{ bomItems: [] } as never], 0, _createOuter());
+    expect(_blank(_build(results[0].bomItems, new Set()))).toBe(true);
+    expect(_build(results[0].bomItems, new Set([0]))).toHaveLength(0);
+  });
+});

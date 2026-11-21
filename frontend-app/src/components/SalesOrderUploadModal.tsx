@@ -6,6 +6,7 @@ import {
   compareSalesOrderBom,
   getAiUsageSummary,
   type AiSalesOrderResult,
+  type AiBomItem,
   type AiUsageSummary,
   type SalesOrderBomCompareRow,
   type OrderOverviewCompareRow,
@@ -45,6 +46,7 @@ import {
   updateHandwrittenCandidateField,
   appendBomItem,
   createEmptyBomItem,
+  createOuterFabricBomItem,
   removeBomItem,
   shiftIndexesAfterRemoval,
   suggestConsumptionFromSheetQty,
@@ -164,8 +166,8 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
 
   // PR-225: 직접 추가한 빈 행도 PR-223 "자재 행으로 추가"와 같은 appendBomItem
   // 경로를 탄다(새 저장 경로를 만들지 않음) — 차이는 변환할 후보가 없다는 것뿐.
-  const addManualBomRow = (index: number) => {
-    const { results: next, newBomIndex } = appendBomItem(results, index, createEmptyBomItem());
+  const addManualBomRow = (index: number, item: AiBomItem = createEmptyBomItem()) => {
+    const { results: next, newBomIndex } = appendBomItem(results, index, item);
     setResults(next);
     setManualBomIndexes((prev) => {
       const nextMap = new Map(prev);
@@ -1114,6 +1116,7 @@ export const SalesOrderUploadModal: React.FC<Props> = ({ isOpen, onClose, onSucc
                     <CompositionSummary
                       testIdSuffix={index}
                       summary={summarizeCompositions(result.bomItems, excludedBomIndexes.get(index) ?? new Set<number>())}
+                      onAddOuterRow={() => addManualBomRow(index, createOuterFabricBomItem())}
                     />
                     {/* PR-248: 선택 행 혼용률 일괄 입력(화면 상태만 변경, 저장은 기존 흐름). 이미 값이 있는 행은 건너뛴다. */}
                     <CompositionBulkPanel

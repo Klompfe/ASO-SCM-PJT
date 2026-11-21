@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   applyBulkComposition,
   selectFabricRowIndexes,
+  selectOuterFabricRowIndexes,
   countNonFabricSelected,
   formatBulkResult,
   cleanComposition,
@@ -62,6 +63,14 @@ export function CompositionBulkPanel({ items, disabledIndexes = new Set(), onApp
               onClick={() => setSelected(new Set([...selectFabricRowIndexes(items)].filter((i) => !disabledIndexes.has(i))))}
             >
               원단류 행 선택
+            </button>
+            <button
+              type="button"
+              data-testid={`composition-bulk-select-outer-${testIdSuffix}`}
+              className="px-2 py-0.5 text-xs border rounded border-red-300 text-red-700"
+              onClick={() => setSelected(new Set([...selectOuterFabricRowIndexes(items)].filter((i) => !disabledIndexes.has(i))))}
+            >
+              겉감만 선택
             </button>
             <button type="button" className="px-2 py-0.5 text-xs border rounded" onClick={() => setSelected(new Set())}>
               선택 해제

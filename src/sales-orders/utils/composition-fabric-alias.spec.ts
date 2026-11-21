@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { COMPOSITION_FABRIC_ALIASES, isCompositionFabricCategory, checkComposition } from './vision-guardrails.util';
+import { COMPOSITION_FABRIC_ALIASES, COMPOSITION_OUTER_ALIASES, COMPOSITION_NON_FABRIC_WORDS, isCompositionFabricCategory, checkComposition } from './vision-guardrails.util';
 
 // PR-254: 영문 구분 별칭의 원단류 판정(서버) + 서버·프런트 목록 일치.
 describe('isCompositionFabricCategory (PR-254)', () => {
@@ -25,5 +25,24 @@ describe('isCompositionFabricCategory (PR-254)', () => {
     expect(m).not.toBeNull();
     const front = [...(m as RegExpMatchArray)[1].matchAll(/'([^']*)'/g)].map((x) => x[1]);
     expect(front).toEqual([...COMPOSITION_FABRIC_ALIASES]);
+  });
+
+  // PR-255: 단어 경계 정확 일치 — 공백 1칸 표기 인식, 부분 일치 금지.
+  it.each([
+    ['겉감 OUT-SHELL', true], ['쉬폰 LINING', true], ['안감(스트라이프)', true], ['안 감', true],
+    ['INTERLINING', false], ['심 지 INTERLINING (M-100)', false], ['배색 스쿠이사 45S/3H THREAD', false], ['SHELL BUTTON', false],
+  ])('PR-255 단어 경계: %j → %s', (category, expected) => {
+    expect(isCompositionFabricCategory(category)).toBe(expected);
+  });
+
+  const frontList = (name: string): string[] => {
+    const src = fs.readFileSync(path.resolve(__dirname, '../../../frontend-app/src/utils/compositionReview.ts'), 'utf8');
+    const m = src.match(new RegExp(name + String.raw`: readonly string\[\] = \[([^\]]*)\]`));
+    expect(m).not.toBeNull();
+    return [...(m as RegExpMatchArray)[1].matchAll(/'([^']*)'/g)].map((x) => x[1]);
+  };
+  it('프런트의 겉감 별칭·비원단 단어 목록과 같다', () => {
+    expect(frontList('COMPOSITION_OUTER_ALIASES')).toEqual([...COMPOSITION_OUTER_ALIASES]);
+    expect(frontList('COMPOSITION_NON_FABRIC_WORDS')).toEqual([...COMPOSITION_NON_FABRIC_WORDS]);
   });
 });

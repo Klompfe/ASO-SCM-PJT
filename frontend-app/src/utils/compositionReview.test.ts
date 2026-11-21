@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeCompositions, formatCompositionSummary, isCompositionTargetCategory, cleanComposition, looksLikeAbbreviatedComposition, applyBulkComposition, selectFabricRowIndexes, countNonFabricSelected, formatBulkResult } from './compositionReview';
+import { isOuterFabricCategory, outerFabricStatus, selectOuterFabricRowIndexes, summarizeCompositions, formatCompositionSummary, isCompositionTargetCategory, cleanComposition, looksLikeAbbreviatedComposition, applyBulkComposition, selectFabricRowIndexes, countNonFabricSelected, formatBulkResult } from './compositionReview';
 
 // PR-246: 합성 값만 사용.
 describe('compositionReview (PR-246)', () => {
@@ -28,7 +28,8 @@ describe('compositionReview (PR-246)', () => {
       { value: 'COTTON 60% POLYESTER 40%', rowCount: 2 },
       { value: 'POLYESTER 100%', rowCount: 1 },
     ]);
-    expect(s.missingRows).toBe(1);
+    expect(s.missingRows).toBe(0); // PR-255: 겉감 미기재는 missingRows 가 아니라 outer(blank)로 센다 — 중복 경고 없음
+    expect(s.outer).toEqual({ kind: 'blank', rowCount: 3, blankRows: 1 });
     expect(formatCompositionSummary(s)).toBe('COTTON 60% POLYESTER 40% (2행) / POLYESTER 100% (1행)');
   });
 
@@ -56,7 +57,8 @@ describe('compositionReview (PR-246)', () => {
     const s = summarizeCompositions([{ category: '겉감', composition: undefined }]);
     expect(s.groups).toEqual([]);
     expect(formatCompositionSummary(s)).toBe('');
-    expect(s.missingRows).toBe(1);
+    expect(s.missingRows).toBe(0);
+    expect(s.outer.kind).toBe('blank');
   });
 });
 
@@ -127,9 +129,9 @@ describe('applyBulkComposition (PR-248)', () => {
 
   it('미기재 행 수 안내는 PR-246 summarizeCompositions 를 그대로 쓴다(채운 뒤 줄어든다)', () => {
     const base = rows();
-    expect(summarizeCompositions(base).missingRows).toBe(2);
+    expect(summarizeCompositions(base).outer).toEqual({ kind: 'blank', rowCount: 2, blankRows: 2 });
     const filled = applyBulkComposition(base, new Set([0, 2]), 'X 100%').rows;
-    expect(summarizeCompositions(filled).missingRows).toBe(0);
+    expect(summarizeCompositions(filled).outer).toEqual({ kind: 'filled', rowCount: 2, values: ['X 100%'] });
   });
 });
 
@@ -151,7 +153,76 @@ describe('isCompositionTargetCategory — 영문 별칭 (PR-254)', () => {
       { category: 'EDGE TAPE', composition: '' },
     ];
     expect([...selectFabricRowIndexes(rows)]).toEqual([0, 1]);
-    expect(summarizeCompositions(rows as never).missingRows).toBe(1);
+    expect(summarizeCompositions(rows as never).outer.kind).toBe('blank');
     expect(rows[0].category).toBe('겉감\r\nOUT-SHELL');
+  });
+});
+
+// PR-255: 공백 1칸 표기·단어 경계 별칭, 겉감 상태, 겉감 전용 선택.
+describe('구분 별칭 — 단어 경계 정확 일치 (PR-255)', () => {
+  it.each([
+    ['겉감 OUT-SHELL', true], ['겉감\nOUT-SHELL', true], ['out shell ', true], ['쉬폰\nLINING', true], ['쉬폰 LINING', true], ['LINING', true],
+    ['안감(스트라이프)', true], ['안감 해리,주머니감', true], ['안 감', true], ['오비미까시배색\nCOMBINATION', true],
+    ['INTERLINING', false], ['심 지 INTERLINING (M-100)', false], ['EDGE TAPE', false], ['PAD', false], ['SEWING THREAD', false], ['배색 스쿠이사 45S/3H THREAD', false], ['SHELL BUTTON', false], ['', false],
+  ])('%j → %s', (category, expected) => {
+    expect(isCompositionTargetCategory(category)).toBe(expected);
+  });
+
+  it('LINING 은 INTERLINING 안에서 인식되지 않는다(부분 일치 금지)', () => {
+    expect(isCompositionTargetCategory('INTERLINING')).toBe(false);
+    expect(isCompositionTargetCategory('심지 INTERLINING')).toBe(false);
+    expect(isCompositionTargetCategory('INTER LINING')).toBe(true); // 별개 단어 LINING
+  });
+
+  it('겉감 계열은 겉감·OUT SHELL·SHELL·OUTER SHELL 만(안감·배색은 원단류지만 겉감 아님)', () => {
+    expect(isOuterFabricCategory('겉감 OUT-SHELL')).toBe(true);
+    expect(isOuterFabricCategory('OUTER SHELL')).toBe(true);
+    expect(isOuterFabricCategory('쉬폰 LINING')).toBe(false);
+    expect(isOuterFabricCategory('배색 COMBINATION')).toBe(false);
+    expect(isOuterFabricCategory(null)).toBe(false);
+  });
+});
+
+describe('outerFabricStatus (PR-255)', () => {
+  it('겉감 행이 없으면 noRow(안감만 있어도)', () => {
+    expect(outerFabricStatus([{ category: '안감', composition: 'A 100%' }, { category: '단추', composition: null }])).toEqual({ kind: 'noRow' });
+    expect(outerFabricStatus([])).toEqual({ kind: 'noRow' });
+  });
+  it('겉감 행의 혼용률이 비어 있으면 blank, 값이 있으면 filled(중복 제거)', () => {
+    expect(outerFabricStatus([{ category: '겉감', composition: '  ' }])).toEqual({ kind: 'blank', rowCount: 1, blankRows: 1 });
+    expect(outerFabricStatus([{ category: '겉감', composition: 'A 100%' }, { category: 'OUT SHELL', composition: 'A 100%' }])).toEqual({ kind: 'filled', rowCount: 2, values: ['A 100%'] });
+  });
+  it('겉감 여러 행 중 일부만 비어 있어도 blank', () => {
+    expect(outerFabricStatus([{ category: '겉감', composition: 'A 100%' }, { category: '겉감', composition: null }])).toEqual({ kind: 'blank', rowCount: 2, blankRows: 1 });
+  });
+  it('제외 체크된 겉감 행은 뺀다(전부 제외면 noRow)', () => {
+    expect(outerFabricStatus([{ category: '겉감', composition: null }], new Set([0]))).toEqual({ kind: 'noRow' });
+  });
+  it('알 수 없는 입력은 안전한 쪽(noRow)', () => {
+    expect(outerFabricStatus(undefined)).toEqual({ kind: 'noRow' });
+    expect(outerFabricStatus(null)).toEqual({ kind: 'noRow' });
+    expect(outerFabricStatus('x' as never)).toEqual({ kind: 'noRow' });
+    expect(outerFabricStatus([null as never, { category: undefined, composition: undefined }])).toEqual({ kind: 'noRow' });
+  });
+  it('안감 미기재는 missingRows 로, 겉감 미기재는 outer 로만 센다(중복 없음)', () => {
+    const s = summarizeCompositions([{ category: '겉감', composition: null }, { category: '안감', composition: null }]);
+    expect(s.missingRows).toBe(1);
+    expect(s.outer.kind).toBe('blank');
+  });
+});
+
+describe('selectOuterFabricRowIndexes (PR-255)', () => {
+  it('겉감 계열 행만 고르고, 값이 있는 행은 일괄 입력에서 건너뛴다', () => {
+    const rows = [
+      { category: '겉감 OUT-SHELL', composition: null as string | null },
+      { category: '쉬폰 LINING', composition: null },
+      { category: '겉감', composition: 'KEEP 100%' },
+      { category: 'EDGE TAPE', composition: null },
+    ];
+    const sel = selectOuterFabricRowIndexes(rows);
+    expect([...sel]).toEqual([0, 2]);
+    const r = applyBulkComposition(rows, sel, 'NEW 100%');
+    expect(r.rows.map((x) => x.composition)).toEqual(['NEW 100%', null, 'KEEP 100%', null]);
+    expect(r).toMatchObject({ filled: 1, skipped: 1 });
   });
 });
