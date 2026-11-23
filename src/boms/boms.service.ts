@@ -12,6 +12,9 @@ import { LABEL_SET } from './label-set.constants';
 import { areBomContentsIdentical, normalizeMaterialName, pickActiveBom } from './utils/active-bom.util';
 import { normalizeForFuzzyMatch } from './utils/bom-name-normalize.util';
 import { resolveCurrencyInput } from '../common/constants/currency';
+import { MasterStyle } from '../styles/entities/master-style.entity';
+import { buildOuterFabricAudit, type OuterFabricAuditResponse } from './utils/outer-fabric-audit.util';
+import { OuterFabricAuditQueryDto } from './dto/outer-fabric-audit-query.dto';
 
 // PR-197: updateItem()이 돌려주는 변경 전 값 스냅샷 — 화면이 "요척 2.7 → 2.9" 같은
 // 변경 전/후 확인 문구를 만들 수 있게 한다(감사 테이블은 만들지 않음, 서버 로그만 남김).
@@ -399,6 +402,34 @@ export class BomsService {
 
   // PR-121: BOM이 2건 이상인 스타일을 나란히 비교할 수 있게 내려준다. 사람이 확인해야 하는 것(내용이 다르거나
   // 활성 BOM이 1건이 아닌 것)이 앞에, 완전히 같은 중복은 뒤에 온다.
+  // PR-256: 겉감 혼용률 점검 목록(읽기 전용) — 겉감 행이 없거나(noRow)·겉감 혼용률이 비어 있거나(blank)·BOM 이 없는(noBom) 스타일.
+  // SELECT 3개만 쓴다(스타일 번호·이름 / BOM id·활성·스타일 / 행의 BOM id·구분·혼용률 — 경량 컬럼, N+1 없음). 계산은 순수 함수.
+  async findOuterFabricAudit(query: OuterFabricAuditQueryDto): Promise<OuterFabricAuditResponse> {
+    const styleRows = await this.dataSource
+      .getRepository(MasterStyle)
+      .createQueryBuilder('s')
+      .leftJoin('s.overview', 'o')
+      .select(['s.styleNo', 'o.styleName'])
+      .getRawMany<{ s_styleNo: string; o_styleName: string | null }>();
+    const bomRows = await this.bomRepository
+      .createQueryBuilder('b')
+      .leftJoin('b.style', 'st')
+      .select(['b.id', 'b.isActive', 'st.styleNo'])
+      .getRawMany<{ b_id: number | string; b_isActive: unknown; st_styleNo: string | null }>();
+    const itemRows = await this.bomItemRepository
+      .createQueryBuilder('i')
+      .leftJoin('i.bom', 'bm')
+      .select(['i.category', 'i.composition', 'bm.id'])
+      .getRawMany<{ i_category: unknown; i_composition: unknown; bm_id: number | string | null }>();
+
+    return buildOuterFabricAudit(
+      styleRows.map((r) => ({ styleNo: r.s_styleNo, styleName: r.o_styleName ?? null })),
+      bomRows.filter((r) => r.st_styleNo != null).map((r) => ({ id: Number(r.b_id), styleNo: r.st_styleNo as string, isActive: r.b_isActive })),
+      itemRows.filter((r) => r.bm_id != null).map((r) => ({ bomId: Number(r.bm_id), category: r.i_category, composition: r.i_composition })),
+      { status: query.status, q: query.q, page: query.page, pageSize: query.pageSize },
+    );
+  }
+
   async findDuplicateReview(): Promise<DuplicateBomStyleView[]> {
     const light = await this.bomRepository.find({ relations: ['style'], order: { id: 'ASC' } });
     const idsByStyle = new Map<string, number[]>();

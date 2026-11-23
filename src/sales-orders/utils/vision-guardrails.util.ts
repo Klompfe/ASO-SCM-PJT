@@ -502,16 +502,27 @@ const aliasKey = (s: string): string => tokenizeCategory(s).join('');
 const COMPOSITION_FABRIC_KEYS = new Set(COMPOSITION_FABRIC_ALIASES.map(aliasKey));
 const COMPOSITION_NON_FABRIC_WORD_SET = new Set(COMPOSITION_NON_FABRIC_WORDS.map((w) => w.toUpperCase()));
 
-export function isCompositionFabricCategory(category: string | null | undefined): boolean {
+const COMPOSITION_OUTER_KEYS = new Set(COMPOSITION_OUTER_ALIASES.map(aliasKey));
+
+function matchesAliasKeys(category: string | null | undefined, keys: ReadonlySet<string>): boolean {
   if (typeof category !== 'string') return false;
   const tokens = tokenizeCategory(category);
   if (tokens.some((t) => COMPOSITION_NON_FABRIC_WORD_SET.has(t))) return false;
   for (let i = 0; i < tokens.length; i++) {
     for (let len = 1; len <= 3 && i + len <= tokens.length; len++) {
-      if (COMPOSITION_FABRIC_KEYS.has(tokens.slice(i, i + len).join(''))) return true;
+      if (keys.has(tokens.slice(i, i + len).join(''))) return true;
     }
   }
   return false;
+}
+
+export function isCompositionFabricCategory(category: string | null | undefined): boolean {
+  return matchesAliasKeys(category, COMPOSITION_FABRIC_KEYS);
+}
+
+// PR-256: 겉감 계열 판정(프런트 isOuterFabricCategory 와 같은 규칙 — 대조 테스트가 고정한다).
+export function isOuterFabricCategory(category: string | null | undefined): boolean {
+  return matchesAliasKeys(category, COMPOSITION_OUTER_KEYS);
 }
 
 export function checkComposition(

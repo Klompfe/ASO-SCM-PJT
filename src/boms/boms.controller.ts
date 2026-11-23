@@ -5,6 +5,7 @@ import { UpdateBomItemDto } from './dto/update-bom-item.dto';
 import { SwapBomItemMaterialDto } from './dto/swap-bom-item-material.dto';
 import { RenameBomItemMaterialDto } from './dto/rename-bom-item-material.dto';
 import { SetActiveBomDto } from './dto/set-active-bom.dto';
+import { OuterFabricAuditQueryDto } from './dto/outer-fabric-audit-query.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
@@ -34,6 +35,13 @@ export class BomsController {
   @ApiOperation({ summary: 'BOM 중복 검토 — BOM이 2건 이상인 스타일을 나란히 비교(확인 필요한 것 먼저)' })
   findDuplicates() {
     return this.bomsService.findDuplicateReview();
+  }
+
+  // PR-256: 겉감 혼용률 점검 목록(읽기 전용 GET) — 고정 경로라 다른 경로보다 앞에 둔다. 권한은 기존 BOM 조회와 같다(로그인).
+  @Get('outer-fabric-audit')
+  @ApiOperation({ summary: '겉감 혼용률 점검 — 겉감 행이 없거나 겉감 혼용률이 비어 있는 스타일 목록(읽기 전용)' })
+  findOuterFabricAudit(@Query() query: OuterFabricAuditQueryDto) {
+    return this.bomsService.findOuterFabricAudit(query);
   }
 
   @Patch('styles/:styleNo/active-bom')

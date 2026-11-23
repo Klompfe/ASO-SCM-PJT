@@ -131,3 +131,31 @@ export const addBomLabelSet = (styleNo: string): Promise<any> =>
 export const getDuplicateBoms = (): Promise<any> => apiClient.get('/boms/duplicates');
 export const setActiveBom = (styleNo: string, bomId: number): Promise<any> =>
   apiClient.patch(`/boms/styles/${encodeURIComponent(styleNo)}/active-bom`, { bomId });
+
+// PR-256: 겉감 혼용률 점검 목록(읽기 전용) — 겉감 행이 없거나·겉감 혼용률이 비어 있거나·BOM 이 없는 스타일.
+export type OuterFabricAuditStatus = 'noBom' | 'noRow' | 'blank';
+export interface OuterFabricAuditItem {
+  styleNo: string;
+  styleName: string | null;
+  status: OuterFabricAuditStatus;
+  outerRowCount: number;
+  blankOuterRows: number;
+  totalRows: number;
+  categories: string[];
+}
+export interface OuterFabricAuditResponse {
+  items: OuterFabricAuditItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  counts: { noBom: number; noRow: number; blank: number; total: number };
+  styleCount: number;
+}
+export interface OuterFabricAuditParams {
+  status?: 'all' | OuterFabricAuditStatus;
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+export const getOuterFabricAudit = (params: OuterFabricAuditParams = {}): Promise<OuterFabricAuditResponse> =>
+  apiClient.get('/boms/outer-fabric-audit', { params });
