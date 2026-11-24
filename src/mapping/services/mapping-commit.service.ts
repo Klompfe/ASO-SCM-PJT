@@ -39,6 +39,7 @@ import {
 } from '../utils/order-overview-merge.util';
 import { normalizeForFuzzyMatch } from '../../boms/utils/bom-name-normalize.util';
 import { findOuterFabricPair } from '../utils/outer-fabric-pair.util';
+import { judgeOuterFabricSupplement, type SupplementJudgement } from '../utils/outer-fabric-supplement.util';
 import { isOuterFabricCategory } from '../../sales-orders/utils/vision-guardrails.util';
 
 // PR-132: commit()이 사용자에게 알려야 하는 두 종류의 사실을 문자열 패턴이 아니라 구조로 구분한다.
@@ -123,6 +124,15 @@ export interface BomDiffResponse {
   hasExistingBom: boolean;
   rows?: BomDiffRow[];
   similarPairs?: BomSimilarPair[];
+}
+
+// PR-258: 겉감 보충 판정/실행 응답. 판정 필드(eligible·reason·message·info·outerRowIndex)는 사전 판정과 실행이 같고,
+// 실행 응답에는 applied(실제로 행을 추가했는지)·addedBomItemId·createdMaterial 이 더해진다(사전 판정은 applied 가 항상 false).
+export interface OuterFabricSupplementResponse extends SupplementJudgement {
+  styleNo: string;
+  applied: boolean;
+  addedBomItemId?: number;
+  createdMaterial?: boolean;
 }
 
 // PR-235: hasExistingBom=false면 rows는 항상 빈 배열(화면은 비교 없이 바로 저장
@@ -663,24 +673,8 @@ export class MappingCommitService {
         } else if (action.type === 'ADD') {
           const newItem = action.newItem!;
           const material = await findOrCreateMaterial(newItem.itemName);
-          const consumption = newItem.consumption ?? 0;
-          const requiredQty = hasTotalQty ? Math.round(consumption * totalQty * 10000) / 10000 : (newItem.requiredQty ?? 0);
-          const saved = await queryRunner.manager.save(BomItem, {
-            bom,
-            material,
-            category: newItem.category || 'GENERAL',
-            colorCode: normalizeKeyPart(newItem.colorCode),
-            spec: normalizeKeyPart(newItem.spec),
-            consumption,
-            requiredQty,
-            supplier: newItem.supplier || null,
-            unitPrice: newItem.unitPrice ?? 0,
-            remarks: newItem.remarks || 'N/A',
-            composition: newItem.composition ?? null,
-            hsCode: newItem.hsCode ?? null,
-            threadType: (newItem.threadType as any) ?? null,
-            tapeType: (newItem.tapeType as any) ?? null,
-          });
+          // PR-258: 행 생성은 공용 루틴(createBomRowFromNewItem)으로 뺐다 — 동작은 이전과 같고, 겉감 보충도 같은 루틴을 쓴다.
+          const saved = await this.createBomRowFromNewItem(queryRunner.manager, bom, material, newItem, hasTotalQty, totalQty);
           items.push(saved);
           this.logger.log(`BomItem #${saved.id} 추가(엑셀 기준): ${newItem.itemName}`);
           applied.added++;
@@ -725,6 +719,134 @@ export class MappingCommitService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  // PR-258: bom-reconcile ADD 의 행 생성 루틴(원래 reconcile 안에 인라인) — 필요량은 스타일 총수량이 양수면 요척×총수량, 아니면
+  // newItem.requiredQty ?? 0. 구분은 비면 'GENERAL', 색상·규격은 normalizeKeyPart, 혼용률은 들어온 값 그대로(없으면 null).
+  private async createBomRowFromNewItem(
+    manager: EntityManager,
+    bom: Bom,
+    material: Item,
+    newItem: CommitBomItemDto,
+    hasTotalQty: boolean,
+    totalQty: number,
+  ): Promise<BomItem> {
+    const consumption = newItem.consumption ?? 0;
+    const requiredQty = hasTotalQty ? Math.round(consumption * totalQty * 10000) / 10000 : (newItem.requiredQty ?? 0);
+    return manager.save(BomItem, {
+      bom,
+      material,
+      category: newItem.category || 'GENERAL',
+      colorCode: normalizeKeyPart(newItem.colorCode),
+      spec: normalizeKeyPart(newItem.spec),
+      consumption,
+      requiredQty,
+      supplier: newItem.supplier || null,
+      unitPrice: newItem.unitPrice ?? 0,
+      remarks: newItem.remarks || 'N/A',
+      composition: newItem.composition ?? null,
+      hsCode: newItem.hsCode ?? null,
+      threadType: (newItem.threadType as any) ?? null,
+      tapeType: (newItem.tapeType as any) ?? null,
+    });
+  }
+
+  // PR-258: 겉감 행 일괄 보충 — 읽기 전용 사전 판정. 스타일 하나의 입력(파싱된 BOM 행)을 라이브 DB 와 비교해
+  // judgeOuterFabricSupplement 결과를 돌려준다. 쓰기 쿼리 없음(SELECT 만).
+  async checkOuterFabricSupplement(payload: BomDiffRequestDto): Promise<OuterFabricSupplementResponse> {
+    return this.runOuterFabricSupplement(payload, false);
+  }
+
+  // PR-258: 보충 실행 — 한 트랜잭션 안에서 라이브 상태로 판정을 다시 수행하고, eligible 일 때만 겉감 BomItem 1행을 추가한다.
+  // 스타일·오더개요·선적일·계약·색상×사이즈·기존 BOM 행은 읽기만 한다(쓰기는 BomItem 1행 + 필요 시 새 Item 1건).
+  async supplementOuterFabric(payload: BomDiffRequestDto): Promise<OuterFabricSupplementResponse> {
+    return this.runOuterFabricSupplement(payload, true);
+  }
+
+  private async runOuterFabricSupplement(payload: BomDiffRequestDto, apply: boolean): Promise<OuterFabricSupplementResponse> {
+    const styleNo = payload?.styleNo;
+    const incoming = payload?.bomItems;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    if (apply) await queryRunner.startTransaction();
+    const manager = queryRunner.manager;
+    try {
+      const style =
+        typeof styleNo === 'string' && styleNo.trim() !== ''
+          ? await manager.findOne(MasterStyle, { where: { styleNo }, relations: ['overview'] })
+          : null;
+
+      let lockedBomId: number | null = null;
+      if (apply && style && this.dataSource.options.type === 'postgres') {
+        // 동시 요청이 겹쳐 겉감 행이 둘 생기지 않도록 활성 BOM 행을 잠근다(잠금을 얻은 뒤에 아래에서 행을 다시 읽어 판정한다).
+        const light = await manager.find(Bom, { where: { style: { styleNo } } });
+        const pickedLight = pickActiveBom(light);
+        if (pickedLight) {
+          await manager.createQueryBuilder(Bom, 'b').setLock('pessimistic_write').where('b.id = :id', { id: pickedLight.id }).getOne();
+          lockedBomId = pickedLight.id;
+        }
+      }
+
+      const boms = style ? await manager.find(Bom, { where: { style: { styleNo } }, relations: ['items', 'items.material'] }) : [];
+      const bom = pickActiveBom(boms);
+      const liveRows: BomDiffExistingRow[] | null = bom
+        ? (bom.items ?? []).map((i) => ({
+            bomItemId: i.id,
+            itemName: i.material?.name ?? '',
+            category: i.category ?? null,
+            colorCode: i.colorCode ?? null,
+            spec: i.spec ?? null,
+            consumption: Number(i.consumption),
+            linkedPoCount: 0,
+          }))
+        : null;
+
+      const judgement = judgeOuterFabricSupplement({ styleNo, registered: !!style, liveRows, incomingRows: incoming });
+      if (!apply || !judgement.eligible || !bom || !style) {
+        if (apply) await queryRunner.rollbackTransaction();
+        return { styleNo: typeof styleNo === 'string' ? styleNo : '', applied: false, ...judgement };
+      }
+
+      const row = (incoming as CommitBomItemDto[])[judgement.outerRowIndex as number];
+      const material = await this.findOrCreateMaterialNormalized(manager, row);
+      const totalQty = Number(style.overview?.totalQty);
+      const hasTotalQty = Number.isFinite(totalQty) && totalQty > 0;
+      // 혼용률은 PR-246 규칙의 정규화(앞뒤 공백 제거, 빈 값은 null)만 거쳐 저장한다.
+      const newItem: CommitBomItemDto = { ...row, composition: cleanComposition(row.composition) ?? undefined };
+      const saved = await this.createBomRowFromNewItem(manager, bom, material.item, newItem, hasTotalQty, totalQty);
+      await queryRunner.commitTransaction();
+      this.logger.log(`겉감 보충: BomItem #${saved.id} 추가(스타일 BOM #${lockedBomId ?? bom.id})`);
+      return { styleNo, applied: true, addedBomItemId: saved.id, createdMaterial: material.created, ...judgement };
+    } catch (err) {
+      if (apply && queryRunner.isTransactionActive) await queryRunner.rollbackTransaction();
+      if (err instanceof BadRequestException || err instanceof NotFoundException) throw err;
+      throw new InternalServerErrorException(err);
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  // PR-258: commit() 과 같은 매칭(PR-233 정규화 이름, 같은 정규화 이름이 여럿이면 가장 오래된 id)으로 겉감 Item 을 재사용하고, 없을 때만 만든다.
+  private async findOrCreateMaterialNormalized(manager: EntityManager, row: CommitBomItemDto): Promise<{ item: Item; created: boolean }> {
+    const key = normalizeForFuzzyMatch(row.itemName);
+    const names = await manager.find(Item, { select: { id: true, name: true } });
+    const matches = key ? names.filter((n) => normalizeForFuzzyMatch(n.name) === key).sort((a, b) => a.id - b.id) : [];
+    if (matches.length > 0) {
+      const found = await manager.findOneOrFail(Item, { where: { id: matches[0].id } });
+      if (row.englishName && !found.englishName) {
+        found.englishName = row.englishName; // PR-234: 비어 있을 때만 채운다
+        return { item: await manager.save(Item, found), created: false };
+      }
+      return { item: found, created: false };
+    }
+    const created = await manager.save(Item, {
+      code: `MAT-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+      name: row.itemName,
+      type: ItemType.RAW_MATERIAL,
+      unit: 'EA',
+      englishName: row.englishName || undefined,
+    });
+    return { item: created, created: true };
   }
 
   // commit()의 "이미 등록된 (자재명,색상,규격) 조합" 처리를 공용화한 것 — 자연

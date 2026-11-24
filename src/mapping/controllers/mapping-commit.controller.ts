@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Post, Body, Query, UseFilters } from '@nestjs/common';
+import { BadRequestException, Controller, Get, HttpCode, Post, Body, Query, UseFilters } from '@nestjs/common';
 import { MappingCommitService } from '../services/mapping-commit.service';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { CommitMappingDto } from '../dto/commit-mapping.dto';
@@ -43,6 +43,22 @@ export class MappingCommitController {
   @Post('bom-diff')
   async bomDiff(@Body() payload: BomDiffRequestDto) {
     return await this.mappingCommitService.diff(payload);
+  }
+
+  // PR-258: 겉감 행 일괄 보충 — 이미 등록된 스타일에 겉감 행 1개만 추가한다(스타일 정보·오더개요·선적일·계약·기존 BOM 행은 불변).
+  // 사전 판정은 읽기 전용. 요청 하나는 스타일 하나. 판정 결과(eligible 여부)는 HTTP 200 으로 돌려주고 입력 형식 오류만 400 이다.
+  @ApiOperation({ summary: '겉감 행 보충 가능 여부 사전 판정(읽기 전용, 저장 안 함)' })
+  @Post('outer-fabric-supplement/check')
+  @HttpCode(200)
+  async outerFabricSupplementCheck(@Body() payload: BomDiffRequestDto) {
+    return await this.mappingCommitService.checkOuterFabricSupplement(payload);
+  }
+
+  @ApiOperation({ summary: '겉감 행 1개 보충(트랜잭션 안에서 다시 판정, 적격일 때만 추가)' })
+  @Post('outer-fabric-supplement')
+  @HttpCode(200)
+  async outerFabricSupplement(@Body() payload: BomDiffRequestDto) {
+    return await this.mappingCommitService.supplementOuterFabric(payload);
   }
 
   // PR-198: 비교 화면에서 사람이 고른 행별 동작(덮어쓰기/추가/제거/교체)을 적용한다.
