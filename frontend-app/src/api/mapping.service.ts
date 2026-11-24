@@ -42,6 +42,15 @@ export const parseMappingFile = (file: File): Promise<ParsedStyleResult[]> => {
 export const checkStyleExists = (styleNo: string): Promise<{ exists: boolean }> =>
   apiClient.get('/mapping/check-exists', { params: { styleNo } });
 
+// PR-259: 겉감 행 일괄 보충(서버 PR-258) — 스타일 하나씩. 응답은 해석하지 않고 그대로 돌려준다(화면의 outerFabricSupplement.ts 가 엄격하게 해석 — 알 수 없으면 "확인 필요").
+// 인터셉터가 이미 응답 본문을 풀어 돌려주므로 여기서 다시 .data 를 꺼내지 않는다. 요청마다 시간 제한(무료 서버 콜드 스타트를 고려).
+export const OUTER_FABRIC_CHECK_TIMEOUT_MS = 60_000;
+export const OUTER_FABRIC_RUN_TIMEOUT_MS = 90_000;
+export const checkOuterFabricSupplement = (payload: { styleNo: string; bomItems: unknown[] }): Promise<unknown> =>
+  apiClient.post('/mapping/outer-fabric-supplement/check', payload, { timeout: OUTER_FABRIC_CHECK_TIMEOUT_MS });
+export const runOuterFabricSupplement = (payload: { styleNo: string; bomItems: unknown[] }): Promise<unknown> =>
+  apiClient.post('/mapping/outer-fabric-supplement', payload, { timeout: OUTER_FABRIC_RUN_TIMEOUT_MS });
+
 // PR-132: 응답의 notices(NEEDS_REVIEW/AUTO_APPLIED 구조화 알림)와 warnings(문자열 배열, 호환용)를 화면이 그대로 쓴다.
 export type { CommitResponse, CommitNotice } from '../utils/commitNotices';
 export const commitMapping = (payload: { styleNo: string; overviewData: any; bomItems: any[] }): Promise<import('../utils/commitNotices').CommitResponse> =>

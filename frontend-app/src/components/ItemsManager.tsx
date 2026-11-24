@@ -11,6 +11,7 @@ import { SearchSelectField } from './SearchSelectField';
 import { parseMappingFile, checkStyleExists, commitMapping, type ParsedStyleResult } from '../api/mapping.service';
 import { MappingPreviewModal } from './MappingPreviewModal';
 import { StyleReviewList } from './StyleReviewList';
+import { OuterFabricSupplementPanel } from './OuterFabricSupplementPanel';
 import { getErrorMessage } from '../utils/errorMessage';
 import { getMaterialCategories, type MaterialCategory } from '../api/materialCategories.service';
 import { getMaterialPackagingUnitRules, type MaterialPackagingUnitRule } from '../api/materialPackagingUnitRules.service';
@@ -1195,6 +1196,8 @@ export const ItemsManager: React.FC<ItemsManagerProps> = ({ onOrderItem, onBulkO
             </div>
           </div>
           {bulkResults && <BulkApproveResult results={bulkResults.results} skipped={bulkResults.skipped} onDismiss={() => setBulkResults(null)} />}
+          {/* PR-259: 이미 등록된 스타일에 겉감 행만 일괄 보충(서버 PR-258). 등록된 스타일이 없으면 아무것도 그리지 않는다. */}
+          <OuterFabricSupplementPanel styles={parsedStyles} existsMap={existsMap} />
           <StyleReviewList
             styles={parsedStyles}
             existsMap={existsMap}
