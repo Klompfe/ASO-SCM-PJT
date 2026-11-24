@@ -1,5 +1,6 @@
 import { classifyCompositionStatus, type CompositionStatus } from './composition-update.util';
 import { normalizeForFuzzyMatch, isSimilarMaterialName } from '../../boms/utils/bom-name-normalize.util';
+import { findOuterFabricPair } from './outer-fabric-pair.util';
 
 // PR-235(PILOT-23 후속): 작지 저장 전 "기존 자재와 비교" — 순수 함수(DB 접근 없음).
 // PR-198의 classifyBomDiff(엑셀 경로, 이름 exact-trim 매칭)와는 다른 매칭 키를 쓴다 —
@@ -54,6 +55,8 @@ export interface SalesOrderBomCompareRow {
   existingComposition?: string | null;
   incomingComposition?: string | null;
   compositionStatus?: CompositionStatus;
+  // PR-257: 겉감 짝(제안) — 엑셀 겉감 행과 작지 겉감 행을 한 쌍으로 제안한 similar 행. 화면 기본 선택은 "기존 행에 합치기".
+  outerFabricPair?: boolean;
 }
 
 function withComposition(row: SalesOrderBomCompareRow): SalesOrderBomCompareRow {
@@ -137,8 +140,32 @@ export function classifySalesOrderBomCompare(
     pairedIncomingIndexes.add(incomingIndex);
   }
 
+  // PR-257: 겉감 짝 — 기존 겉감 계열 행이 정확히 1개, 새 인식 겉감 계열 행도 정확히 1개일 때만, 아직 짝이 없는 그 둘을
+  // "겉감 짝(제안)"으로 묶는다(구분·색상·규격이 달라도). 이미 same 으로 맞은 행이나 다른 행과 짝지어진 행은 건드리지 않는다.
+  const outerPair = findOuterFabricPair(existingRows, incomingRows);
+  let outerPairIncomingIndex: number | null = null;
+  if (outerPair) {
+    const existingRow = existingRows.find((e) => e.bomItemId === outerPair.existingBomItemId);
+    const existingFree = !!existingRow && !matchedExistingIds.has(existingRow.bomItemId);
+    const incomingFree = !matchedIncoming.has(outerPair.incomingIndex);
+    const alreadyPairedTogether = similarPairs.some(
+      (p) => p.existing.bomItemId === outerPair.existingBomItemId && p.incomingIndex === outerPair.incomingIndex,
+    );
+    const existingPairedElsewhere = similarPairs.some((p) => p.existing.bomItemId === outerPair.existingBomItemId) && !alreadyPairedTogether;
+    const incomingPairedElsewhere = similarPairs.some((p) => p.incomingIndex === outerPair.incomingIndex) && !alreadyPairedTogether;
+    if (existingFree && incomingFree && !existingPairedElsewhere && !incomingPairedElsewhere) {
+      if (!alreadyPairedTogether && existingRow) {
+        similarPairs.push({ existing: existingRow, incomingIndex: outerPair.incomingIndex });
+        pairedExistingIds.add(existingRow.bomItemId);
+        pairedIncomingIndexes.add(outerPair.incomingIndex);
+      }
+      outerPairIncomingIndex = outerPair.incomingIndex;
+    }
+  }
+
   for (const pair of similarPairs) {
-    rows.push(withComposition({ type: 'similar', incomingIndex: pair.incomingIndex, existing: pair.existing, incoming: incomingRows[pair.incomingIndex] }));
+    const row = withComposition({ type: 'similar', incomingIndex: pair.incomingIndex, existing: pair.existing, incoming: incomingRows[pair.incomingIndex] });
+    rows.push(pair.incomingIndex === outerPairIncomingIndex ? { ...row, outerFabricPair: true } : row);
   }
   for (const existing of unmatchedExisting) {
     if (!pairedExistingIds.has(existing.bomItemId)) rows.push({ type: 'existingOnly', existing });

@@ -38,6 +38,8 @@ import {
   type OrderOverviewCompareRow,
 } from '../utils/order-overview-merge.util';
 import { normalizeForFuzzyMatch } from '../../boms/utils/bom-name-normalize.util';
+import { findOuterFabricPair } from '../utils/outer-fabric-pair.util';
+import { isOuterFabricCategory } from '../../sales-orders/utils/vision-guardrails.util';
 
 // PR-132: commit()이 사용자에게 알려야 하는 두 종류의 사실을 문자열 패턴이 아니라 구조로 구분한다.
 // - NEEDS_REVIEW: 병합 중 "자동 반영을 보류"했다 → 사용자가 확인하고 필요하면 수동으로 고쳐야 한다.
@@ -272,6 +274,9 @@ export class MappingCommitService {
         materialsByNormalizedName.set(key, arr);
       }
 
+      // PR-257: 겉감 짝 검증용 — 이번 요청이 행을 추가하기 전의 기존 BOM 행(스냅샷).
+      const initialExistingRows = (bom.items ?? []).map((bi) => ({ bomItemId: bi.id, category: bi.category }));
+
       // PR-235: 저장 전 비교 화면에서 고른 선택 — 없으면(undefined) 비어 있는 Map이라
       // 아래 로직은 전부 기존 동작 그대로 움직인다.
       const incomingDecisionsByIndex = new Map(
@@ -292,6 +297,22 @@ export class MappingCommitService {
           const target = (bom.items ?? []).find((bi) => bi.id === decision.mergeIntoBomItemId);
           if (!target) {
             throw new BadRequestException(`행 ${bomItemIndex}: BOM 행 #${decision.mergeIntoBomItemId}은(는) 스타일 ${styleNo}의 자재명세가 아닙니다.`);
+          }
+          // PR-257: 겉감이 얽힌 합치기(구분이 서로 다른데 한쪽이라도 겉감 계열)는 "겉감 짝" 규칙을 서버가 라이브 데이터로 다시 검증한다 —
+          // 기존 겉감 계열 정확히 1개·새 인식 겉감 계열 정확히 1개이고 그 둘일 때만 허용. 구분이 완전히 같은 합치기(기존 규칙)나
+          // 겉감과 무관한 합치기는 기존 동작 그대로다.
+          const targetIsOuter = isOuterFabricCategory(target.category);
+          const incomingIsOuter = isOuterFabricCategory(item.category);
+          if ((targetIsOuter || incomingIsOuter) && (target.category ?? null) !== (item.category ?? null)) {
+            const livePair = findOuterFabricPair(
+              initialExistingRows,
+              bomItems.map((b) => ({ category: b.category })),
+            );
+            if (!targetIsOuter || !incomingIsOuter || !livePair || livePair.existingBomItemId !== target.id || livePair.incomingIndex !== bomItemIndex) {
+              throw new BadRequestException(
+                `행 ${bomItemIndex}: 겉감 행 합치기는 기존 겉감 행 1개와 새 인식 겉감 행 1개일 때만 가능합니다 — 이 요청은 겉감 짝 조건을 만족하지 않아 거부했습니다.`,
+              );
+            }
           }
           await this.applyIncomingToExistingBomItem(item, target, notices, queryRunner, decision.overwriteComposition === true, decision.skipComposition === true);
           continue;

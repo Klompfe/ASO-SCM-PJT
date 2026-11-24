@@ -25,7 +25,9 @@ export function buildDraftRows(rows: SalesOrderBomCompareRow[]): SalesOrderBomCo
 // 기본값도 반드시 'keep'이어야 한다(안전장치 — 기본값이 비활성 선택이면 화면이 깨짐).
 export function defaultIncomingDecisionFor(row: SalesOrderBomCompareRow): IncomingDecision {
   if (row.type === 'same') return 'update';
-  return 'add'; // similar/new 둘 다 기본은 "새 자재로 추가"(합치기는 사람이 선택).
+  // PR-257: 겉감 짝(제안)만 예외 — 새 행을 추가하면 겉감이 두 줄이 되므로 기본은 "기존 겉감 행에 합치기"(사람이 "새 자재로 추가"로 바꿀 수 있다).
+  if (row.type === 'similar' && row.outerFabricPair === true) return 'mergeInto';
+  return 'add'; // 그 밖의 similar/new 는 기본 "새 자재로 추가"(합치기는 사람이 선택).
 }
 
 export function defaultExistingDecisionFor(row: SalesOrderBomCompareRow): ExistingDecision {

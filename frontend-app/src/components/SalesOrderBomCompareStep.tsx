@@ -14,6 +14,7 @@ import {
   riskyDeleteRows,
   buildCommitDecisionsPayload,
   defaultExistingDecisionFor,
+  defaultIncomingDecisionFor,
   compositionTargetsExisting,
   toggleCompositionChoice,
   countCompositionOverwrites,
@@ -39,6 +40,10 @@ const TYPE_BADGE: Record<SalesOrderBomCompareRow['type'], { label: string; class
   new: { label: '새 자재', className: 'bg-blue-100 text-blue-800' },
   existingOnly: { label: '기존에만 있음', className: 'bg-red-100 text-red-800' },
 };
+
+// PR-257: 겉감 짝(제안) 행은 일반 "비슷한 이름" 배지 대신 별도 배지로 보여 준다.
+export const OUTER_PAIR_BADGE = { label: '겉감 짝(제안)', className: 'bg-purple-100 text-purple-800' };
+export const OUTER_PAIR_NOTE = '엑셀의 겉감 행과 작지의 겉감 행을 한 쌍으로 제안합니다. 기본은 기존 겉감 행에 합치기(자재명·구분은 바뀌지 않고 혼용률만 규칙에 따라 반영)이며, 합치지 않으려면 "새 자재로 추가"를 고르세요(겉감이 두 줄이 됩니다).';
 
 // PR-235(PILOT-23 후속): 작지 저장 전 "기존 자재명세와 비교" 화면. 기본 선택은
 // "새 인식 우선"(사용자 확정 요구사항) — ① 새 인식에 없는 기존 행은 기본 삭제(단,
@@ -132,7 +137,8 @@ export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCa
           </thead>
           <tbody>
             {draftRows.map(({ key, row }) => {
-              const badge = TYPE_BADGE[row.type];
+              const isOuterPair = row.type === 'similar' && row.outerFabricPair === true;
+              const badge = isOuterPair ? OUTER_PAIR_BADGE : TYPE_BADGE[row.type];
               const isRisky = riskyKeys.has(key);
               return (
                 <tr key={key} className="border-t align-top">
@@ -147,6 +153,11 @@ export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCa
                           {row.incoming.englishName ? `${row.incoming.englishName} · ` : ''}
                           {row.incoming.colorCode ?? '-'} · {row.incoming.category ?? '-'} · {row.incoming.requiredQty ?? row.incoming.consumption ?? '-'}
                         </div>
+                        {isOuterPair && (
+                          <div className="text-xs text-gray-700" data-testid={`outer-pair-incoming-${key}`}>
+                            구분 {row.incoming.category ?? '-'} · 혼용률 {row.incoming.composition?.trim() || '미기재'}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <span className="text-gray-400">—</span>
@@ -159,6 +170,11 @@ export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCa
                         <div className="text-xs text-gray-500">
                           필요수량 {row.existing.requiredQty} {row.existing.unit ?? ''}
                         </div>
+                        {isOuterPair && (
+                          <div className="text-xs text-gray-700" data-testid={`outer-pair-existing-${key}`}>
+                            구분 {row.existing.category ?? '-'} · 혼용률 {row.existing.composition?.trim() || '미기재'}
+                          </div>
+                        )}
                         {compositionTargetsExisting(row, decisions.incoming.get(key)) && (
                           <CompositionCell
                             rowKey={key}
@@ -176,15 +192,18 @@ export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCa
                     {row.type === 'same' && <span className="text-xs text-gray-500">갱신(자동)</span>}
                     {row.type === 'new' && <span className="text-xs text-gray-500">새 자재로 추가(자동)</span>}
                     {row.type === 'similar' && (
-                      <select
-                        aria-label="합치기/새 자재로 추가"
-                        className="border rounded px-2 py-1 text-xs"
-                        value={decisions.incoming.get(key) ?? 'add'}
-                        onChange={(e) => setIncoming(key, e.target.value as IncomingDecision)}
-                      >
-                        <option value="add">새 자재로 추가</option>
-                        <option value="mergeInto">합치기(기존 행에)</option>
-                      </select>
+                      <div className="space-y-1">
+                        <select
+                          aria-label="합치기/새 자재로 추가"
+                          className="border rounded px-2 py-1 text-xs"
+                          value={decisions.incoming.get(key) ?? defaultIncomingDecisionFor(row)}
+                          onChange={(e) => setIncoming(key, e.target.value as IncomingDecision)}
+                        >
+                          <option value="add">새 자재로 추가</option>
+                          <option value="mergeInto">합치기(기존 행에)</option>
+                        </select>
+                        {isOuterPair && <div className="text-xs text-purple-800 max-w-xs" data-testid={`outer-pair-note-${key}`}>{OUTER_PAIR_NOTE}</div>}
+                      </div>
                     )}
                     {row.type === 'existingOnly' && row.existing && (
                       <div className="space-y-1">

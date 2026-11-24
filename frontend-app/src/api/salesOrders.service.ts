@@ -205,6 +205,8 @@ export interface SalesOrderBomCompareRow {
   existingComposition?: string | null;
   incomingComposition?: string | null;
   compositionStatus?: CompositionStatus;
+  // PR-257: 겉감 짝(제안) — 엑셀로 보충한 겉감 행과 작지 인식 겉감 행을 한 쌍으로 제안한 similar 행(서버가 판정).
+  outerFabricPair?: boolean;
 }
 
 export interface SalesOrderBomCompareResponse {
