@@ -35,8 +35,16 @@ function matchesAliasKeys(category: string | null | undefined, keys: ReadonlySet
   return false;
 }
 
-export const isCompositionTargetCategory = (category: string | null | undefined): boolean => matchesAliasKeys(category, FABRIC_KEYS);
-export const isOuterFabricCategory = (category: string | null | undefined): boolean => matchesAliasKeys(category, OUTER_KEYS);
+// PR-261: 구분 칸 "전체"가 이 값과 같을 때만 겉감 계열(앞뒤 공백 제거·대소문자 무시). 작지 맨 위 표 머리글 "소재" = 겉감.
+// 단어 경계 별칭에 넣지 않는 이유: 한글은 단어 경계가 없어 "원단 소재"·"(소재)" 같은 구분까지 겉감이 된다. 부소재·소재류·원단소재 등은 인정하지 않는다.
+// 서버(vision-guardrails.util.ts)의 같은 이름 상수와 같은 목록이다(백엔드 테스트가 대조).
+export const COMPOSITION_OUTER_EXACT_CATEGORIES: readonly string[] = ['소재'];
+const OUTER_EXACT_SET: ReadonlySet<string> = new Set(COMPOSITION_OUTER_EXACT_CATEGORIES.map((c) => c.toUpperCase()));
+const isExactOuterCategory = (category: string | null | undefined): boolean =>
+  typeof category === 'string' && OUTER_EXACT_SET.has(category.trim().toUpperCase());
+
+export const isCompositionTargetCategory = (category: string | null | undefined): boolean => isExactOuterCategory(category) || matchesAliasKeys(category, FABRIC_KEYS);
+export const isOuterFabricCategory = (category: string | null | undefined): boolean => isExactOuterCategory(category) || matchesAliasKeys(category, OUTER_KEYS);
 
 export const cleanComposition = (v: string | null | undefined): string | null => {
   const s = (v ?? '').trim();

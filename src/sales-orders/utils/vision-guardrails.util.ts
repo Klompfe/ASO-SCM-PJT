@@ -516,13 +516,21 @@ function matchesAliasKeys(category: string | null | undefined, keys: ReadonlySet
   return false;
 }
 
+// PR-261: 구분 칸 "전체"가 이 값과 같을 때만 겉감 계열로 본다(앞뒤 공백 제거·대소문자 무시). 작지 맨 위 표 머리글 "소재" = 겉감.
+// 위의 단어 경계 별칭에 넣지 않는 이유: 한글은 단어 경계가 없어 "원단 소재"·"소재 원단"·"(소재)" 같은 구분까지 겉감이 된다.
+// 확신할 수 없는 표기(부소재·소재류·원단소재·소 재 등)는 인정하지 않는다(fail-closed). 저장된 구분 원문은 바꾸지 않는다.
+export const COMPOSITION_OUTER_EXACT_CATEGORIES: readonly string[] = ['소재'];
+const COMPOSITION_OUTER_EXACT_SET = new Set(COMPOSITION_OUTER_EXACT_CATEGORIES.map((c) => c.toUpperCase()));
+const isExactOuterCategory = (category: string | null | undefined): boolean =>
+  typeof category === 'string' && COMPOSITION_OUTER_EXACT_SET.has(category.trim().toUpperCase());
+
 export function isCompositionFabricCategory(category: string | null | undefined): boolean {
-  return matchesAliasKeys(category, COMPOSITION_FABRIC_KEYS);
+  return isExactOuterCategory(category) || matchesAliasKeys(category, COMPOSITION_FABRIC_KEYS);
 }
 
 // PR-256: 겉감 계열 판정(프런트 isOuterFabricCategory 와 같은 규칙 — 대조 테스트가 고정한다).
 export function isOuterFabricCategory(category: string | null | undefined): boolean {
-  return matchesAliasKeys(category, COMPOSITION_OUTER_KEYS);
+  return isExactOuterCategory(category) || matchesAliasKeys(category, COMPOSITION_OUTER_KEYS);
 }
 
 export function checkComposition(
