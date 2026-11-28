@@ -13,6 +13,10 @@ const sample: OuterFabricAuditResponse = {
     { styleNo: 'SYN-C', styleName: null, status: 'noBom', outerRowCount: 0, blankOuterRows: 0, totalRows: 0, categories: [] },
   ],
   total: 3, page: 1, pageSize: 50, counts: { noRow: 1, blank: 1, noBom: 1, total: 3 }, styleCount: 10,
+  // PR-262: 새 응답 필드(없으면 화면이 "의심 응답"으로 본다) — 요청 조건과 일치하는 합성 값.
+  overall: { total: 10, noRow: 1, blank: 1, noBom: 1, okCount: 7 },
+  applied: { q: '', status: 'all', page: 1, pageSize: 50 },
+  generatedAt: '2026-01-01T00:00:00.000Z',
 };
 
 const render = (over: Partial<Parameters<typeof OuterFabricAuditView>[0]> = {}) =>
@@ -47,7 +51,8 @@ describe('겉감 점검 목록 (PR-256)', () => {
   });
 
   it('목록이 비면 안내 문구, 이때 표는 없다', () => {
-    const html = render({ data: { ...sample, items: [], total: 0, counts: { noRow: 0, blank: 0, noBom: 0, total: 0 } } });
+    // PR-262: 초록 안내는 "빈 목록"이 아니라 확인된 전부 완료(okCount === total)일 때만 — 그 입력을 만든다.
+    const html = render({ data: { ...sample, items: [], total: 0, counts: { noRow: 0, blank: 0, noBom: 0, total: 0 }, overall: { total: 10, noRow: 0, blank: 0, noBom: 0, okCount: 10 } } });
     expect(html).toContain(AUDIT_EMPTY_MESSAGE);
     expect(html).not.toContain('outer-fabric-audit-table');
   });

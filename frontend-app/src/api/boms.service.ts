@@ -150,6 +150,10 @@ export interface OuterFabricAuditResponse {
   pageSize: number;
   counts: { noBom: number; noRow: number; blank: number; total: number };
   styleCount: number;
+  // PR-262: 검색·필터와 무관한 전체 기준 수치와 서버가 적용한 조건. 배포 시차로 옛 서버 응답에는 없을 수 있다(그러면 화면은 의심 응답으로 본다).
+  overall?: { total: number; noBom: number; noRow: number; blank: number; okCount: number };
+  applied?: { q: string; status: 'all' | OuterFabricAuditStatus; page: number; pageSize: number };
+  generatedAt?: string;
 }
 export interface OuterFabricAuditParams {
   status?: 'all' | OuterFabricAuditStatus;
