@@ -22,12 +22,22 @@ export interface SalesOrderBomCompareDraftRow {
 }
 
 export function buildDraftRows(rows: SalesOrderBomCompareRow[]): SalesOrderBomCompareDraftRow[] {
-  const duplicate = detectOuterDuplicate(rows);
+  const info = detectOuterDuplicate(rows);
+  const keepExistingOuter = info.active || isOuterMissingInIncoming(info);
   return rows.map((row, i) => ({
     key: `${row.type}-${i}`,
-    row: duplicate.active && row.type === 'existingOnly' && isOuterFabricCategory(row.existing?.category) ? { ...row, keepByDefault: true } : row,
+    row: keepExistingOuter && row.type === 'existingOnly' && isOuterFabricCategory(row.existing?.category) ? { ...row, keepByDefault: true } : row,
   }));
 }
+
+// PR-263: 기존 겉감 계열이 1줄 이상인데 비교에 올라간 새 행에 겉감 계열이 하나도 없으면, 혼용률이 담긴 기존 겉감 행을 기본 삭제로 두지 않는다.
+// 작지 인식이 겉감을 놓친 경우와 저장 화면에서 "제외"한 경우는 비교 요청에서 똑같이 "새 겉감 행 없음"이다 — "제외"는 이 보호를 풀지 않는다.
+export const isOuterMissingInIncoming = (info: OuterDuplicateInfo): boolean =>
+  info.existingOuterCount >= 1 && info.incomingOuterCount === 0;
+
+// 기존 겉감 계열 2줄 이상이면 formatOuterDuplicateNotice(새 겉감 0줄 문구 포함)가 우선이고, 이 문구는 1줄일 때만 보인다(한 스타일에 안내 한 번).
+export const OUTER_MISSING_NOTICE =
+  '이번 인식에서 겉감이 확인되지 않았거나 제외되어 있습니다. 기존 겉감 행은 자동으로 삭제하지 않습니다. 저장 전에 원본 작지를 확인하세요.';
 
 // PR-261 보강: 기존 겉감 계열 행이 2줄 이상이면 어느 행이 같은 원단인지 시스템이 판단할 수 없다(겉감 짝을 만들지 않는다 — PR-257).
 // 판단이 모호할 때는 파괴적 동작(삭제)을 기본값으로 두지 않는다.
@@ -102,7 +112,7 @@ export function defaultIncomingDecisionFor(row: SalesOrderBomCompareRow): Incomi
 }
 
 export function defaultExistingDecisionFor(row: ReviewRow): ExistingDecision {
-  if (row.keepByDefault === true) return 'keep'; // PR-261 보강: 겉감 중복이 의심되는 기존 겉감 행은 기본 유지(사용자가 직접 삭제로 바꿀 수는 있다)
+  if (row.keepByDefault === true) return 'keep'; // PR-261 보강·PR-263: 겉감 중복이 의심되거나 새 겉감이 없을 때의 기존 겉감 행은 기본 유지(사용자가 직접 삭제로 바꿀 수는 있다)
   if (row.type === 'existingOnly' && row.existing?.canDelete) return 'delete';
   return 'keep';
 }

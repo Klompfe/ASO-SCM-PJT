@@ -23,6 +23,8 @@ import {
   formatOuterDuplicateNotice,
   formatOuterDuplicateAddNotice,
   withOuterDuplicateConfirm,
+  isOuterMissingInIncoming,
+  OUTER_MISSING_NOTICE,
   type CompositionChoiceMap,
   type SalesOrderBomCompareDecisionMap,
   type IncomingDecision,
@@ -126,6 +128,13 @@ export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCa
           기본 선택은 "새 인식 우선"입니다(비슷한 이름은 새 자재로 추가, 기존에만 있는 자재는 삭제) — 수동 필요수량·확정 단가·종류 지정·요척·비고 같은 확정 값은 갱신/합치기에서 항상 기존 값을 유지합니다.
         </p>
       </div>
+
+      {/* PR-263: 기존 겉감 1줄 + 새 겉감 0줄. 2줄 이상이면 아래 중복 안내만 보인다(안내는 한 번). */}
+      {!outerDuplicate.active && isOuterMissingInIncoming(outerDuplicate) && (
+        <div className="border-2 border-red-400 bg-red-50 rounded p-3 text-sm text-red-800" data-testid="outer-missing-notice">
+          <p className="font-semibold">⚠ {OUTER_MISSING_NOTICE}</p>
+        </div>
+      )}
 
       {outerDuplicate.active && (
         <div className="border-2 border-red-400 bg-red-50 rounded p-3 text-sm text-red-800" data-testid="outer-duplicate-notice">

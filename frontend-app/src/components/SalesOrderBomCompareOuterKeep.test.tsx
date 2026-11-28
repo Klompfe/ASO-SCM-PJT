@@ -106,7 +106,8 @@ describe('④ 기존 겉감 계열 1줄 이하: 이전과 같다', () => {
   it.each([
     ['0줄 + 새 겉감 0줄', [only(ex(1, '안감')), only(ex(2, '부자재'))], { 1: 'delete', 2: 'delete' }],
     ['0줄 + 새 겉감 1줄', [only(ex(1, '안감')), fresh(0, '겉감')], { 1: 'delete' }],
-    ['1줄 + 새 겉감 0줄', [only(ex(1, '소재')), only(ex(2, '부자재'))], { 1: 'delete', 2: 'delete' }],
+    // PR-263(사용자 결정): 이 한 경우만 바뀌었다 — 새 겉감이 없으면 기존 겉감 1줄도 기본 유지(겉감이 아닌 행은 삭제 그대로).
+    ['1줄 + 새 겉감 0줄', [only(ex(1, '소재')), only(ex(2, '부자재'))], { 1: 'keep', 2: 'delete' }],
     ['1줄 + 새 겉감 1줄(짝이 안 된 경우)', [only(ex(1, '겉감')), fresh(0, '겉감')], { 1: 'delete' }],
   ])('%s', (_label, rows, expected) => {
     expect(detectOuterDuplicate(rows as SalesOrderBomCompareRow[]).active).toBe(false);
