@@ -2,6 +2,7 @@ import type {
   SalesOrderBomCompareRow,
   SalesOrderBomCompareDecisions,
 } from '../api/salesOrders.service';
+import { isOuterFabricCategory } from './compositionReview';
 
 // PR-235(PILOT-23 후속): 작지 저장 전 "기존 자재와 비교" 화면의 순수 로직 — PR-198의
 // bomDiffReview.ts(엑셀 경로)와 같은 원칙이지만, 행 유형(same/similar/new/
@@ -12,13 +13,77 @@ import type {
 export type IncomingDecision = 'update' | 'mergeInto' | 'add';
 export type ExistingDecision = 'keep' | 'delete';
 
+// PR-261 보강: keepByDefault 는 화면에서만 붙이는 표시(서버 응답·저장 요청에는 없다) — 이 행은 "새 인식 우선"의 기본 삭제에서 뺀다.
+export type ReviewRow = SalesOrderBomCompareRow & { keepByDefault?: boolean };
+
 export interface SalesOrderBomCompareDraftRow {
   key: string;
-  row: SalesOrderBomCompareRow;
+  row: ReviewRow;
 }
 
 export function buildDraftRows(rows: SalesOrderBomCompareRow[]): SalesOrderBomCompareDraftRow[] {
-  return rows.map((row, i) => ({ key: `${row.type}-${i}`, row }));
+  const duplicate = detectOuterDuplicate(rows);
+  return rows.map((row, i) => ({
+    key: `${row.type}-${i}`,
+    row: duplicate.active && row.type === 'existingOnly' && isOuterFabricCategory(row.existing?.category) ? { ...row, keepByDefault: true } : row,
+  }));
+}
+
+// PR-261 보강: 기존 겉감 계열 행이 2줄 이상이고 새 인식에도 겉감 계열 행이 있으면, 어느 행이 같은 원단인지 시스템이 판단할 수 없다
+// (겉감 짝을 만들지 않는다 — PR-257). 판단이 모호할 때는 파괴적 동작(삭제)을 기본값으로 두지 않는다.
+export interface OuterDuplicateInfo {
+  active: boolean;
+  existingOuterCount: number;
+  incomingOuterCount: number;
+}
+
+export function detectOuterDuplicate(rows: SalesOrderBomCompareRow[]): OuterDuplicateInfo {
+  const existingIds = new Set<number>();
+  const incomingIndexes = new Set<number>();
+  for (const row of rows) {
+    if (row.existing && isOuterFabricCategory(row.existing.category)) existingIds.add(row.existing.bomItemId);
+    if (row.incoming && row.incomingIndex != null && isOuterFabricCategory(row.incoming.category)) incomingIndexes.add(row.incomingIndex);
+  }
+  return {
+    active: existingIds.size >= 2 && incomingIndexes.size >= 1,
+    existingOuterCount: existingIds.size,
+    incomingOuterCount: incomingIndexes.size,
+  };
+}
+
+// 지금 선택대로 저장하면 겉감 계열 행이 어떻게 되는지 — 새로 추가되는 겉감 행 수와 저장 후 겉감 계열 줄 수.
+export function countOuterAfterSave(
+  draftRows: SalesOrderBomCompareDraftRow[],
+  decisions: SalesOrderBomCompareDecisionMap,
+): { added: number; total: number } {
+  let added = 0;
+  let deleted = 0;
+  for (const { key, row } of draftRows) {
+    if ((row.type === 'similar' || row.type === 'new') && isOuterFabricCategory(row.incoming?.category)) {
+      if ((decisions.incoming.get(key) ?? defaultIncomingDecisionFor(row)) === 'add') added++;
+    }
+    if (row.type === 'existingOnly' && isOuterFabricCategory(row.existing?.category)) {
+      if ((decisions.existing.get(key) ?? defaultExistingDecisionFor(row)) === 'delete') deleted++;
+    }
+  }
+  return { added, total: detectOuterDuplicate(draftRows.map((d) => d.row)).existingOuterCount - deleted + added };
+}
+
+export const formatOuterDuplicateNotice = (info: OuterDuplicateInfo): string =>
+  `겉감 계열 행이 2줄 이상입니다(구분 소재·겉감 등, 기존 ${info.existingOuterCount}줄). 같은 원단이 중복되었을 수 있어 자동으로 삭제하지 않습니다. 새 겉감 행과 어느 행이 같은지 직접 확인하세요.`;
+
+export const formatOuterDuplicateAddNotice = (after: { added: number; total: number }): string =>
+  `이대로 저장하면 새 겉감 행 ${after.added}개가 추가되어 겉감 계열이 ${after.total}줄이 됩니다. 원하지 않으면 '취소(저장 안 함)'를 누르세요.`;
+
+// 겉감 중복 상태에서 새 겉감 행이 추가되면 저장 확인창을 반드시 띄운다(기존 확인 문구가 있으면 앞에 덧붙인다).
+export function withOuterDuplicateConfirm(
+  baseMessage: string | null,
+  info: OuterDuplicateInfo,
+  after: { added: number; total: number },
+): string | null {
+  if (!info.active || after.added === 0) return baseMessage;
+  const line = `겉감 계열 행이 이미 ${info.existingOuterCount}줄입니다. 새 겉감 행 ${after.added}개를 추가하면 겉감 계열이 ${after.total}줄이 됩니다.`;
+  return baseMessage ? `${line}\n${baseMessage}` : `${line} 계속할까요?`;
 }
 
 // "새 인식 우선" 기본값. existingOnly는 canDelete가 아니면 삭제를 고를 수조차 없으므로
@@ -30,7 +95,8 @@ export function defaultIncomingDecisionFor(row: SalesOrderBomCompareRow): Incomi
   return 'add'; // 그 밖의 similar/new 는 기본 "새 자재로 추가"(합치기는 사람이 선택).
 }
 
-export function defaultExistingDecisionFor(row: SalesOrderBomCompareRow): ExistingDecision {
+export function defaultExistingDecisionFor(row: ReviewRow): ExistingDecision {
+  if (row.keepByDefault === true) return 'keep'; // PR-261 보강: 겉감 중복이 의심되는 기존 겉감 행은 기본 유지(사용자가 직접 삭제로 바꿀 수는 있다)
   if (row.type === 'existingOnly' && row.existing?.canDelete) return 'delete';
   return 'keep';
 }

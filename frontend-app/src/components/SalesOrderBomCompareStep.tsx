@@ -18,6 +18,11 @@ import {
   compositionTargetsExisting,
   toggleCompositionChoice,
   countCompositionOverwrites,
+  detectOuterDuplicate,
+  countOuterAfterSave,
+  formatOuterDuplicateNotice,
+  formatOuterDuplicateAddNotice,
+  withOuterDuplicateConfirm,
   type CompositionChoiceMap,
   type SalesOrderBomCompareDecisionMap,
   type IncomingDecision,
@@ -65,6 +70,9 @@ export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCa
   const riskyKeys = new Set(risky.map((r) => r.key));
   const compositionOverwriteCount = countCompositionOverwrites(draftRows, decisions, compositionChoices);
   const overviewOverwriteCount = countOverviewOverwrites(overview, overviewUseNew);
+  // PR-261 보강: 기존 겉감 계열 2줄 이상 + 새 겉감 — 기존 겉감 행은 기본 유지(buildDraftRows)하고, 안내와 저장 확인창으로 알린다.
+  const outerDuplicate = detectOuterDuplicate(rows);
+  const outerAfterSave = countOuterAfterSave(draftRows, decisions);
 
   const setIncoming = (key: string, value: IncomingDecision) => {
     setDecisions((prev) => ({ incoming: new Map(prev.incoming).set(key, value), existing: prev.existing }));
@@ -99,7 +107,9 @@ export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCa
             .filter(Boolean)
         : [];
     // 삭제만 있을 때는 기존 문구 그대로, 오더개요·혼용률 교체가 있으면 그 줄을 앞에 덧붙인다(없으면 확인창 없음).
-    const confirmMessage = buildCompareConfirmMessage({ deleteNames, compositionOverwriteCount, overviewOverwriteCount });
+    const baseMessage = buildCompareConfirmMessage({ deleteNames, compositionOverwriteCount, overviewOverwriteCount });
+    // 겉감 중복 상태에서 새 겉감 행이 추가되면 다른 확인 사항이 없어도 확인창을 띄운다 — 확인하지 않으면 저장되지 않는다.
+    const confirmMessage = withOuterDuplicateConfirm(baseMessage, outerDuplicate, outerAfterSave);
     if (confirmMessage && !window.confirm(confirmMessage)) return;
     const overwriteOrderFields = buildOverwriteOrderFields(overview, overviewUseNew);
     onConfirm(buildCommitDecisionsPayload(draftRows, decisions, compositionChoices), overwriteOrderFields.length > 0 ? overwriteOrderFields : undefined);
@@ -116,6 +126,13 @@ export function SalesOrderBomCompareStep({ styleNo, rows, overview, saving, onCa
           기본 선택은 "새 인식 우선"입니다(비슷한 이름은 새 자재로 추가, 기존에만 있는 자재는 삭제) — 수동 필요수량·확정 단가·종류 지정·요척·비고 같은 확정 값은 갱신/합치기에서 항상 기존 값을 유지합니다.
         </p>
       </div>
+
+      {outerDuplicate.active && (
+        <div className="border-2 border-red-400 bg-red-50 rounded p-3 text-sm text-red-800" data-testid="outer-duplicate-notice">
+          <p className="font-semibold">⚠ {formatOuterDuplicateNotice(outerDuplicate)}</p>
+          {outerAfterSave.added > 0 && <p className="mt-1" data-testid="outer-duplicate-add-notice">{formatOuterDuplicateAddNotice(outerAfterSave)}</p>}
+        </div>
+      )}
 
       {overview && overview.some((r) => r.status !== 'incomingEmpty' || r.existing != null) && (
         <OrderOverviewSection
