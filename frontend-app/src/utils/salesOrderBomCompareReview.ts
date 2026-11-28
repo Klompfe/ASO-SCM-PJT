@@ -29,8 +29,10 @@ export function buildDraftRows(rows: SalesOrderBomCompareRow[]): SalesOrderBomCo
   }));
 }
 
-// PR-261 보강: 기존 겉감 계열 행이 2줄 이상이고 새 인식에도 겉감 계열 행이 있으면, 어느 행이 같은 원단인지 시스템이 판단할 수 없다
-// (겉감 짝을 만들지 않는다 — PR-257). 판단이 모호할 때는 파괴적 동작(삭제)을 기본값으로 두지 않는다.
+// PR-261 보강: 기존 겉감 계열 행이 2줄 이상이면 어느 행이 같은 원단인지 시스템이 판단할 수 없다(겉감 짝을 만들지 않는다 — PR-257).
+// 판단이 모호할 때는 파괴적 동작(삭제)을 기본값으로 두지 않는다.
+// PR-261 보강 2: 판정(active)은 **기존 행 수만** 본다 — 새 인식의 겉감 줄 수(0 포함)와 무관하다. 저장 화면의 "제외" 체크는 비교 요청의
+// 새 행만 빼고, 비교 응답에는 기존 행이 항상 전부 들어오므로(same/similar/existingOnly) 화면 조작으로 보호가 풀리지 않는다.
 export interface OuterDuplicateInfo {
   active: boolean;
   existingOuterCount: number;
@@ -45,7 +47,7 @@ export function detectOuterDuplicate(rows: SalesOrderBomCompareRow[]): OuterDupl
     if (row.incoming && row.incomingIndex != null && isOuterFabricCategory(row.incoming.category)) incomingIndexes.add(row.incomingIndex);
   }
   return {
-    active: existingIds.size >= 2 && incomingIndexes.size >= 1,
+    active: existingIds.size >= 2,
     existingOuterCount: existingIds.size,
     incomingOuterCount: incomingIndexes.size,
   };
@@ -69,8 +71,12 @@ export function countOuterAfterSave(
   return { added, total: detectOuterDuplicate(draftRows.map((d) => d.row)).existingOuterCount - deleted + added };
 }
 
-export const formatOuterDuplicateNotice = (info: OuterDuplicateInfo): string =>
-  `겉감 계열 행이 2줄 이상입니다(구분 소재·겉감 등, 기존 ${info.existingOuterCount}줄). 같은 원단이 중복되었을 수 있어 자동으로 삭제하지 않습니다. 새 겉감 행과 어느 행이 같은지 직접 확인하세요.`;
+export const formatOuterDuplicateNotice = (info: OuterDuplicateInfo): string => {
+  const head = `겉감 계열 행이 2줄 이상입니다(구분 소재·겉감 등, 기존 ${info.existingOuterCount}줄).`;
+  return info.incomingOuterCount === 0
+    ? `${head} 이번 인식에서 겉감이 확인되지 않았거나 제외되어 있습니다. 자동으로 삭제하지 않습니다. 저장 전에 원본 작지를 확인하세요.`
+    : `${head} 같은 원단이 중복되었을 수 있어 자동으로 삭제하지 않습니다. 새 겉감 행과 어느 행이 같은지 직접 확인하세요.`;
+};
 
 export const formatOuterDuplicateAddNotice = (after: { added: number; total: number }): string =>
   `이대로 저장하면 새 겉감 행 ${after.added}개가 추가되어 겉감 계열이 ${after.total}줄이 됩니다. 원하지 않으면 '취소(저장 안 함)'를 누르세요.`;

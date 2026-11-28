@@ -112,10 +112,11 @@ describe('③④⑤ 겉감 계열 1줄 이하·조건 미충족은 이전과 같
     expect(render(rows)).not.toContain('outer-duplicate-notice');
   });
 
-  it('새 인식에 겉감 계열이 없으면 규칙이 적용되지 않는다(지시된 조건 — 알려진 한계)', () => {
+  // 보강 2(사용자 결정): 조건을 넓혔다 — 이전에는 "새 겉감 0줄이면 규칙 미적용(두 행 기본 삭제)"을 단언했다.
+  it('새 인식에 겉감 계열이 없어도 기존 겉감 계열 2줄은 기본 유지다', () => {
     const rows = [only(ex(1, '소재')), only(ex(2, '겉감')), fresh(0, '안감')];
-    expect(detectOuterDuplicate(rows)).toEqual({ active: false, existingOuterCount: 2, incomingOuterCount: 0 });
-    expect(state(rows).defaults).toEqual({ 1: 'delete', 2: 'delete' });
+    expect(detectOuterDuplicate(rows)).toEqual({ active: true, existingOuterCount: 2, incomingOuterCount: 0 });
+    expect(state(rows).defaults).toEqual({ 1: 'keep', 2: 'keep' });
   });
 
   it('⑤ 겉감 계열이 아닌 행(부자재·부소재·안감)은 중복 상태에서도 기본 삭제 그대로', () => {
